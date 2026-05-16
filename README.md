@@ -4,6 +4,35 @@
 
 An event-sourced reactive graph runtime for building long-running, auditable, agentic systems. Behaviors react to a shared graph instead of talking to each other. Every change is traceable. Every run is resumable.
 
+## What v0.9 ships
+
+The first **pack** — a bundle of object types, behaviors, tools, prompts, and policies for a specific domain — and the first reference pack: **Diligence**.
+
+```python
+from activegraph import Runtime, Graph
+from activegraph.packs.diligence import pack as diligence_pack, DiligenceSettings
+from activegraph.packs.diligence.fixtures import (
+    RecordedDiligenceProvider, THREE_COMPANIES, company_goal,
+)
+
+rt = Runtime(
+    Graph(),
+    llm_provider=RecordedDiligenceProvider(companies=THREE_COMPANIES),
+    persist_to="/tmp/diligence.db",
+)
+rt.load_pack(diligence_pack, settings=DiligenceSettings())
+for company in THREE_COMPANIES:
+    rt.run_goal(company_goal(company))
+
+# Three structured memos: every claim cites evidence, contradictions surface, risks identified.
+memos = [o for o in rt.graph.all_objects() if o.type == "memo"]
+assert len(memos) == 3
+```
+
+The full runnable demo is [`examples/diligence_real_run.py`](examples/diligence_real_run.py). It runs in under 30 seconds without an API key, byte-for-byte reproducible. The pack format itself is documented in [`docs/pack_authoring.md`](docs/pack_authoring.md); the locked design decisions are in [`CONTRACT.md`](CONTRACT.md) v0.9.
+
+For the underlying primitives (everything below packs), the v0.7-style minimal example still works:
+
 ```python
 from activegraph import Graph, Runtime, behavior, relation_behavior
 
@@ -1180,7 +1209,7 @@ arguments. `examples/diligence_with_tools.py` demonstrates a fork
 that hits 9 cached LLM responses and 6 cached tool responses without
 talking to any provider. No other agent framework can do this.
 
-**v0.8 — Persistence beyond SQLite, observability, operator surface (current)**
+**v0.8 — Persistence beyond SQLite, observability, operator surface**
 
 - `PostgresEventStore` behind the same `EventStore` protocol as SQLite
 - Connection-URL addressing everywhere (`sqlite:///`, `postgres://`)
@@ -1191,12 +1220,36 @@ talking to any provider. No other agent framework can do this.
 - `activegraph` CLI: `inspect`, `replay`, `fork`, `diff`, `export-trace`, `migrate`
 - Operator guide ([docs/operating.md](docs/operating.md))
 
-**v1.0 — Packs**
+**v0.9 — Pack format + Diligence pack (current)**
 
-- Pack format (objects + relations + behaviors + policies + prompts)
-- Diligence pack
+- `Pack` dataclass: frozen, equality by `(name, version)`
+- Pack-aware decorators (`activegraph.packs.behavior`, `llm_behavior`,
+  `relation_behavior`, `tool`) — identical to the user decorators but
+  with no global registry side effects
+- `runtime.load_pack(pack, settings=...)` — idempotent, conflict-explicit
+- Object type schemas (Pydantic) enforced post-load
+- Namespace prefixing: canonical strict (`diligence.claim_extractor`),
+  short lookups lenient
+- Settings: typed parameter injection (primary), `ctx.settings`,
+  `ctx.pack_settings(name)`
+- Prompt loader: TOML frontmatter, content-hashed for replay drift
+- Discovery via `activegraph.packs` Python entry points
+- `activegraph pack new <name>` scaffolding command
+- `activegraph.packs.diligence` — production-quality reference pack:
+  8 object types, 6 relation types, 7 behaviors, 3 tools, 2 policies,
+  4 prompts, recorded fixtures for 3 companies, end-to-end demo
+- Pack authoring guide ([docs/pack_authoring.md](docs/pack_authoring.md))
+- Python floor raised to 3.11 (tomllib in stdlib)
+
+**v1.0 — Additional packs and distribution**
+
 - Memory pack
 - Research pack
+- Pack marketplace / signing / distribution mechanism
+- Streaming LLM responses
+- Multi-model routing
+- Adaptive question generation (currently one-shot in Diligence)
+- Contradiction resolution as an LLM behavior (currently detected only)
 
 **Later**
 

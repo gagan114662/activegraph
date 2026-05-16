@@ -128,6 +128,14 @@ class Graph:
         # Optional persistence sink (attached by Runtime when persist_to=...).
         self._store = None  # type: ignore[assignment]
 
+        # v0.9: optional schema validators attached by `runtime.load_pack`.
+        # `_pack_object_validator(type, data) -> validated_data` is called
+        # from `add_object`. `_pack_relation_validator(type, src_type,
+        # tgt_type) -> None` is called from `add_relation`. When None
+        # (default), behavior is unchanged from v0.8.
+        self._pack_object_validator = None
+        self._pack_relation_validator = None
+
     # ---------- read API ----------
 
     @property
@@ -282,6 +290,12 @@ class Graph:
     ) -> Object:
         obj_id = self.ids.object(type)
         clean = _strip_provenance(copy.deepcopy(data))
+        # v0.9: schema validation against loaded pack object types.
+        # Validator is set by runtime.load_pack and is None when no
+        # typed pack contributes this object type — preserving v0.8
+        # untyped semantics (CONTRACT v0.9 #5 / #21).
+        if self._pack_object_validator is not None:
+            clean = self._pack_object_validator(type, clean)
         provenance = self._provenance(
             actor,
             caused_by,
@@ -327,6 +341,15 @@ class Graph:
     ) -> Relation:
         rel_id = self.ids.relation()
         clean = _strip_provenance(copy.deepcopy(data or {}))
+        # v0.9: relation type validation (source/target type rules).
+        if self._pack_relation_validator is not None:
+            src_obj = self._objects.get(source)
+            tgt_obj = self._objects.get(target)
+            self._pack_relation_validator(
+                type,
+                src_obj.type if src_obj else None,
+                tgt_obj.type if tgt_obj else None,
+            )
         provenance = self._provenance(
             actor,
             caused_by,

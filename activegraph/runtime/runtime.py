@@ -127,6 +127,46 @@ class Context:
     # produced — iterating `ctx.matches` is the developer's job
     # (CONTRACT v0.7 #12).
     matches: list = field(default_factory=list)
+    # v0.9: pack-aware context. Set by the runtime when invoking a
+    # pack-owned behavior.
+    #   `settings` — the executing behavior's pack's settings instance,
+    #                or None if the behavior is not pack-owned.
+    #   `_runtime` — backref so ctx.pack_settings(...) and
+    #                ctx.propose_object(...) can reach the runtime.
+    settings: Any = None
+    _runtime: Any = None
+
+    def pack_settings(self, pack_name: str) -> Any:
+        """Look up settings for any loaded pack by name. Returns the
+        Pydantic settings instance, or None if the pack isn't loaded.
+        CONTRACT v0.9 #7 (Form 3 / cross-pack lookup).
+        """
+        if self._runtime is None or self._runtime._pack_state is None:
+            return None
+        return self._runtime._pack_state.pack_settings.get(pack_name)
+
+    def propose_object(
+        self,
+        object_type: str,
+        data: dict,
+        *,
+        reason: str = "",
+    ) -> str:
+        """Defer creation of an object behind a policy approval.
+
+        Returns the proposal id. The object materializes when
+        `runtime.approve(id)` is called. Intended for use by behaviors
+        whose pack policy gates `object_type` writes.
+
+        Convenience: behaviors can just call `graph.add_object` if their
+        pack settings say auto-approval is on; this helper is the
+        explicit path when gating is enabled.
+        """
+        if self._runtime is None:
+            raise RuntimeError("ctx.propose_object requires a runtime-bound context")
+        return self._runtime._add_pending_approval(
+            object_type=object_type, data=data, reason=reason
+        )
 
 
 class Runtime:
@@ -224,6 +264,17 @@ class Runtime:
         if store is not None:
             graph.attach_store(store)
 
+        # ---- v0.9: pack state (lazy) ----
+        # Holds the per-runtime pack bookkeeping populated by
+        # `load_pack`. Initialized lazily on first access via the
+        # loader's `_ensure_pack_state`. The `_pack_behaviors` and
+        # `_pack_tools` lists are merged into the registry inside
+        # `_ensure_registry` (which rebuilds `tool_registry` from
+        # scratch each call).
+        self._pack_state = None  # type: ignore[assignment]
+        self._pack_behaviors: list = []
+        self._pack_tools: list = []
+
     # ---------- public surface ----------
 
     @property
@@ -253,6 +304,10 @@ class Runtime:
             or event.type.startswith("llm.")
             or event.type.startswith("tool.")
             or event.type.startswith("pattern.")
+            # v0.9: approval bookkeeping is internal; CONTRACT v0.9 #13
+            # deliberately keeps `pack.loaded` queue-visible so pack-aware
+            # behaviors can subscribe, but `approval.*` is suppressed.
+            or event.type.startswith("approval.")
         ):
             return
         self._queue.push(event)
@@ -279,6 +334,13 @@ class Runtime:
             if self._explicit_behaviors is not None
             else get_registry()
         )
+        # v0.9: pack-owned behaviors live in `_pack_behaviors` (filled
+        # by `load_pack`) and are merged on top of the global / explicit
+        # source. Pack behaviors carry canonical (namespace-prefixed)
+        # names; they never collide with non-pack behaviors because the
+        # `pack.` prefix is reserved for packs.
+        if self._pack_behaviors:
+            source = list(source) + list(self._pack_behaviors)
         # CONTRACT v0.6 #21: LLM behaviors fail loud at registration if
         # there is no provider. We do not silently fall back to a mock —
         # a missing provider is almost always a real misconfiguration.
@@ -295,9 +357,14 @@ class Runtime:
         # v0.7: assemble the tool registry. Explicit tools= override the
         # global @tool registry, mirroring how behaviors= works.
         if self._explicit_tools is not None:
-            tools_source = self._explicit_tools
+            tools_source = list(self._explicit_tools)
         else:
-            tools_source = get_tool_registry()
+            tools_source = list(get_tool_registry())
+        # v0.9: pack-owned tools merge in here (filled by `load_pack`).
+        # These carry canonical (namespace-prefixed) names and may also
+        # be registered under their short name if `export_globally=True`.
+        if self._pack_tools:
+            tools_source = tools_source + list(self._pack_tools)
         # LLM behaviors may also bring their own tools via tools=[...] on
         # the decorator; pull those in too so the name lookup is unified.
         for b in source:
@@ -316,6 +383,12 @@ class Runtime:
                     f"(decorate with @tool or pass a Tool object)"
                 )
             self.tool_registry[t.name] = t
+            # v0.9: globally-exported pack tools are also registered
+            # under their short name.
+            if getattr(t, "_export_globally", False):
+                short = getattr(t, "_short_name", None) or t.name.split(".", 1)[-1]
+                if short != t.name:
+                    self.tool_registry[short] = t
         for b in source:
             if not isinstance(b, LLMBehavior):
                 continue
@@ -509,6 +582,8 @@ class Runtime:
             random=self._random,
             clock=self.graph.clock,
             matches=list(matches or []),
+            settings=self._pack_settings_for_behavior(b),
+            _runtime=self,
         )
 
         # v0.8: count and time the handler call. Only function behaviors
@@ -623,6 +698,8 @@ class Runtime:
             clock=self.graph.clock,
             llm_provider=self.llm_provider,
             matches=list(matches or []),
+            settings=self._pack_settings_for_behavior(b),
+            _runtime=self,
         )
 
         self._emit_lifecycle(
@@ -1323,6 +1400,8 @@ class Runtime:
             random=self._random,
             clock=self.graph.clock,
             matches=list(matches or []),
+            settings=self._pack_settings_for_behavior(b),
+            _runtime=self,
         )
 
         self._emit_lifecycle(
@@ -1481,6 +1560,180 @@ class Runtime:
         self._idle_emitted = True
 
     # ---------- trace + graph dump (delegate to trace module) ----------
+
+    # ---------- v0.9: pack public API ----------
+
+    def load_pack(self, pack, settings=None) -> bool:
+        """Load a pack into the runtime.
+
+        Returns True on first load, False if the same `(name, version)`
+        was already loaded (CONTRACT v0.9 #6 idempotency). Raises
+        `PackVersionConflictError` for name-match-version-mismatch and
+        `PackConflictError` for any contributor name collision.
+        Pre-mutation: a failed load leaves the runtime exactly as it was.
+        """
+        from activegraph.packs.loader import load_pack_into_runtime
+        return load_pack_into_runtime(self, pack, settings=settings)
+
+    def loaded_packs(self) -> list:
+        """List of currently-loaded packs."""
+        if self._pack_state is None:
+            return []
+        return list(self._pack_state.loaded_packs.values())
+
+    def get_behavior(self, name: str):
+        """Look up a registered behavior by canonical or short name.
+
+        Short names resolve when unambiguous (load-time conflict check
+        guarantees this invariant). Raises `LookupError` if not found
+        or `ValueError` if ambiguous. CONTRACT v0.9 #8.
+        """
+        # Canonical lookup first
+        if "." in name:
+            for b in self._pack_behaviors:
+                if b.name == name:
+                    return b
+            raise LookupError(f"no behavior named {name!r} is loaded")
+        # Short name
+        if self._pack_state is None:
+            raise LookupError(f"no behavior named {name!r} is loaded")
+        from activegraph.packs.loader import AMBIGUOUS
+        canonical = self._pack_state.behavior_short_to_canonical.get(name)
+        if canonical is None:
+            raise LookupError(f"no behavior named {name!r} is loaded")
+        if canonical == AMBIGUOUS:
+            raise ValueError(
+                f"behavior name {name!r} is ambiguous across loaded packs; "
+                f"use the fully-qualified form (e.g. 'pack_name.{name}')"
+            )
+        return self.get_behavior(canonical)
+
+    def get_tool(self, name: str):
+        """Look up a registered tool by canonical or short name.
+
+        Same resolution rule as `get_behavior`. CONTRACT v0.9 #8 / #9.
+        """
+        if "." in name:
+            t = self.tool_registry.get(name)
+            if t is None:
+                raise LookupError(f"no tool named {name!r} is loaded")
+            return t
+        # Short name
+        if self._pack_state is None:
+            t = self.tool_registry.get(name)
+            if t is None:
+                raise LookupError(f"no tool named {name!r} is loaded")
+            return t
+        from activegraph.packs.loader import AMBIGUOUS
+        canonical = self._pack_state.tool_short_to_canonical.get(name)
+        if canonical is None:
+            # Maybe a globally-exported tool registered under its short name
+            t = self.tool_registry.get(name)
+            if t is None:
+                raise LookupError(f"no tool named {name!r} is loaded")
+            return t
+        if canonical == AMBIGUOUS:
+            raise ValueError(
+                f"tool name {name!r} is ambiguous across loaded packs; "
+                f"use the fully-qualified form (e.g. 'pack_name.{name}')"
+            )
+        return self.tool_registry[canonical]
+
+    def _pack_settings_for_behavior(self, b) -> Any:
+        """Return the settings instance for the pack that owns `b`, or
+        None if `b` is not pack-owned.
+        """
+        if self._pack_state is None:
+            return None
+        owner = getattr(b, "_pack_owner", None)
+        if owner is None:
+            return None
+        return self._pack_state.pack_settings.get(owner)
+
+    # ---------- v0.9: approval flow ----------
+
+    def pending_approvals(self) -> list:
+        """List of currently-pending approvals (in creation order)."""
+        if self._pack_state is None:
+            return []
+        return list(self._pack_state.pending_approvals)
+
+    def _add_pending_approval(
+        self, *, object_type: str, data: dict, reason: str = ""
+    ) -> str:
+        """Internal: create a PendingApproval and return its id.
+
+        Called from `ctx.propose_object(...)`. The id is later used by
+        `runtime.approve(id)` to materialize the deferred object.
+        """
+        from activegraph.packs import PendingApproval
+        from activegraph.packs.loader import _ensure_pack_state
+
+        state = _ensure_pack_state(self)
+        # Find the pack that gates this object type, if any.
+        gating = state.gated_object_types.get(object_type, [])
+        owner_pack = gating[0].split(".", 1)[0] if gating else ""
+        n = state._next_approval_n
+        state._next_approval_n += 1
+        approval_id = f"approval_{n:03d}"
+        pa = PendingApproval(
+            id=approval_id,
+            kind="object",
+            object_type=object_type,
+            data=dict(data),
+            reason=reason,
+            pack=owner_pack,
+        )
+        state.pending_approvals.append(pa)
+        # Emit an event so the trace shows the proposal.
+        self.graph.emit(
+            Event(
+                id=self.graph.ids.event(),
+                type="approval.proposed",
+                payload={
+                    "approval_id": approval_id,
+                    "object_type": object_type,
+                    "reason": reason,
+                    "pack": owner_pack,
+                },
+                actor="runtime",
+                frame_id=self.frame.id if self.frame else None,
+                caused_by=None,
+                timestamp=self.graph.clock.now(),
+            )
+        )
+        return approval_id
+
+    def approve(self, approval_id: str, approved_by: Optional[str] = None) -> str:
+        """Materialize a pending approval. Returns the new object id.
+
+        Raises `LookupError` if `approval_id` is not pending. Emits an
+        `approval.granted` event followed by the deferred `object.created`.
+        """
+        if self._pack_state is None:
+            raise LookupError(f"no pending approval named {approval_id!r}")
+        for i, pa in enumerate(self._pack_state.pending_approvals):
+            if pa.id != approval_id:
+                continue
+            self._pack_state.pending_approvals.pop(i)
+            self.graph.emit(
+                Event(
+                    id=self.graph.ids.event(),
+                    type="approval.granted",
+                    payload={
+                        "approval_id": approval_id,
+                        "object_type": pa.object_type,
+                        "approved_by": approved_by or "user",
+                    },
+                    actor="runtime",
+                    frame_id=self.frame.id if self.frame else None,
+                    caused_by=None,
+                    timestamp=self.graph.clock.now(),
+                )
+            )
+            obj = self.graph.add_object(pa.object_type, pa.data, actor=approved_by or "user")
+            return obj.id
+        raise LookupError(f"no pending approval named {approval_id!r}")
 
     @property
     def trace(self):
