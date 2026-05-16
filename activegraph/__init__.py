@@ -19,23 +19,41 @@ from activegraph.core.view import View
 from activegraph.frame import Frame
 from activegraph.policy import Policy
 from activegraph.runtime.budget import Budget
+from activegraph.runtime.diff import Diff, DivergentObject, DivergentRelation
+from activegraph.runtime.errors import ReplayDivergenceError
 from activegraph.runtime.runtime import Runtime
+from activegraph.store import (
+    EventStore,
+    InMemoryEventStore,
+    NonSerializableEventError,
+    RunRecord,
+    SQLiteEventStore,
+)
 
 __all__ = [
     "Behavior",
     "Budget",
     "Clock",
+    "Diff",
+    "DivergentObject",
+    "DivergentRelation",
     "Event",
+    "EventStore",
     "Frame",
     "FrozenClock",
     "Graph",
     "IDGen",
+    "InMemoryEventStore",
+    "NonSerializableEventError",
     "Object",
     "Patch",
     "Policy",
     "Relation",
     "RelationBehavior",
+    "ReplayDivergenceError",
+    "RunRecord",
     "Runtime",
+    "SQLiteEventStore",
     "TickingClock",
     "View",
     "behavior",
@@ -44,4 +62,4 @@ __all__ = [
     "relation_behavior",
 ]
 
-__version__ = "0.0.1"
+__version__ = "0.5.0"

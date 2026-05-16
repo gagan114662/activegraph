@@ -1,0 +1,8 @@
+[replay.event]            evt_001 goal.created "Pin the trace"
+[replay.event]            evt_002 behavior.started planner
+[replay.event]            evt_003 object.created task#1 "x"
+[replay.event]            evt_004 object.created task#2 "y"
+[replay.event]            evt_005 behavior.completed planner
+[replay.event]            evt_006 runtime.idle
+[replay.complete]         6 events replayed, graph reconstructed
+[runtime.idle]            ready to resume

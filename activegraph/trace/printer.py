@@ -5,6 +5,12 @@ longer, exactly one space follows it.
 
 Standard event types get specific renderings (see CONTRACT for the table).
 Anything else is rendered as `[event.emitted] {type} k=v...`.
+
+CONTRACT v0.5 #22: replayed events are rendered with a `[replay.event]`
+prefix. After the last replayed event, two synthetic lines appear so
+operators can see the load boundary:
+    [replay.complete] N events replayed, graph reconstructed
+    [runtime.idle]    ready to resume
 """
 
 from __future__ import annotations
@@ -71,16 +77,11 @@ def _fmt_patch_applied(e: Event) -> str:
     if not diff:
         return f'{_format_tag("patch.applied")}{target} (no change)'
     lines = []
-    first = True
     for field, change in diff.items():
         old = change.get("old")
         new = change.get("new")
         body = f"{target} {field}: {old} -> {new}"
-        if first:
-            lines.append(f'{_format_tag("patch.applied")}{body}')
-            first = False
-        else:
-            lines.append(f'{_format_tag("patch.applied")}{body}')
+        lines.append(f'{_format_tag("patch.applied")}{body}')
     return "\n".join(lines)
 
 
@@ -186,6 +187,44 @@ def format_event(event: Event) -> str:
     return fn(event)
 
 
+# ---------- replay rendering (CONTRACT v0.5 #22) ----------
+
+
+def _fmt_replay(event: Event) -> str:
+    """Render a replayed event with the `[replay.event]` prefix.
+
+    Format: `[replay.event] <evt_id> <event.type> <one-line summary>`
+    """
+    t = event.type
+    p = event.payload or {}
+    if t == "object.created":
+        o = p.get("object", {})
+        oid = o.get("id", "?")
+        label = (o.get("data") or {}).get("title") or (o.get("data") or {}).get("text") or ""
+        label_s = f' "{label}"' if label else ""
+        body = f"{event.id} {t} {oid}{label_s}"
+    elif t == "relation.created":
+        r = p.get("relation", {})
+        body = f'{event.id} {t} {r.get("source")} --{r.get("type")}--> {r.get("target")}'
+    elif t == "patch.applied":
+        body = f'{event.id} {t} {p.get("target", "?")}'
+    elif t == "goal.created":
+        body = f'{event.id} {t} "{p.get("goal", "")}"'
+    elif t in ("behavior.started", "behavior.completed", "behavior.failed", "relation_behavior.started"):
+        body = f'{event.id} {t} {p.get("behavior", "?")}'
+    else:
+        body = f"{event.id} {t}"
+    return f'{_format_tag("replay.event")}{body}'
+
+
+def _fmt_replay_complete(n: int) -> str:
+    return f'{_format_tag("replay.complete")}{n} events replayed, graph reconstructed'
+
+
+def _fmt_replay_ready() -> str:
+    return f'{_format_tag("runtime.idle")}ready to resume'
+
+
 # ---------- Trace facade exposed via runtime.trace ----------
 
 
@@ -194,7 +233,26 @@ class Trace:
         self._graph = graph
 
     def lines(self) -> list[str]:
-        return [format_event(e) for e in self._graph.events]
+        replayed = self._graph.replayed_ids
+        replayed_count = len(replayed)
+        out: list[str] = []
+        emitted_boundary = False
+        seen_replayed = 0
+        for e in self._graph.events:
+            if e.id in replayed:
+                out.append(_fmt_replay(e))
+                seen_replayed += 1
+                continue
+            if replayed_count > 0 and not emitted_boundary:
+                out.append(_fmt_replay_complete(replayed_count))
+                out.append(_fmt_replay_ready())
+                emitted_boundary = True
+            line = format_event(e)
+            out.append(line)
+        if replayed_count > 0 and not emitted_boundary:
+            out.append(_fmt_replay_complete(replayed_count))
+            out.append(_fmt_replay_ready())
+        return out
 
     def print(self) -> None:
         for line in self.lines():
