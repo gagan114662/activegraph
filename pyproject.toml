@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "activegraph"
-version = "0.7.0"
+version = "0.8.0"
 description = "An event-sourced reactive graph runtime for long-running, auditable, agentic systems."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,13 +20,28 @@ classifiers = [
     "Operating System :: OS Independent",
     "Development Status :: 3 - Alpha",
 ]
-dependencies = []
+dependencies = ["click>=8,<9"]
 
 [project.optional-dependencies]
 llm = ["anthropic>=0.40", "pydantic>=2"]
 sqlite = []     # SQLite is stdlib — no extra deps needed for the v0.5 store
-all = ["anthropic>=0.40", "pydantic>=2"]
-dev = ["pytest>=7", "pydantic>=2"]
+postgres = ["psycopg[binary]>=3.1,<4"]
+prometheus = ["prometheus_client>=0.20"]
+all = [
+    "anthropic>=0.40",
+    "pydantic>=2",
+    "psycopg[binary]>=3.1,<4",
+    "prometheus_client>=0.20",
+]
+dev = [
+    "pytest>=7",
+    "pydantic>=2",
+    "prometheus_client>=0.20",
+    "psycopg[binary]>=3.1,<4",
+]
+
+[project.scripts]
+activegraph = "activegraph.cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/yoheinakajima/activegraph"
@@ -34,3 +49,8 @@ Homepage = "https://github.com/yoheinakajima/activegraph"
 [tool.setuptools.packages.find]
 include = ["activegraph*"]
 exclude = ["tests*", "examples*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "postgres: tests that require a running Postgres (skipped unless ACTIVEGRAPH_TEST_POSTGRES_URL is set)",
+]
