@@ -17,6 +17,16 @@ from activegraph.core.graph import Graph, Object, Relation
 from activegraph.core.ids import IDGen
 from activegraph.core.patch import Patch
 from activegraph.core.view import View
+from activegraph.errors import (
+    ActiveGraphError,
+    ConfigurationError,
+    ExecutionError,
+    PackError,
+    PatternError,
+    RegistrationError,
+    ReplayError,
+    StorageError,
+)
 from activegraph.frame import Frame
 from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
 from activegraph.policy import Policy
@@ -84,9 +94,11 @@ from activegraph.packs import (
 )
 
 __all__ = [
+    "ActiveGraphError",
     "Behavior",
     "Budget",
     "Clock",
+    "ConfigurationError",
     "Diff",
     "DiscoveredPack",
     "DivergentObject",
@@ -94,6 +106,7 @@ __all__ = [
     "EmptySettings",
     "Event",
     "EventStore",
+    "ExecutionError",
     "Frame",
     "FrozenClock",
     "Graph",
@@ -121,18 +134,22 @@ __all__ = [
     "PackSettingsMissingError",
     "PackValidationError",
     "PackVersionConflictError",
+    "PatternError",
     "Patch",
     "PendingApproval",
     "Policy",
     "PrometheusMetrics",
     "Relation",
     "RelationBehavior",
+    "RegistrationError",
     "RelationType",
     "ReplayDivergenceError",
+    "ReplayError",
     "RunRecord",
     "Runtime",
     "RuntimeStatus",
     "SQLiteEventStore",
+    "StorageError",
     "TickingClock",
     "Tool",
     "ToolContext",

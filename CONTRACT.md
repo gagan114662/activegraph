@@ -2542,6 +2542,87 @@ ActiveGraphError
 
 `__str__` produces the format in #3.
 
+### v1.0 PR-A landed (foundation + ReplayError reference)
+
+Concrete artifact under `activegraph/errors.py`:
+
+```python
+class ActiveGraphError(Exception): ...
+class ConfigurationError(ActiveGraphError): ...
+class RegistrationError(ActiveGraphError): ...
+class ExecutionError(ActiveGraphError): ...
+class ReplayError(ActiveGraphError): ...
+class StorageError(ActiveGraphError): ...
+class PatternError(ActiveGraphError): ...
+class PackError(ActiveGraphError): ...
+```
+
+Re-exported from `activegraph.__all__`. `activegraph.packs.PackError` is
+re-homed to point at `activegraph.errors.PackError` (same class object) so
+the existing pack leaves (PackValidationError, PackConflictError, etc.)
+inherit the new base without changing their import paths.
+
+`ActiveGraphError.__init__` has two construction modes during the v1.0
+transition:
+
+- **Structured** (the v1.0 target): pass ``summary`` plus the three named
+  fields. `__str__` produces the locked format.
+- **Legacy**: pass a single positional message. `__str__` returns that
+  message verbatim. Format-noncompliant but valid Python, so existing
+  raises in unmigrated leaves keep working through PR-B → PR-F.
+
+`ActiveGraphError.is_structured()` returns True for the first mode, False
+for the second. Snapshot tests in `tests/test_errors_format.py` only run
+on classes that are explicitly enumerated; legacy raises don't fail
+format compliance until their category's PR migrates them.
+
+Reference category in PR-A: **ReplayError**. The chosen reference
+because:
+
+- Single class (smallest by class count, tied with PatternError and
+  PackError; broke the tie by stakes)
+- Highest-stakes error in the framework — fires in the fork-and-diff
+  flow that BEAT 4 of the v1.0 transcript depends on
+- Three distinct call sites discriminated at `__init__` time
+  (prompt_hash_mismatch, type_mismatch, length_mismatch), each producing
+  a different "what failed / why / how to fix" — exercises the format's
+  full expressive range so PR-B+ can model against a real reference
+
+`ReplayDivergenceError` migrated from `RuntimeError` to `ReplayError`.
+Constructor signature (`event_id`, `expected`, `actual`) preserved so
+the 384 v0–v0.9 tests still pass unchanged.
+
+Snapshot files under `tests/snapshots/errors/`:
+
+- `replay_divergence__prompt_hash_mismatch.txt`
+- `replay_divergence__type_mismatch.txt`
+- `replay_divergence__short_live.txt`
+- `replay_divergence__extra_live.txt`
+
+Each snapshot is byte-identical; `UPDATE_SNAPSHOTS=1` regenerates them
+and the doc-site reference page at `docs/reference/errors/<slug>.md`
+(landing in a later v1.0 PR) must be updated in the same commit.
+
+Tests added: 18 in `tests/test_errors_format.py`. Format check is
+structural (section headers in order, 2-space body indent, doc URL in
+`More:`), not regex — multi-line bodies with internal blank lines (as in
+the `How to fix:` of a real ReplayDivergenceError) pass.
+
+### Format spec amendments noted during PR-A
+
+The `How to fix:` section in real errors often runs to multiple
+paragraphs separated by blank lines (a "Identify the behavior… / Then
+diff against current source…" structure). The format spec's "2-space
+indent for the body" applies to every non-blank line; blank lines stay
+blank. Code blocks inside the body are indented further (4 additional
+spaces) for visual separation. The format snapshot tests are structural,
+not regex, to accommodate this.
+
+PR-B through PR-F will encounter similar prose conventions in their
+categories. The convention: 2-space indent for body lines, 4-extra-space
+indent for code blocks, blank line for paragraph breaks. Cosmetic, but
+locking it now means the 50+ error pages on the doc site look uniform.
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```

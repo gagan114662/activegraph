@@ -1,0 +1,24 @@
+ReplayDivergenceError: replay diverged at evt_042: LLM prompt hash mismatch
+
+What failed:
+  Event evt_042 (an `llm.requested` event in the recorded log) had a different prompt hash during this replay than the parent run recorded:
+    recorded:  prompt_hash=a1b2c3d4e5f60718
+    live:      prompt_hash=z9y8x7w6v5u43210
+
+Why:
+  The replay cache keys on the full prompt hash, so any change to an LLM behavior's code, a prompt template, a system message, or a tool's input arguments produces a mismatch. The framework refuses to silently substitute a stale cached response under a new prompt — that would break the audit trail the cache is designed to preserve.
+
+How to fix:
+  If the change was intentional (you edited a behavior or a prompt template),
+  re-record the cache from the divergence point:
+      activegraph fork <parent-run> --at-event evt_042 --record
+
+  If the change was unintentional, diff your code against the recorded run's
+  pack version and revert the change:
+      activegraph inspect <parent-run> --pack-version
+
+  To see the full recorded prompt for this event:
+      activegraph inspect <parent-run> --event evt_042
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/replay-divergence-error

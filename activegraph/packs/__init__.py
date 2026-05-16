@@ -64,10 +64,15 @@ from activegraph.tools.base import Tool
 
 
 # ---------------------------------------------------------------- exceptions
+#
+# v1.0 PR-A: PackError is re-homed under `activegraph.errors.PackError`,
+# the v1.0 category base in the ActiveGraphError hierarchy. The pack
+# leaves (PackValidationError, PackConflictError, ...) continue to
+# inherit from it; their existing `raise PackError("message")` call sites
+# go through the legacy `__init__` branch on ActiveGraphError. PR-F
+# migrates each leaf into the v1.0 structured format.
 
-
-class PackError(Exception):
-    """Base class for every pack-related error."""
+from activegraph.errors import PackError as PackError  # re-export for back-compat
 
 
 class PackValidationError(PackError):

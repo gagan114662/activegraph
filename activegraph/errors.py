@@ -1,0 +1,202 @@
+"""ActiveGraphError hierarchy. CONTRACT v1.0 #3, #4 — the error format and
+the class tree are public contract.
+
+Every framework error inherits from `ActiveGraphError` and renders in the
+locked format:
+
+    <ErrorClass>: <one-line summary>
+
+    What failed:
+      <specific thing that went wrong, with names>
+
+    Why:
+      <root cause, not the symptom>
+
+    How to fix:
+      <concrete action>
+
+    More:
+      https://docs.activegraph.dev/errors/<slug>
+
+The seven category bases are stable. Concrete leaves are migrated under
+their categories one PR at a time (CONTRACT v1.0 #C1 — the rewrite ships
+as a PR series, not one PR). PR-A lands the foundation plus ReplayError
+as the reference category; subsequent PRs migrate the other categories
+without changing the bases.
+
+`_doc_slug` on each class is the URL slug for the error's doc page. The
+base URL is the github.io fallback (CONTRACT v1.0 #C6); once DNS for
+`docs.activegraph.dev` is live, the constant is swapped in one place.
+"""
+
+from __future__ import annotations
+
+from typing import Any, ClassVar
+
+
+# CONTRACT v1.0 #C6: until docs.activegraph.dev DNS is live, error URLs
+# point at the github.io fallback. The cutover is a one-line edit here
+# plus a README update; the URLs in every error message follow.
+_DOCS_BASE_URL = "https://yoheinakajima.github.io/activegraph"
+
+
+def _indent_continuation(text: str, indent: str = "  ") -> str:
+    """Re-indent a multi-line block so every line after the first sits
+    under the same column as the first line. The format spec puts every
+    field's body on a continuation line indented by two spaces; multi-line
+    bodies (a how-to-fix with three steps, for instance) maintain that
+    indent on every line so the message reads as a single block."""
+    lines = text.split("\n")
+    if len(lines) == 1:
+        return lines[0]
+    return lines[0] + "\n" + "\n".join(indent + line if line else line for line in lines[1:])
+
+
+class ActiveGraphError(Exception):
+    """Root of every framework error. CONTRACT v1.0 #4.
+
+    Subclasses construct by passing a one-line ``summary`` plus the three
+    structured fields (``what_failed``, ``why``, ``how_to_fix``) and any
+    error-specific context. ``__str__`` produces the locked format; the
+    structured fields stay accessible programmatically for tools that
+    want to render errors differently (a doc-site error catalog, a
+    machine-readable failure log, etc.).
+    """
+
+    # Each subclass sets its own slug. The base class slug exists so a
+    # bare `ActiveGraphError` (which should not be raised in practice;
+    # always reach for a concrete subclass) still produces a valid URL.
+    _doc_slug: ClassVar[str] = "active-graph-error"
+
+    def __init__(
+        self,
+        summary_or_message: str,
+        *,
+        what_failed: str | None = None,
+        why: str | None = None,
+        how_to_fix: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        """Two construction modes during the v1.0 transition:
+
+        - **Structured** (the v1.0 target): pass ``summary`` plus the three
+          named fields. ``__str__`` produces the locked format.
+        - **Legacy**: pass a single positional message. Used by error
+          leaves that have not yet migrated under the v1.0 PR series.
+          ``__str__`` returns the message verbatim — format-noncompliant
+          but valid Python, so existing raises keep working.
+
+        PR-A converts the ReplayError leaves (the reference category).
+        PR-B through PR-F convert the rest one PR at a time. The legacy
+        branch goes away once every leaf is migrated; until then this
+        gateway is the bridge.
+        """
+        self._summary = summary_or_message
+        self.what_failed = what_failed or ""
+        self.why = why or ""
+        self.how_to_fix = how_to_fix or ""
+        self.context: dict[str, Any] = dict(context) if context else {}
+        if self.is_structured():
+            super().__init__(self._format())
+        else:
+            super().__init__(summary_or_message)
+
+    def is_structured(self) -> bool:
+        """True when the three structured fields are populated. Used by
+        the format snapshot tests and the docs catalog to filter out
+        leaves that have not yet migrated to the v1.0 format."""
+        return bool(self.what_failed and self.why and self.how_to_fix)
+
+    @property
+    def doc_url(self) -> str:
+        return f"{_DOCS_BASE_URL}/errors/{self._doc_slug}"
+
+    def _format(self) -> str:
+        return (
+            f"{type(self).__name__}: {self._summary}\n\n"
+            f"What failed:\n  {_indent_continuation(self.what_failed)}\n\n"
+            f"Why:\n  {_indent_continuation(self.why)}\n\n"
+            f"How to fix:\n  {_indent_continuation(self.how_to_fix)}\n\n"
+            f"More:\n  {self.doc_url}"
+        )
+
+    def __str__(self) -> str:
+        if self.is_structured():
+            return self._format()
+        return self._summary
+
+
+# ---------- Category bases ----------------------------------------------
+#
+# The seven categories from CONTRACT v1.0 #4. Each is an abstract base —
+# raise a concrete subclass, not a bare category. Until PR-B through PR-F
+# land, some categories have no concrete leaves yet; the bases still
+# exist so external code can `except RegistrationError:` today and have
+# it cover those leaves once they migrate.
+
+
+class ConfigurationError(ActiveGraphError):
+    """Runtime construction problems: invalid budget, malformed store URL,
+    missing required configuration. Fires before any work runs."""
+
+    _doc_slug = "configuration-error"
+
+
+class RegistrationError(ActiveGraphError):
+    """Behavior, tool, or pack registration problems: conflicts at
+    registration time, version mismatches, missing providers, unknown
+    tools. Fires at registration / pack-load time."""
+
+    _doc_slug = "registration-error"
+
+
+class ExecutionError(ActiveGraphError):
+    """Runtime execution problems: behavior failures, budget exhausted,
+    tool failures during a goal run. Named ExecutionError (not
+    RuntimeError) because Python already has builtin ``RuntimeError`` and
+    shadowing the builtin produces confusing stack traces."""
+
+    _doc_slug = "execution-error"
+
+
+class ReplayError(ActiveGraphError):
+    """Replay and fork problems: cache hash mismatches, type-stream
+    divergence between recorded and re-run event logs. Fires only during
+    replay / fork; never during a fresh run."""
+
+    _doc_slug = "replay-error"
+
+
+class StorageError(ActiveGraphError):
+    """Persistence problems: failed writes, malformed event payloads on
+    deserialize, schema version mismatches."""
+
+    _doc_slug = "storage-error"
+
+
+class PatternError(ActiveGraphError):
+    """Pattern subscription problems: invalid Cypher syntax, unsupported
+    features, malformed WHERE clauses at registration time."""
+
+    _doc_slug = "pattern-error"
+
+
+class PackError(ActiveGraphError):
+    """Pack-specific problems at runtime (not registration): schema
+    violations on add_object after pack load, pack-state inconsistencies.
+    Registration-time pack errors live under :class:`RegistrationError`
+    instead."""
+
+    _doc_slug = "pack-error"
+
+
+__all__ = [
+    "ActiveGraphError",
+    "ConfigurationError",
+    "RegistrationError",
+    "ExecutionError",
+    "ReplayError",
+    "StorageError",
+    "PatternError",
+    "PackError",
+]
