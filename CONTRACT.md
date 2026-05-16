@@ -2298,3 +2298,348 @@ The v1.0 plan locked these as out for v0.9.1 and v1.0 both:
 - A `--live` quickstart mode (dropped from v1.0 per pushback;
   ships post-1.0 only if quickstart usage shows demand)
 - Web UI, streaming, multi-model routing (per v0.9 #26)
+
+# v1.0 — adoption surface (PR series; not yet shipped)
+
+The framework runtime is done. v1.0 is the milestone that decides
+whether anyone uses it. Every prior milestone improved the artifact;
+v1.0 improves the path to the artifact — installation, first-run
+experience, error messages, documentation site. The least technically
+interesting milestone in the roadmap and probably the most
+commercially important one.
+
+Scope is a fixed list, not a moving target: a `quickstart` CLI command
+that produces a working diligence run with no configuration, an audit
+and rewrite of every error message in the framework against a
+documented standard, an `ActiveGraphError` hierarchy, a docs site at
+`docs.activegraph.dev` built with mkdocs-material, all examples
+rewritten to be copy-pasteable, a "first 10 minutes" tutorial, type
+stubs verified against `mypy --strict` for the public API, a
+`CHANGELOG.md` covering v0 through v1.0, and the two pending
+follow-ups that just landed in v0.9.1 above.
+
+Out-of-scope deferral list (post-1.0 or never): web UI, streaming LLM
+responses, multi-model routing, more reference packs (Memory pack,
+Research pack), a pack registry, error message i18n, video tutorials,
+adaptive question generation in Diligence, the contradiction
+resolver, richer fixture cardinality.
+
+## v1.0 contract diff vs. the v1.0 plan (seven revisions)
+
+The v1.0 plan as authored prompted seven pieces of pushback that
+changed the contract before the first line of code in the v1.0 PR
+series. Recording them here so the contract diff is visible from the
+start of the work, not buried in PR descriptions.
+
+### v1.0 #C1. Error message rewrite ships as a PR series, not one PR
+
+The error message audit covers 50+ sites. Format is uniform but
+every site needs a real "what failed / why / how to fix" with
+specific names — that's 50+ small design decisions, not find-replace.
+One PR is unreviewable; reviewers skim and miss the bad ones.
+
+The series:
+
+- **PR-A (foundation):** `ActiveGraphError` hierarchy, the format
+  spec, snapshot-test harness, one fully-converted category as the
+  reference (smallest category by error count). Lock the format
+  standard here so it cannot drift across the series.
+- **PR-B through PR-F:** one error category per PR
+  (`ConfigurationError`, `RegistrationError`, `ExecutionError`,
+  `ReplayError`, `StorageError`, `PatternError`, `PackError`).
+  Each PR includes a snapshot test of every error in its category
+  so review is mechanical — reviewer reads the "what failed / why /
+  how to fix" text, not the diff.
+
+If `RegistrationError` is genuinely the smallest category by error
+count, PR-A leads with it. Otherwise the smallest leads. Goal is to
+set reference quality before larger categories land.
+
+### v1.0 #C2. Docstring coverage is tiered, not a flat percentage
+
+Flat percentage gates breed performative docstrings (you've seen the
+codebases). v1.0 gates by ring:
+
+- **Ring 0 (public surface):** symbols in `activegraph.__all__` plus
+  each pack's top-level `__all__`. 100% docstring coverage. No
+  exceptions. This is a small, finite, hard-to-game list.
+- **Ring 1 (importable but not re-exported):** modules users import
+  directly (`activegraph.trace`, `activegraph.llm`, etc.) but
+  symbols not in a top-level `__all__`. 80% coverage.
+- **Internals:** no gate.
+
+CI enforces Ring 0 and Ring 1 thresholds via `interrogate`. The
+list of Ring 0 symbols lives in `pyproject.toml` and changing it
+requires a deliberate PR — adding a new public symbol forces a
+docstring decision.
+
+### v1.0 #C3. `--live` quickstart mode is dropped from v1.0
+
+Cost-prompted live calls on a brand-new install is a UX trap.
+Estimate accuracy depends on provider pricing we don't control; new
+user hits `y` by reflex; first experience is a surprise charge.
+
+`activegraph quickstart` ships in v1.0 with the fixture-backed
+demo only. `--interactive` (walk-through tutorial) stays in scope.
+`--live` ships post-1.0 only if quickstart usage shows real demand,
+and only after we agree on a hard cap (likely env-var-gated, $0.01
+default ceiling using the existing budget primitives).
+
+The v1.0 quickstart command therefore exposes two modes:
+
+```
+activegraph quickstart                # fixture-backed diligence demo
+activegraph quickstart --interactive  # tutorial walk-through
+```
+
+Both end with "here's what to read next" pointing at specific doc
+pages.
+
+### v1.0 #C4. v1.0 ships as `v1.0-rc1`; first-time-user gate is owned externally
+
+The "real first-time user runs through the tutorial" gate cannot be
+verified from inside the agent loop. Pretending it can produces a
+passing test for a failed experience.
+
+The v1.0 PR series therefore ships as `v1.0-rc1`. The CHANGELOG
+flags the first-time-user test as the sole blocker on `v1.0` final.
+The gate is run externally — a non-author developer runs through
+the tutorial blind, screen-recorded, the friction points are
+captured, fixes go in, then the version is cut to `v1.0`.
+
+The agent does not claim the gate passed.
+
+### v1.0 #C5. `mypy --strict` scope is allowlist-driven, in `pyproject.toml`
+
+"Public surface" is too vague to gate on. v1.0 makes the allowlist
+explicit:
+
+- The allowlist is a `[tool.mypy.strict_modules]`-equivalent block in
+  `pyproject.toml` enumerating every module that should pass `mypy
+  --strict`. The default is everything reachable from
+  `activegraph.__all__` and pack-level `__all__`.
+- Internal modules get normal `mypy`. The internal/public boundary
+  matches the docstring-coverage boundary (#C2), so "what we
+  document publicly" and "what we strictly type" are the same set
+  of symbols — satisfyingly self-consistent.
+- Adding a new symbol to a top-level `__all__` forces a PR-level
+  decision about typing strictness.
+
+### v1.0 #C6. Doc site DNS is externally owned; ship with fallback URL
+
+`docs.activegraph.dev` is a domain registration outside the agent's
+reach. v1.0:
+
+- Wires `mkdocs-material`, the GitHub Pages deploy workflow, and the
+  `CNAME` file pointing at `docs.activegraph.dev`.
+- Until DNS is live, error message doc URLs and the README point at
+  the github.io fallback (`https://yoheinakajima.github.io/activegraph/`).
+- When DNS resolves, the cutover is a search-replace in error
+  message URLs plus a one-line CNAME update. Documented in the
+  CHANGELOG so the swap is reproducible.
+
+### v1.0 #C7. v0.9.1 lands before v1.0 PR-A
+
+The two follow-ups (granular approval-demo output, prompt_normalized
+trace rollup) ship as v0.9.1 — not bundled into a v1.0 PR. Reasoning:
+v1.0 is an adoption-surface milestone, and milestone discipline says
+no milestone starts with carryover from the previous one. v0.9.1 is
+committed before any v1.0 work begins. **Done. See v0.9.1 sections
+above.**
+
+## v1.0 #1. The quickstart command is the spec
+
+The single most important deliverable in v1.0 is the
+`activegraph quickstart` command. End-to-end against bundled fixtures
+with no API key, no Postgres, no configuration. Output is a single
+memo to stdout, a trace summary, and a "what just happened" section
+explaining what the developer saw.
+
+The transcript at `examples/quickstart_session.txt` is the contract
+for the whole milestone. Every piece of v1.0 work either supports a
+line of this transcript or it doesn't belong in v1.0.
+
+The transcript explicitly includes the fork-and-diff beat: most
+evaluators won't read about that capability; they need to see it in
+the quickstart flow to understand what's structurally different
+about the framework. The transcript has an explicit beat for that
+moment of recognition.
+
+## v1.0 #2. Build order is fixed
+
+1. `examples/quickstart_session.txt` (the spec)
+2. `ActiveGraphError` hierarchy + format standard + PR-A reference category
+3. PR-B through PR-F (one error category per PR)
+4. `activegraph quickstart` CLI command (fixture + interactive modes)
+5. mkdocs-material site skeleton + GitHub Pages workflow
+6. Error reference pages (one per error class)
+7. API auto-generation via mkdocstrings
+8. 10-minute tutorial (`docs/quickstart.md`)
+9. Cookbook + migration pages
+10. `mypy --strict` allowlist + interrogate gates as CI requirements
+11. `CHANGELOG.md` covering v0 through v1.0-rc1
+12. `v1.0-rc1` tag
+13. (External) first-time-user test gate clears → `v1.0` tag
+
+Do not invert. Each step depends on the contract set by the prior
+step.
+
+## v1.0 #3. The error message format is locked
+
+Every framework error follows this exact shape:
+
+```
+<ErrorClass>: <one-line summary>
+
+What failed:
+  <specific thing that went wrong, with names>
+
+Why:
+  <explanation of the root cause, not just the symptom>
+
+How to fix:
+  <concrete action the developer can take>
+
+More:
+  https://docs.activegraph.dev/errors/<error-class-slug>
+```
+
+Snapshot-tested per-error-class. Doc URL must resolve to a real
+page; broken links fail CI. Until DNS for `docs.activegraph.dev` is
+live, the URL renders as the github.io fallback (#C6) and the swap
+is the documented cutover.
+
+## v1.0 #4. The `ActiveGraphError` hierarchy is the root
+
+```
+ActiveGraphError
+├── ConfigurationError      # runtime construction problems
+├── RegistrationError       # behavior/tool/pack registration
+│   ├── PackConflictError
+│   ├── MissingProviderError
+│   └── MissingToolError
+├── ExecutionError          # runtime execution
+│   ├── BudgetExhaustedError
+│   └── BehaviorFailedError
+├── ReplayError             # replay/fork
+│   └── ReplayDivergenceError
+├── StorageError            # persistence
+├── PatternError            # pattern subscriptions
+│   └── UnsupportedPatternError
+└── PackError               # pack-specific
+```
+
+`ExecutionError`, not `RuntimeError` — Python has a builtin
+`RuntimeError` and shadowing it produces confusing stack traces.
+
+`ActiveGraphError` exposes structured fields:
+
+- `.what_failed: str`
+- `.why: str`
+- `.how_to_fix: str`
+- `.doc_url: str`
+- `.context: dict`  (error-class-specific data)
+
+`__str__` produces the format in #3.
+
+## v1.0 #5. Doc site structure is the contract
+
+```
+docs/
+  index.md                    # landing page
+  quickstart.md               # 10-minute tutorial
+  concepts/
+    graph.md
+    events.md
+    behaviors.md
+    relations.md
+    patches.md
+    views.md
+    frames.md
+    policies.md
+    replay.md
+    forking.md
+  guides/
+    writing-behaviors.md
+    writing-llm-behaviors.md
+    writing-tools.md
+    pattern-subscriptions.md
+    operating-in-production.md
+    authoring-packs.md
+  reference/
+    api/                      # auto-generated from docstrings
+    cli/
+    errors/                   # one page per error class
+    metrics/
+    events/
+  packs/
+    diligence.md
+  cookbook/
+    common-patterns.md
+    debugging.md
+    migration-from-v0-7.md
+  about/
+    architecture.md
+    roadmap.md
+    contributing.md
+    changelog.md
+```
+
+Build to this structure. Adding pages is fine; removing or
+restructuring is a contract change.
+
+## v1.0 #6. Every code block in docs is a snippet inclusion
+
+No inline code blocks in docs. Every example is a runnable file in
+`examples/` that is tested in CI, and the doc page embeds the file
+via mkdocs snippet inclusion. This prevents doc rot. Convention is
+documented in `CONTRIBUTING.md`.
+
+## v1.0 #7. Errors name names
+
+Every error includes the specific names of the things involved —
+behavior name, pack name, object id, event id, file path. Generic
+errors are bugs.
+
+Wrong: "Pack conflict detected"
+Right: "Pack conflict: 'diligence' and 'research' both declare object type 'Claim'"
+
+Snapshot tests lock specific instances of each error to enforce
+this.
+
+## v1.0 #8. No telemetry, no phone-home
+
+The framework runs offline; that's a feature. No analytics in the
+quickstart. No version-check pinging. Deployments that want
+telemetry add it through the metrics protocol.
+
+## v1.0 #9. Backward compatibility is absolute
+
+All 384 v0–v0.9 tests pass unchanged through every v1.0 PR. The two
+trace snapshot files updated in v0.9.1 are the new baseline; no
+further drift in v1.0.
+
+## v1.0 #10. What v1.0 deliberately does NOT add
+
+Locked deferral list (post-1.0 or never):
+
+- Web UI (never, per prior decisions)
+- Streaming LLM responses (post-1.0)
+- Multi-model routing (post-1.0)
+- More packs beyond Diligence — Memory pack, Research pack (post-1.0)
+- Pack registry or marketplace (post-1.0)
+- Error message internationalization (never; English only)
+- Video tutorials (separate project)
+- Adaptive question generation in Diligence pack (post-1.0 if at all)
+- Contradiction resolver in Diligence pack (post-1.0 if at all)
+- Richer fixture cardinality (re-affirm: v0.9 contract is 3 companies)
+- `--live` quickstart mode (post-1.0; see #C3)
+
+If a v1.0 PR finds itself building toward any of these, stop.
+
+v1.0 is about making the framework discoverable, learnable, and
+forgiving. The developer who tries this on a Friday afternoon is
+going to decide in the first 10 minutes whether they come back
+Monday. Slow down on implementation choices, speed up on user-facing
+polish, and remember that adoption-surface work is a different skill
+from runtime engineering.
