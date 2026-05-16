@@ -72,6 +72,7 @@ def _canonical_prompt_payload(
     temperature: float,
     top_p: float,
     deterministic: bool,
+    tools: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     from activegraph.llm.prompt import schema_to_json
 
@@ -87,6 +88,9 @@ def _canonical_prompt_payload(
         "temperature": float(temperature),
         "top_p": float(top_p),
         "deterministic": bool(deterministic),
+        # v0.7: tool definitions contribute to the prompt hash so a
+        # behavior gaining or losing a tool produces a different key.
+        "tools": list(tools) if tools else None,
     }
 
 
@@ -122,6 +126,7 @@ class RecordedLLMProvider(LLMProvider):
         top_p: float,
         output_schema: Optional[type],
         timeout_seconds: float,
+        tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
         payload = _canonical_prompt_payload(
             model=model,
@@ -132,6 +137,7 @@ class RecordedLLMProvider(LLMProvider):
             temperature=temperature,
             top_p=top_p,
             deterministic=(temperature == 0.0 and top_p == 1.0),
+            tools=tools,
         )
         prompt_hash = _hash_payload(payload)
         path = os.path.join(self._dir, f"{prompt_hash}.json")
@@ -212,6 +218,7 @@ class RecordingLLMProvider(LLMProvider):
         top_p: float,
         output_schema: Optional[type],
         timeout_seconds: float,
+        tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
         response = self._inner.complete(
             system=system,
@@ -222,6 +229,7 @@ class RecordingLLMProvider(LLMProvider):
             top_p=top_p,
             output_schema=output_schema,
             timeout_seconds=timeout_seconds,
+            tools=tools,
         )
         payload = _canonical_prompt_payload(
             model=model,
@@ -232,6 +240,7 @@ class RecordingLLMProvider(LLMProvider):
             temperature=temperature,
             top_p=top_p,
             deterministic=(temperature == 0.0 and top_p == 1.0),
+            tools=tools,
         )
         prompt_hash = _hash_payload(payload)
         fixture = {

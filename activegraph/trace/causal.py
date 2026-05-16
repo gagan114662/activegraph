@@ -42,11 +42,17 @@ def causal_chain(graph: Graph, object_id: str) -> str:
     # round-trip into the chain at this point before continuing up
     # through the triggering event.
     llm_request_id = obj.provenance.get("llm_request_event_id")
+    # CONTRACT v0.7 #19: tool calls that contributed to the final LLM
+    # output are also enumerated. Each entry walks tool.requested +
+    # tool.responded, same shape as the LLM block.
+    tool_request_ids: list[str] = list(
+        obj.provenance.get("tool_request_event_ids") or []
+    )
     indent = "  "
     if llm_request_id:
         llm_req = by_id.get(llm_request_id)
         if llm_req is not None:
-            llm_resp = _find_response_for(by_id, llm_request_id)
+            llm_resp = _find_response_for(by_id, llm_request_id, "llm.responded")
             actor = llm_req.actor or "?"
             model = llm_req.payload.get("model", "?")
             lines.append(
@@ -59,6 +65,30 @@ def causal_chain(graph: Graph, object_id: str) -> str:
                 lines.append(
                     f"{indent}  ({llm_resp.id}) llm.responded{tail}"
                 )
+    for tr_id in tool_request_ids:
+        tr = by_id.get(tr_id)
+        if tr is None:
+            continue
+        tresp = _find_response_for(by_id, tr_id, "tool.responded")
+        tool_name = tr.payload.get("tool", "?")
+        lines.append(
+            f"{indent}← {tr.actor or '?'} ({tr.id}) tool.requested  tool={tool_name}"
+        )
+        if tresp is not None:
+            cost = tresp.payload.get("cost_usd")
+            cached = tresp.payload.get("cache_hit")
+            err = tresp.payload.get("error")
+            if err:
+                tail = f" error={err.get('reason', 'tool.error') if isinstance(err, dict) else 'tool.error'}"
+            elif cached:
+                tail = " (cache_hit)"
+            elif cost is not None:
+                tail = f" cost=${_fmt_money(cost)}"
+            else:
+                tail = ""
+            lines.append(
+                f"{indent}  ({tresp.id}) tool.responded{tail}"
+            )
 
     seen: set[str] = set()
     cursor = created_by_evt
@@ -77,9 +107,11 @@ def causal_chain(graph: Graph, object_id: str) -> str:
     return "\n".join(lines)
 
 
-def _find_response_for(by_id: dict[str, Event], request_id: str) -> Event | None:
+def _find_response_for(
+    by_id: dict[str, Event], request_id: str, response_type: str = "llm.responded"
+) -> Event | None:
     for e in by_id.values():
-        if e.type == "llm.responded" and e.caused_by == request_id:
+        if e.type == response_type and e.caused_by == request_id:
             return e
     return None
 

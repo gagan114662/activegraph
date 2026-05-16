@@ -30,7 +30,7 @@ from typing import Any, Mapping, Optional
 
 from activegraph.llm.errors import LLMBehaviorError
 from activegraph.llm.provider import LLMProvider
-from activegraph.llm.types import LLMMessage, LLMResponse
+from activegraph.llm.types import LLMMessage, LLMResponse, ToolCall
 
 
 # Per-million-token pricing in USD. Tracks the rates of the Claude 4.x
@@ -111,12 +111,13 @@ class AnthropicProvider(LLMProvider):
         top_p: float,
         output_schema: Optional[type],
         timeout_seconds: float,
+        tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
         client = self._client()
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": int(max_tokens),
-            "messages": [m.to_dict() for m in messages],
+            "messages": [_message_to_anthropic(m) for m in messages],
             "temperature": float(temperature),
         }
         if system:
@@ -124,6 +125,10 @@ class AnthropicProvider(LLMProvider):
         # top_p of 1.0 is the model default; only forward when narrowing.
         if top_p < 1.0:
             kwargs["top_p"] = float(top_p)
+        if tools:
+            # Anthropic's tools shape: {"name", "description", "input_schema"}.
+            # Our Tool.to_definition() already emits this shape.
+            kwargs["tools"] = list(tools)
 
         t0 = time.monotonic()
         try:
@@ -143,8 +148,12 @@ class AnthropicProvider(LLMProvider):
         latency = time.monotonic() - t0
 
         text = _extract_text(raw)
+        tool_calls = _extract_tool_calls(raw)
         parsed: Any = None
-        if output_schema is not None:
+        # If the model returned tool_use blocks the loop isn't done yet
+        # — the runtime will dispatch the tools and re-call. Parsing
+        # structured output happens on the final turn, not mid-loop.
+        if output_schema is not None and not tool_calls:
             parsed = _parse_structured(text, output_schema)
 
         in_tok = int(getattr(raw.usage, "input_tokens", 0) or 0)
@@ -163,6 +172,7 @@ class AnthropicProvider(LLMProvider):
             finish_reason=str(getattr(raw, "stop_reason", "end_turn") or "end_turn"),
             seed=None,  # Anthropic messages API has no seed parameter.
             cache_hit=False,
+            tool_calls=tool_calls or None,
         )
 
     def estimate_cost(
@@ -210,6 +220,49 @@ def _extract_text(raw: Any) -> str:
         if isinstance(text, str):
             parts.append(text)
     return "".join(parts)
+
+
+def _extract_tool_calls(raw: Any) -> list[ToolCall]:
+    """Extract `tool_use` blocks from a `Message.content` list. v0.7."""
+    content = getattr(raw, "content", None)
+    if content is None:
+        return []
+    out: list[ToolCall] = []
+    for block in content:
+        block_type = getattr(block, "type", None)
+        if block_type != "tool_use":
+            continue
+        call_id = getattr(block, "id", None) or ""
+        name = getattr(block, "name", None) or ""
+        args = getattr(block, "input", None) or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {"_raw": args}
+        out.append(ToolCall(id=call_id, name=name, args=dict(args)))
+    return out
+
+
+def _message_to_anthropic(m: LLMMessage) -> dict[str, Any]:
+    """Convert an LLMMessage to Anthropic message-list shape.
+
+    For role="tool", Anthropic wants a "user" message with a
+    `tool_result` content block. For role in {"user","assistant"} the
+    standard {role, content: str} shape works.
+    """
+    if m.role == "tool":
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_use_id or "",
+                    "content": m.content,
+                }
+            ],
+        }
+    return {"role": m.role, "content": m.content}
 
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.DOTALL)

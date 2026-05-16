@@ -68,6 +68,9 @@ class LLMCache:
             seed=r.seed,
             cache_hit=True,
             provider_meta=dict(r.provider_meta),
+            # v0.7: tool_calls must round-trip so the turn loop sees
+            # the same shape live vs cached.
+            tool_calls=list(r.tool_calls) if r.tool_calls else None,
         )
 
     def has(self, prompt_hash: str) -> bool:
@@ -87,6 +90,8 @@ class LLMCache:
     ) -> None:
         # Store an un-flagged copy so subsequent `get()` calls
         # consistently set cache_hit=True.
+        # v0.7: tolerate test-provider responses without tool_calls.
+        tool_calls = getattr(response, "tool_calls", None)
         clean = LLMResponse(
             raw_text=response.raw_text,
             parsed=response.parsed,
@@ -99,6 +104,7 @@ class LLMCache:
             seed=response.seed,
             cache_hit=False,
             provider_meta=dict(response.provider_meta),
+            tool_calls=list(tool_calls) if tool_calls else None,
         )
         self._by_hash[prompt_hash] = CachedEntry(
             response=clean, requested_event_id=requesting_event_id
@@ -139,9 +145,25 @@ class LLMCache:
 
 
 def _response_from_event_payload(payload: dict) -> LLMResponse:
+    from activegraph.llm.types import ToolCall
+
     cost = payload.get("cost_usd", "0")
     if not isinstance(cost, Decimal):
         cost = Decimal(str(cost))
+    # v0.7: tool_calls round-trip through the event payload as plain
+    # dicts; hydrate back into ToolCall instances so the runtime's
+    # turn loop sees a uniform shape.
+    tc_payload = payload.get("tool_calls")
+    tool_calls = None
+    if tc_payload:
+        tool_calls = [
+            ToolCall(
+                id=tc.get("id", ""),
+                name=tc.get("name", ""),
+                args=dict(tc.get("args", {})),
+            )
+            for tc in tc_payload
+        ]
     return LLMResponse(
         raw_text=payload.get("raw_text", ""),
         parsed=payload.get("parsed"),
@@ -154,4 +176,5 @@ def _response_from_event_payload(payload: dict) -> LLMResponse:
         seed=payload.get("seed"),
         cache_hit=False,
         provider_meta=dict(payload.get("provider_meta", {}) or {}),
+        tool_calls=tool_calls,
     )

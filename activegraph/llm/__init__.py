@@ -30,7 +30,7 @@ from activegraph.llm.prompt import (
 )
 from activegraph.llm.provider import LLMProvider
 from activegraph.llm.recorded import RecordedLLMProvider, RecordingLLMProvider
-from activegraph.llm.types import LLMMessage, LLMResponse
+from activegraph.llm.types import LLMMessage, LLMResponse, ToolCall
 
 
 __all__ = [
@@ -44,6 +44,7 @@ __all__ = [
     "MissingProviderError",
     "RecordedLLMProvider",
     "RecordingLLMProvider",
+    "ToolCall",
     "assemble_prompt",
     "schema_to_json",
     "serialize_view",

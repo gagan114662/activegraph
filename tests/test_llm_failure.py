@@ -61,7 +61,7 @@ def test_schema_violation_becomes_behavior_failed():
     # Provider returns text that isn't valid JSON / doesn't match schema.
     class _NonparseResponseProvider:
         def complete(self, *, system, messages, model, max_tokens, temperature,
-                     top_p, output_schema, timeout_seconds):
+                     top_p, output_schema, timeout_seconds, tools=None):
             # Force a schema_violation by raising from the provider as
             # the SDK-flavored providers (Anthropic) do.
             raise LLMBehaviorError(
@@ -161,7 +161,7 @@ def test_provider_kwargs_are_threaded_through():
 
     class _Capture:
         def complete(self, *, system, messages, model, max_tokens, temperature,
-                     top_p, output_schema, timeout_seconds):
+                     top_p, output_schema, timeout_seconds, tools=None):
             captured.append(
                 dict(
                     system_starts_with=system[:30],

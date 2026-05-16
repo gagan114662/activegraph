@@ -176,6 +176,7 @@ class _DemoScriptedProvider:
         top_p: float,
         output_schema: type | None,
         timeout_seconds: float,
+        tools: list | None = None,
     ) -> LLMResponse:
         user_text = "\n".join(m.content for m in messages if m.role == "user")
         for needle, claims in _SCRIPTS.items():

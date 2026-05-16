@@ -881,6 +881,201 @@ documents, structured-output extraction, a low-confidence flag, a
 relation behavior, a cached fork, and a causal chain that crosses the
 LLM boundary.
 
+## Tool use
+
+Tools are a primitive, not something buried inside an LLM behavior. A
+tool is a registered function with an input schema, an output schema,
+a determinism flag, a cost, and a timeout. The runtime invokes tools
+through the same event-sourced pattern as LLM calls: every invocation
+is a `tool.requested` / `tool.responded` event pair, with replay,
+budgets, and provenance threaded through.
+
+### A tool
+
+```python
+from decimal import Decimal
+from pydantic import BaseModel
+from activegraph import tool, ToolContext
+
+
+class WebFetchInput(BaseModel):
+    url: str
+    timeout_seconds: float = 10.0
+
+
+class WebFetchOutput(BaseModel):
+    text: str
+    status: int
+    final_url: str
+
+
+@tool(
+    name="web_fetch",
+    description="Fetch the body text of a URL.",
+    input_schema=WebFetchInput,
+    output_schema=WebFetchOutput,
+    cost_per_call=Decimal("0.001"),
+    timeout_seconds=10.0,
+    deterministic=False,
+)
+def web_fetch(args: WebFetchInput, ctx: ToolContext) -> WebFetchOutput:
+    ...
+```
+
+Tools receive a `ToolContext`, not the graph. Tools that need graph
+read access close over a `Graph` via a factory — see
+`make_graph_query_tool(graph)` for the reference implementation. Tools
+cannot mutate the graph directly; if a tool wants to record
+information, it returns it in its output and the calling behavior
+writes the mutation.
+
+### An LLM behavior that uses tools
+
+```python
+@llm_behavior(
+    name="researcher",
+    on=["object.created"],
+    where={"object.type": "question"},
+    output_schema=ResearchFindings,
+    tools=[web_fetch, make_graph_query_tool(graph)],
+    budget={"max_tool_calls": 8},
+)
+def researcher(event, graph, ctx, out):
+    # `out` is the final parsed ResearchFindings. The runtime ran the
+    # LLM ↔ tool loop already; the handler never sees raw tool calls.
+    for c in out.claims:
+        graph.add_object("claim", c.model_dump())
+```
+
+The runtime orchestrates the multi-turn loop:
+
+1. Call the LLM with the assembled prompt + tool definitions
+2. If the response is a tool call, invoke the tool, append the result
+   as a `role="tool"` message, re-call the LLM
+3. Repeat until the model returns a non-tool response or
+   `max_tool_turns` is hit
+4. Hand the final parsed output to the developer's handler
+
+### Failure modes
+
+Tools fail loud, with structured reason codes — same shape as LLM
+failures:
+
+| Reason                          | When                                                |
+|---------------------------------|-----------------------------------------------------|
+| `tool.timeout`                  | exceeded `timeout_seconds`                          |
+| `tool.network_error`            | provider / network failure                          |
+| `tool.invalid_input`            | input schema validation failed before invocation    |
+| `tool.invalid_output`           | output schema validation failed after invocation    |
+| `tool.execution_error`          | tool function raised                                |
+| `tool.unknown_tool`             | LLM asked for a tool the behavior didn't declare    |
+| `tool.fixture_missing`          | `RecordedToolProvider` had no fixture               |
+| `tool.max_turns_exhausted`      | turn loop exceeded `max_tool_turns`                 |
+| `budget.tool_calls_exhausted`   | would exceed `max_tool_calls`                       |
+| `budget.cost_exhausted`         | tool cost would exceed `max_cost_usd`               |
+
+### Budget
+
+`budget={"max_tool_calls": 8, "max_cost_usd": "0.10"}` enforces a tool
+call ceiling and a Decimal-precise cost cap. Tools and LLM calls share
+`max_cost_usd` — they're both dollars.
+
+### Replay
+
+`replay_tool_cache=True` (parallel to `replay_llm_cache=True`)
+pre-populates a content-keyed cache from recorded `tool.responded`
+events. Cache key is `sha256(canonical_json({tool_name, args_normalized}))`,
+separately namespaced from the LLM cache.
+
+**Default**: ALL tools (deterministic or not) serve from cache on
+replay. Deterministic-tool correctness depends on the graph state at
+the moment of the call matching the recorded state — the runtime
+can't cheaply verify that, so cache-served is the honest default.
+
+**Opt-in**: `replay_reinvoke_deterministic=True` actually re-invokes
+deterministic tools on replay. Useful for "would this still hold?"
+experiments.
+
+### Recorded mode for tests
+
+`RecordedToolProvider(fixtures_dir)` reads fixtures from disk;
+`RecordingToolProvider(inner_invoker, fixtures_dir)` writes them.
+Fixtures live at `tests/fixtures/tools/<tool_name>/<args_hash>.json`,
+same shape as the v0.6 LLM fixtures with `recorded_at` outside the
+hash.
+
+## Pattern subscriptions
+
+A behavior can declare a `pattern=` instead of (or in addition to)
+`on=[...]`. The pattern is a strict Cypher subset compiled at
+registration time; matches are exposed to the handler as
+`ctx.matches`.
+
+### Example
+
+```python
+@llm_behavior(
+    name="critic",
+    on=["relation.created"],
+    where={"relation.type": "contradicts"},
+    pattern="(c1:claim)-[r:contradicts]->(c2:claim) "
+            "WHERE c1.confidence > 0.7 AND c2.confidence > 0.7",
+    output_schema=Resolution,
+)
+def critic(event, graph, ctx, out):
+    for match in ctx.matches:
+        c1 = graph.get_object(match["c1"])
+        c2 = graph.get_object(match["c2"])
+        graph.add_object("resolution", {...})
+```
+
+When a behavior has both `on=` AND `pattern=`, both conditions must
+hold — the event type matches AND the pattern matches the post-event
+graph state. Pattern-only behaviors (no `on=`) check every
+non-lifecycle event.
+
+### The Cypher subset
+
+Supported:
+- Node patterns: `(var:type {prop: value})` (equality only)
+- Relationships: `(a)-[var:rel_type]->(b)` and `(a)<-[var:rel_type]-(b)`
+- Multi-hop: `(a)-[:r1]->(b)-[:r2]->(c)`
+- `WHERE` with `AND`, `NOT`, `NOT EXISTS { ... }`
+- Property access: `a.confidence > 0.7`
+
+Refused (with `UnsupportedPatternError` at the offending token):
+- `OR` in WHERE → register two behaviors instead
+- `RETURN`, `OPTIONAL MATCH`, `WITH`, `UNION`, `MERGE`, `CREATE`,
+  variable-length paths (`-[*]-`), aggregation, undirected edges,
+  edges without a type
+
+A clean subset is more useful than a fuzzy superset. If you need
+something outside the subset for v0.7, file an issue.
+
+## Temporal predicates: `activate_after`
+
+```python
+@behavior(
+    on=["object.created"],
+    where={"object.type": "task"},
+    activate_after=2,
+)
+def nag(event, graph, ctx):
+    ...
+```
+
+`activate_after=N` schedules the behavior for invocation `N` events
+later. At schedule time the runtime emits `behavior.scheduled`. At
+fire time the runtime re-checks `where=` against the current graph
+state — if the condition no longer holds, the invocation is silently
+skipped. Useful for "X hasn't been resolved by the time Y other things
+happened" patterns.
+
+**Event-count, not wall-clock.** v0.7 is intentionally event-count
+only. Wall-clock would require a clock-source abstraction and break
+determinism under replay. If you need wall-clock semantics, drive
+`runtime.tick()` from your own loop and inject `timer.fired` events.
+
 ## Patterns
 
 A few patterns that fall out of the model naturally.
@@ -934,12 +1129,19 @@ A few patterns that fall out of the model naturally.
 - Frame-aware prompt construction
 - Cost accounting
 
-**v0.7 — Advanced matching**
+**v0.7 — Tools + advanced matching (current)**
 
-- Cypher-style pattern subscriptions
-- Negation predicates
-- Temporal predicates (`activate_after`)
-- Priority and conflict resolution policies
+- `@tool` decorator: tools as first-class primitives
+- LLM ↔ tool turn loop owned by the runtime
+- `tool.requested` / `tool.responded` events; replay cache
+- `RecordedToolProvider` + `RecordingToolProvider`
+- Two reference tools: `web_fetch`, `graph_query`
+- Cypher subset pattern subscriptions (`pattern=`)
+- Negation via `NOT EXISTS`
+- Temporal predicates (`activate_after=N` events)
+- Tool budgets + cost-sharing with LLM
+- Causal chain crosses tool boundaries
+- Trace integration for all new event types
 
 **v1.0 — Packs**
 

@@ -141,22 +141,30 @@ def _fmt_behavior_failed(e: Event) -> str:
 
 
 def _fmt_llm_requested(e: Event) -> str:
-    """CONTRACT v0.6 #14:
+    """CONTRACT v0.6 #14 (+ v0.7 turn_index + prompt_normalized):
     `[llm.requested] evt_NNN  behavior  model=... tokens_in~NNNN budget_remaining=$X.XX`
 
     The `~` prefix on `tokens_in` marks an estimate; absent if no
     pre-call count was made (no cost budget OR cache hit). The
     `budget_remaining=$...` segment is dropped if no cost budget.
+    v0.7 adds `turn=N` for tool-loop turns past the first, and
+    `prompt_normalized=true` to make the volatile-field-stripping
+    behavior explicit in the trace (CONTRACT v0.6 follow-up).
     """
     p = e.payload or {}
     name = p.get("behavior", "?")
     parts: list[str] = [f"{e.id}  {name}", f"model={p.get('model', '?')}"]
     if p.get("cache_hit"):
         parts.append("cache_hit=true")
+    turn_idx = p.get("turn_index")
+    if turn_idx is not None and turn_idx > 0:
+        parts.append(f"turn={turn_idx}")
     if "estimated_input_tokens" in p:
         parts.append(f"tokens_in~{p['estimated_input_tokens']}")
     if p.get("budget_remaining_usd") is not None:
         parts.append(f"budget_remaining=${_money(p['budget_remaining_usd'])}")
+    if p.get("prompt_normalized"):
+        parts.append("prompt_normalized=true")
     return f'{_format_tag("llm.requested")}{"  ".join([parts[0], " ".join(parts[1:])])}'
 
 
@@ -192,6 +200,85 @@ def _money(v: Any) -> str:
         return f"{float(v):.3f}"
     except (TypeError, ValueError):
         return str(v)
+
+
+# ---------- v0.7 trace lines: tool.* / pattern.* / behavior.scheduled ------
+
+
+def _fmt_tool_requested(e: Event) -> str:
+    """CONTRACT v0.7 #18:
+    `[tool.requested]  evt_NNN  behavior  tool=name args_hash=AAA cache_hit=false`
+    """
+    p = e.payload or {}
+    name = p.get("behavior", "?")
+    tool = p.get("tool", "?")
+    parts: list[str] = [
+        f"{e.id}  {name}",
+        f"tool={tool}",
+        f"args_hash={_short_hash(p.get('args_hash', '?'))}",
+    ]
+    if p.get("cache_hit"):
+        parts.append("cache_hit=true")
+    if p.get("deterministic"):
+        parts.append("deterministic=true")
+    return f'{_format_tag("tool.requested")}{"  ".join([parts[0], " ".join(parts[1:])])}'
+
+
+def _fmt_tool_responded(e: Event) -> str:
+    """CONTRACT v0.7 #18:
+    `[tool.responded] evt_NNN  behavior  tool=name latency=X.Xs cost=$X.XXX cache_hit=false`
+    """
+    p = e.payload or {}
+    name = p.get("behavior", "?")
+    tool = p.get("tool", "?")
+    parts: list[str] = [f"{e.id}  {name}", f"tool={tool}"]
+    if p.get("cache_hit"):
+        parts.append("cache_hit=true")
+    err = p.get("error")
+    if err:
+        reason = err.get("reason", "tool.error") if isinstance(err, dict) else "tool.error"
+        parts.append(f"error={reason}")
+    else:
+        lat = p.get("latency_seconds")
+        cost = p.get("cost_usd")
+        if lat is not None and not p.get("cache_hit"):
+            parts.append(f"latency={float(lat):.1f}s")
+        if cost is not None and not p.get("cache_hit"):
+            parts.append(f"cost=${_money(cost)}")
+    return f'{_format_tag("tool.responded")}{"  ".join([parts[0], " ".join(parts[1:])])}'
+
+
+def _fmt_pattern_matched(e: Event) -> str:
+    """CONTRACT v0.7 #18:
+    `[pattern.matched]  evt_NNN  behavior  matches=N`
+    """
+    p = e.payload or {}
+    name = p.get("behavior", "?")
+    n = int(p.get("matches_count", 0))
+    return (
+        f'{_format_tag("pattern.matched")}'
+        f'{e.id}  {name}  matches={n}'
+    )
+
+
+def _fmt_behavior_scheduled(e: Event) -> str:
+    """CONTRACT v0.7 #18:
+    `[behavior.scheduled]  evt_NNN  behavior  activate_after=N_events`
+    """
+    p = e.payload or {}
+    name = p.get("behavior", "?")
+    n = int(p.get("activate_after", 0))
+    return (
+        f'{_format_tag("behavior.scheduled")}'
+        f'{e.id}  {name}  activate_after={n}_event{"s" if n != 1 else ""}'
+    )
+
+
+def _short_hash(h: str) -> str:
+    """Trim a long hex hash to 8 chars for trace readability."""
+    if not isinstance(h, str):
+        return str(h)
+    return h[:8] if len(h) > 8 else h
 
 
 def _fmt_runtime_idle(_: Event) -> str:
@@ -230,9 +317,13 @@ _FORMATTERS = {
     "behavior.started": _fmt_behavior_started,
     "behavior.completed": _fmt_behavior_completed,
     "behavior.failed": _fmt_behavior_failed,
+    "behavior.scheduled": _fmt_behavior_scheduled,
     "relation_behavior.started": _fmt_relation_behavior_started,
     "llm.requested": _fmt_llm_requested,
     "llm.responded": _fmt_llm_responded,
+    "tool.requested": _fmt_tool_requested,
+    "tool.responded": _fmt_tool_responded,
+    "pattern.matched": _fmt_pattern_matched,
     "runtime.idle": _fmt_runtime_idle,
     "runtime.budget_exhausted": _fmt_runtime_budget_exhausted,
 }

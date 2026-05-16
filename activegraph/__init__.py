@@ -23,6 +23,7 @@ from activegraph.policy import Policy
 from activegraph.runtime.budget import Budget
 from activegraph.runtime.diff import Diff, DivergentObject, DivergentRelation
 from activegraph.runtime.errors import ReplayDivergenceError
+from activegraph.runtime.patterns import UnsupportedPatternError
 from activegraph.runtime.runtime import Runtime
 from activegraph.store import (
     EventStore,
@@ -30,6 +31,17 @@ from activegraph.store import (
     NonSerializableEventError,
     RunRecord,
     SQLiteEventStore,
+)
+# v0.7 public surface for tools
+from activegraph.tools import (
+    MissingToolError,
+    Tool,
+    ToolContext,
+    ToolError,
+    UnknownToolError,
+    clear_tool_registry,
+    get_tool_registry,
+    tool,
 )
 
 __all__ = [
@@ -49,6 +61,7 @@ __all__ = [
     "LLMBehavior",
     "LLMBehaviorError",
     "MissingProviderError",
+    "MissingToolError",
     "NonSerializableEventError",
     "Object",
     "Patch",
@@ -60,12 +73,20 @@ __all__ = [
     "Runtime",
     "SQLiteEventStore",
     "TickingClock",
+    "Tool",
+    "ToolContext",
+    "ToolError",
+    "UnknownToolError",
+    "UnsupportedPatternError",
     "View",
     "behavior",
     "clear_registry",
+    "clear_tool_registry",
     "get_registry",
+    "get_tool_registry",
     "llm_behavior",
     "relation_behavior",
+    "tool",
 ]
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"

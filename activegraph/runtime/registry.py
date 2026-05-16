@@ -1,8 +1,20 @@
-"""Match events to behaviors. CONTRACT #10: registration order for ties."""
+"""Match events to behaviors. CONTRACT #10: registration order for ties.
+
+v0.7 (CONTRACT v0.7 #11): a behavior with both `on=[...]` and
+`pattern=...` requires BOTH conditions — the event type matches AND
+the pattern matches against the post-event graph state. A behavior
+with only `pattern=...` (empty `on`) matches on every non-lifecycle
+event.
+
+`match()` returns `(behavior, relations, matches)` triples. The
+`matches` list is the pattern matcher's bindings (empty for
+behaviors without `pattern=`). The runtime forwards `matches` as
+`ctx.matches`.
+"""
 
 from __future__ import annotations
 
-from typing import Iterable, Union
+from typing import Any, Iterable, Union
 
 from activegraph.behaviors.base import Behavior, RelationBehavior
 from activegraph.core.event import Event
@@ -19,28 +31,53 @@ class Registry:
     def all(self) -> list[BehaviorLike]:
         return list(self._behaviors)
 
+    def index_of(self, behavior: BehaviorLike) -> int:
+        for i, b in enumerate(self._behaviors):
+            if b is behavior:
+                return i
+        return -1
+
     def match(
         self, event: Event, graph: Graph
-    ) -> list[tuple[BehaviorLike, list[Relation]]]:
-        """Return (behavior, matching_relations) pairs in registration order.
-
-        For regular behaviors the relations list is empty. For relation
-        behaviors it's the set of edges the runtime should iterate over —
-        the behavior is invoked once per relation.
+    ) -> list[tuple[BehaviorLike, list[Relation], list[Any]]]:
+        """Return (behavior, matching_relations, pattern_matches) triples
+        in registration order. Pattern matches are empty for behaviors
+        without `pattern=`.
         """
-        out: list[tuple[BehaviorLike, list[Relation]]] = []
+        out: list[tuple[BehaviorLike, list[Relation], list[Any]]] = []
         for b in self._behaviors:
-            if event.type not in b.on:
+            # Event-type filter: required only when `on=` is non-empty.
+            # Pattern-only behaviors (empty `on`) skip this gate.
+            if b.on and event.type not in b.on:
                 continue
+            # Suppress lifecycle events for pattern-only behaviors so a
+            # pattern doesn't fire on behavior.started, etc.
+            if not b.on and _is_lifecycle(event):
+                continue
+            pattern_matches: list[Any] = []
+            if b.pattern_matcher is not None:
+                pattern_matches = b.pattern_matcher.matches(event, graph)
+                if not pattern_matches:
+                    continue
             if isinstance(b, RelationBehavior):
                 rels = _matching_relations(b, event, graph)
                 if rels:
-                    out.append((b, rels))
+                    out.append((b, rels, pattern_matches))
             else:
                 if b.where and not evaluate_where(b.where, event.payload):
                     continue
-                out.append((b, []))
+                out.append((b, [], pattern_matches))
         return out
+
+
+def _is_lifecycle(event: Event) -> bool:
+    return (
+        event.type.startswith("behavior.")
+        or event.type.startswith("relation_behavior.")
+        or event.type.startswith("runtime.")
+        or event.type.startswith("llm.")
+        or event.type.startswith("tool.")
+    )
 
 
 def _matching_relations(

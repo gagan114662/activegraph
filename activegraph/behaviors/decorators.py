@@ -43,8 +43,31 @@ def behavior(
     creates: Optional[list[str]] = None,
     budget: Optional[dict[str, Any]] = None,
     priority: int = 0,
+    *,
+    pattern: Optional[str] = None,
+    activate_after: Any = None,
 ) -> Callable[[Callable], Behavior]:
-    """Decorate a function as an event-driven behavior."""
+    """Decorate a function as an event-driven behavior.
+
+    v0.7 additions (both keyword-only):
+      - `pattern=`: a Cypher subset pattern string. When set, the
+        behavior fires only when the pattern matches the post-event
+        graph state. Combined with `on=` both conditions must hold
+        (CONTRACT v0.7 #11). Matches are exposed as `ctx.matches`.
+      - `activate_after=`: int event count or "N events". Delays
+        invocation by N events; re-checks `where=` at fire time
+        (CONTRACT v0.7 #13).
+    """
+
+    from activegraph.runtime.patterns import parse as _parse_pattern
+    from activegraph.runtime.scheduler import parse_activate_after as _parse_aa
+
+    compiled_matcher = None
+    if pattern is not None:
+        compiled_matcher = _parse_pattern(pattern).compile()
+    delay_n: Optional[int] = None
+    if activate_after is not None:
+        delay_n = _parse_aa(activate_after)
 
     def wrap(fn: Callable) -> Behavior:
         b = Behavior(
@@ -56,6 +79,9 @@ def behavior(
             creates=list(creates or []),
             budget=dict(budget) if budget else None,
             priority=priority,
+            pattern=pattern,
+            pattern_matcher=compiled_matcher,
+            activate_after=delay_n,
         )
         _REGISTRY.append(b)
         return b
@@ -81,6 +107,10 @@ def llm_behavior(
     timeout_seconds: float = 60.0,
     prompt_template: Optional[str] = None,
     priority: int = 0,
+    pattern: Optional[str] = None,
+    activate_after: Any = None,
+    tools: Optional[list] = None,
+    max_tool_turns: int = 6,
 ) -> Callable[[Callable], LLMBehavior]:
     """Decorate a function as an LLM-driven behavior.
 
@@ -95,6 +125,16 @@ def llm_behavior(
     Keyword-only on purpose — `@llm_behavior` carries enough
     parameters that positional binding would be a footgun.
     """
+
+    from activegraph.runtime.patterns import parse as _parse_pattern
+    from activegraph.runtime.scheduler import parse_activate_after as _parse_aa
+
+    compiled_matcher = None
+    if pattern is not None:
+        compiled_matcher = _parse_pattern(pattern).compile()
+    delay_n: Optional[int] = None
+    if activate_after is not None:
+        delay_n = _parse_aa(activate_after)
 
     def wrap(fn: Callable) -> LLMBehavior:
         b = LLMBehavior(
@@ -116,6 +156,11 @@ def llm_behavior(
             top_p=top_p,
             timeout_seconds=timeout_seconds,
             prompt_template=prompt_template,
+            pattern=pattern,
+            pattern_matcher=compiled_matcher,
+            activate_after=delay_n,
+            tools=list(tools) if tools else [],
+            max_tool_turns=max_tool_turns,
         )
         _REGISTRY.append(b)
         return b
@@ -132,8 +177,25 @@ def relation_behavior(
     creates: Optional[list[str]] = None,
     budget: Optional[dict[str, Any]] = None,
     priority: int = 0,
+    *,
+    pattern: Optional[str] = None,
+    activate_after: Any = None,
 ) -> Callable[[Callable], RelationBehavior]:
-    """Decorate a function as a relation behavior — fires once per matching edge."""
+    """Decorate a function as a relation behavior — fires once per matching edge.
+
+    v0.7: also accepts `pattern=` and `activate_after=` per CONTRACT
+    v0.7 #8 / #11 / #13.
+    """
+
+    from activegraph.runtime.patterns import parse as _parse_pattern
+    from activegraph.runtime.scheduler import parse_activate_after as _parse_aa
+
+    compiled_matcher = None
+    if pattern is not None:
+        compiled_matcher = _parse_pattern(pattern).compile()
+    delay_n: Optional[int] = None
+    if activate_after is not None:
+        delay_n = _parse_aa(activate_after)
 
     def wrap(fn: Callable) -> RelationBehavior:
         rb = RelationBehavior(
@@ -146,6 +208,9 @@ def relation_behavior(
             creates=list(creates or []),
             budget=dict(budget) if budget else None,
             priority=priority,
+            pattern=pattern,
+            pattern_matcher=compiled_matcher,
+            activate_after=delay_n,
         )
         _REGISTRY.append(rb)
         return rb
