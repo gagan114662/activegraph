@@ -4,23 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "activegraph"
-version = "0.8.0"
+version = "0.9.0"
 description = "An event-sourced reactive graph runtime for long-running, auditable, agentic systems."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Active Graph contributors" }]
 keywords = ["graph", "agents", "event-sourcing", "runtime"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Development Status :: 3 - Alpha",
 ]
-dependencies = ["click>=8,<9"]
+# Pydantic is required for the pack format (object type schemas and
+# settings models). It was optional in v0.8 (LLM-only); v0.9 pulls it
+# into the hard deps so packs Just Work.
+dependencies = ["click>=8,<9", "pydantic>=2"]
 
 [project.optional-dependencies]
 llm = ["anthropic>=0.40", "pydantic>=2"]
@@ -42,6 +44,12 @@ dev = [
 
 [project.scripts]
 activegraph = "activegraph.cli.main:main"
+
+# v0.9: register the shipped Diligence pack under the
+# `activegraph.packs` entry point group. Third-party packs follow the
+# same pattern. See CONTRACT v0.9 #11 and docs/pack_authoring.md.
+[project.entry-points."activegraph.packs"]
+diligence = "activegraph.packs.diligence:pack"
 
 [project.urls]
 Homepage = "https://github.com/yoheinakajima/activegraph"

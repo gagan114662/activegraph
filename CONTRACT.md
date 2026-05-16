@@ -1601,3 +1601,610 @@ produces false confidence; we don't.
 
 Stay scoped. v0.8 is less exciting than v0.6 and v0.7 by design; it
 is what makes the framework deployable.
+
+---
+
+# v0.9 — Pack format + Diligence pack
+
+v0.9 ships two things that share a single design: the **pack format**
+(a way to bundle object types, relation types, behaviors, tools,
+prompts, and policies for a domain) and **`activegraph.packs.diligence`**
+(the first production-quality pack, evolved from v0.7's diligence
+example). The pack format is defined by what the first pack needs;
+the first pack is shipped in the same milestone.
+
+Packs were originally on the v1.0 roadmap. They moved forward because
+the runtime is now capable enough that the next risk is "no one knows
+how to use it well." A pack is the answer to that.
+
+## v0.9 #1. A pack is a Python package, not a manifest file
+
+A pack is a Python package with a known entry point. The "manifest"
+is a `Pack` object exported from the package, not a YAML or JSON
+file. Packs need to express real logic (behaviors, prompts, policies)
+and Python is the right language for that.
+
+```python
+# activegraph_diligence/__init__.py
+from activegraph.packs import Pack
+pack = Pack(
+    name="diligence",
+    version="0.1.0",
+    description="Investment diligence: claims, evidence, contradictions, memos.",
+    object_types=[...],
+    relation_types=[...],
+    behaviors=[...],
+    tools=[...],
+    policies=[...],
+    prompts=[...],
+    settings_schema=DiligenceSettings,
+)
+```
+
+## v0.9 #2. The `Pack` dataclass shape is locked
+
+```python
+@dataclass(frozen=True, eq=False)
+class Pack:
+    name: str
+    version: str
+    description: str = ""
+    object_types: tuple[ObjectType, ...] = ()
+    relation_types: tuple[RelationType, ...] = ()
+    behaviors: tuple = ()  # Behavior | LLMBehavior | RelationBehavior
+    tools: tuple = ()  # Tool
+    policies: tuple[PackPolicy, ...] = ()
+    prompts: tuple[PackPrompt, ...] = ()
+    settings_schema: type = EmptySettings  # Pydantic BaseModel subclass
+```
+
+`frozen=True` so packs are immutable after construction. `eq=False`
+with explicit `__eq__` / `__hash__` keyed on `(name, version)` —
+behaviors and tools are dataclasses, not hashable, so identity must
+not depend on them. Idempotent load (#5) hinges on this key.
+
+List arguments are converted to tuples in `__post_init__` via
+`object.__setattr__` so authors can pass lists; the field type is
+always a tuple at rest.
+
+## v0.9 #3. No module-import side effects
+
+(Revises the original v0.9 plan's per-pack import-time registry.)
+
+A pack module is safe to import without a runtime. Pack-aware
+decorators **do not register into any global state** — they attach
+metadata to the function and return a `Behavior` / `LLMBehavior` /
+`RelationBehavior` / `Tool` object. The `Pack(...)` constructor takes
+explicit lists; nothing about a pack module's import has runtime
+visibility.
+
+To make this explicit, pack-aware decorators are imported from a
+distinct path:
+
+```python
+from activegraph.packs import behavior, llm_behavior, relation_behavior, tool
+```
+
+These have identical signatures to the `activegraph.*` versions. The
+**only** difference is that they skip the global registry. Pack
+authors are told: inside a pack module, import decorators from
+`activegraph.packs`; in regular user scripts, import them from
+`activegraph`.
+
+This was the only viable resolution after rejecting:
+  (a) thread-local "pack-definition mode" (fragile),
+  (b) Pack.__init__ removing from the global registry (mutates global
+      state at construction),
+  (c) a single decorator with a `pack=...` kwarg (decorators look
+      identical but behave very differently — worse footgun).
+
+The pack authoring guide documents this convention. Tests in
+`tests/test_packs_no_side_effects.py` import every pack twice and
+assert the global registry stays empty.
+
+## v0.9 #4. Object and relation types are declared
+
+A pack declares the object types it introduces, with their data
+schemas as Pydantic `BaseModel` classes:
+
+```python
+class Claim(BaseModel):
+    text: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[str] = []
+
+object_types = [
+    ObjectType(name="claim", schema=Claim, description="A factual statement with confidence."),
+]
+```
+
+When a pack with object type `claim` is loaded, the runtime validates
+data passed to `graph.add_object("claim", data=...)` against `Claim`.
+Validation errors raise `PackSchemaViolation` — a subclass of
+`ValueError` — and the object is not created.
+
+`RelationType` declares `(name, source_types, target_types,
+description)`. `source_types` and `target_types` are tuples of object
+type names; empty means "any". Validation is enforced for
+`graph.add_relation` against loaded relation types.
+
+## v0.9 #5. Validation is post-load, not retroactive (load-order asymmetry, option (a))
+
+(Decision 5 from the lock-in discussion.)
+
+`graph.add_object` validates against a typed pack's schema ONLY for
+objects created **after** the pack is loaded. Objects created before
+the pack was loaded are NOT retroactively validated.
+
+The `pack.loaded` event is part of the event log, so replay enforces
+the same load order: if a run loads the diligence pack at event
+`evt_005`, replay must load the same pack at the same point.
+Mismatched load order is a `ReplayDivergenceError`.
+
+Creating a typed object **before** its pack is loaded is allowed —
+the type is unknown to the runtime and no schema applies. This is
+consistent with backward compatibility (v0–v0.8 had no schemas).
+
+## v0.9 #6. Pack loading is idempotent and conflict-explicit
+
+```python
+runtime.load_pack(diligence_pack)
+runtime.load_pack(diligence_pack)  # no-op
+```
+
+Idempotency key: `(pack.name, pack.version)`. Loading the same
+`(name, version)` twice is a no-op. Loading the same `name` with a
+different `version` raises `PackVersionConflictError`.
+
+Loading two packs that declare the same object type, relation type,
+behavior name (post-prefix), tool name (post-prefix), or policy name
+with different definitions raises `PackConflictError` at load time,
+naming both packs. No silent overrides. No "last pack wins."
+
+Conflict detection is performed BEFORE any state mutation — a
+conflicting `load_pack` call leaves the runtime exactly as it was.
+
+## v0.9 #7. Pack-scoped settings, primary form is typed injection
+
+Every pack declares a `settings_schema` (Pydantic `BaseModel`). The
+user provides settings at load time:
+
+```python
+runtime.load_pack(diligence_pack, settings=DiligenceSettings(
+    llm_model="claude-sonnet-4-5",
+    max_claims_per_document=20,
+    confidence_threshold_for_review=0.7,
+))
+```
+
+Three documented access forms, in order of preference:
+
+  1. **Type-annotated parameter injection (primary)** — the runtime
+     inspects the handler signature. Extra parameters (beyond
+     `event, graph, ctx[, out]`) whose type annotation matches a
+     loaded pack's `settings_schema` get the matching instance
+     injected by keyword.
+     ```python
+     def claim_extractor(event, graph, ctx, out, *, settings: DiligenceSettings):
+         if out.confidence < settings.confidence_threshold_for_review:
+             ...
+     ```
+  2. **`ctx.settings` (secondary)** — returns the settings instance
+     for the pack that owns the currently-executing behavior. Untyped
+     and convenient. Behaviors not owned by a pack get `None`.
+  3. **`ctx.pack_settings("other_pack")` (cross-pack)** — string-keyed
+     lookup of another pack's settings. Returns `None` if the pack
+     isn't loaded. Documented as a code smell when used for the
+     behavior's own pack; intended for the rare cross-pack case.
+
+If a pack has no configurable settings, `settings_schema =
+EmptySettings`. Passing `settings=` for a pack that takes
+`EmptySettings` is allowed but ignored.
+
+`runtime.load_pack(pack)` without `settings=` is allowed only if
+`settings_schema` accepts construction with no arguments. Otherwise
+`PackSettingsMissingError`.
+
+## v0.9 #8. Behaviors are namespace-prefixed: canonical strict, lookup lenient
+
+A behavior declared in the diligence pack with `name="claim_extractor"`
+is registered as `diligence.claim_extractor`. The fully-qualified form
+is the **canonical** identifier and appears in:
+
+  - the trace (`[behavior.started] diligence.claim_extractor ...`)
+  - metrics labels (`{behavior="diligence.claim_extractor"}`)
+  - error messages (`PackConflictError: ... diligence.claim_extractor ...`)
+  - `runtime.status()`'s `registered_behaviors`
+  - the replay manifest
+
+Lookups from user code are **lenient**: a short name resolves when
+unambiguous. Since #6 raises `PackConflictError` on duplicate names
+at load time, "unambiguous" is a load-time invariant.
+
+```python
+runtime.get_behavior("claim_extractor")          # works if unambiguous
+runtime.get_behavior("diligence.claim_extractor") # always works
+```
+
+The same rule applies to tools: `diligence.fetch_company_docs` is
+canonical, short forms work when unambiguous. LLM behaviors with
+`tools=["fetch_company_docs"]` resolve the short name through the
+same rule.
+
+## v0.9 #9. Pack tools are pack-scoped by default
+
+A tool declared in the diligence pack is registered as
+`diligence.fetch_company_docs`. The pack may opt to export a tool
+globally with `export_globally=True` on the `@tool` decorator, but
+the default is scoped. This prevents pack tools from polluting the
+global tool namespace and makes it explicit when a pack provides
+infrastructure intended for other packs.
+
+## v0.9 #10. Prompts: declared version + content hash, hash is the contract
+
+(Decision 2 from lock-in: declared version for humans, content hash
+for replay.)
+
+Pack prompts live in `prompts/` inside the pack package as `.md`
+files with **TOML frontmatter** between `---` delimiters:
+
+```markdown
+---
+version = "1.0.0"
+name = "claim_extractor"   # optional; defaults to filename without .md
+---
+You extract factual claims from a document...
+
+For each claim, return:
+- text
+- confidence (0.0-1.0)
+- supporting evidence (verbatim quote)
+```
+
+Frontmatter parsed with `tomllib` (stdlib, Python 3.11+). YAML
+deliberately not used — the codebase has avoided YAML and a tomllib
+parser is one stdlib import.
+
+Each prompt is loaded into a `PackPrompt(name, version, body,
+content_hash)`. The hash is `sha256(body.encode("utf-8")).hexdigest()`
+truncated to 16 hex chars (`"sha256:abcd...ef01"`). Whitespace in the
+body is included in the hash — formatting changes count as content
+changes.
+
+**The hash, not the version, is the replay contract.** When a pack
+loads, the runtime emits a `pack.loaded` event whose payload
+includes `{"prompts": {"claim_extractor": {"version": "1.0.0",
+"hash": "sha256:..."}}, ...}`. On replay, the same event must be
+emitted with the same hashes. A hash mismatch raises
+`ReplayDivergenceError`, and the error message includes both
+declared versions so an operator sees the change at a glance:
+`prompt "claim_extractor": replay expected hash sha256:abcd... (v1.0.0)
+but loaded prompt hashes to sha256:beef... (v1.0.0 — version
+unchanged, content drift)`.
+
+This catches "I upgraded the diligence pack and my old run now
+replays differently" *even when the author forgot to bump the
+version*. Declared version is for changelogs and operator messages,
+not for correctness.
+
+Helper: `activegraph.packs.load_prompts_from_dir(path) ->
+tuple[PackPrompt, ...]` scans a directory of `.md` files and
+returns the tuple suitable for `Pack(prompts=...)`. Errors
+(malformed frontmatter, missing version, IO failures) raise
+`PackPromptLoadError`.
+
+## v0.9 #11. Pack discovery via Python entry points
+
+Third-party packs register themselves under the `activegraph.packs`
+entry point group:
+
+```toml
+# pyproject.toml of a third-party pack
+[project.entry-points."activegraph.packs"]
+diligence-extension = "activegraph_diligence_extension:pack"
+```
+
+The framework can enumerate installed packs:
+
+```python
+from activegraph.packs import discover, load_by_name
+
+for entry in discover():
+    print(entry.name, entry.version)
+
+# Load by name from any installed pack:
+runtime.load_pack(load_by_name("diligence"), settings=...)
+```
+
+`discover()` uses `importlib.metadata.entry_points()` and is cached
+per process. Documentation states clearly: `pip install
+activegraph-diligence` + `load_by_name("diligence")` Just Works,
+and that's how third-party packs are distributed.
+
+The shipped `activegraph.packs.diligence` registers itself under
+this entry point group via `[project.entry-points."activegraph.packs"]`
+in the framework's own `pyproject.toml`.
+
+## v0.9 #12. Packs use the public API. No privileged access.
+
+Pack code uses the same public API as user code — pack-aware
+decorators (#3), `graph.add_object`, `ctx.view`, etc. Packs have no
+"escape hatch" to runtime internals. If a pack needs to do
+something user code can't do, that's a signal to extend the public
+API, not to give packs privileged access.
+
+Packs run with the same OS-level privileges as user code. **Packs
+are not sandboxed.** Installing a pack is equivalent to installing
+any Python package: it can read your files, make network calls, and
+exec arbitrary code in your process. Document this clearly in the
+pack authoring guide; trust model is at install time, not run time.
+
+## v0.9 #13. The pack.loaded event
+
+`pack.loaded` is emitted exactly once per `load_pack` call. Payload:
+
+```json
+{
+  "name":            "diligence",
+  "version":         "0.1.0",
+  "description":     "...",
+  "object_types":    ["claim", "evidence", ...],
+  "relation_types":  ["supports", "contradicts", ...],
+  "behaviors":       ["diligence.question_generator", ...],
+  "tools":           ["diligence.fetch_company_docs", ...],
+  "policies":        ["memo_approval", "risk_approval", ...],
+  "prompts": {
+    "claim_extractor": {"version": "1.0.0", "hash": "sha256:..."},
+    ...
+  },
+  "settings":        {<JSON-serialized settings>}
+}
+```
+
+Re-loading an already-loaded pack does NOT emit a duplicate
+`pack.loaded` event (#6 idempotency). The replay path verifies the
+event's payload byte-for-byte (after canonical JSON serialization).
+The `settings` block is included so settings drift between runs is
+visible in the diff.
+
+`pack.loaded` is in the `runtime.*`-style internal namespace from the
+runtime's perspective (it's runtime bookkeeping), but it is **not
+suppressed** from the queue — pack-aware behaviors can subscribe to
+`pack.loaded` to bootstrap. The Diligence pack does not do this; it's
+allowed.
+
+## v0.9 #14. The pack scaffolding command
+
+`activegraph pack new <name>` generates:
+
+```
+<name>/
+  pyproject.toml          # declares dep on activegraph; activegraph.packs entry point
+  <name>/                 # the Python package
+    __init__.py           # exports `pack`
+    object_types.py
+    behaviors.py
+    tools.py
+    prompts/
+      example_prompt.md
+  tests/
+    test_pack_loads.py    # smoke test: import pack, load into runtime
+  README.md
+```
+
+Click handles the command; same as the rest of the CLI. The
+generated `test_pack_loads.py` verifies the pack imports without
+side effects and loads into an in-memory runtime.
+
+The package name (directory and Python package) is the kebab→snake
+of the pack name: `pack new diligence-extension` produces directory
+`diligence-extension/` and Python package `diligence_extension/`.
+
+## v0.9 #15. Diligence pack scope (locked)
+
+Concretely, `activegraph.packs.diligence` provides:
+
+**Object types** (8): `company`, `document`, `question`, `claim`,
+`evidence`, `contradiction`, `risk`, `memo`.
+
+**Relation types** (6): `supports`, `contradicts`, `references`,
+`derived_from`, `addresses` (claim → question), `mitigates`
+(evidence → risk).
+
+**Behaviors** (7):
+  - `company_planner` (deterministic — bootstraps a `company` object
+    from `goal.created`)
+  - `question_generator` (LLM, one-shot from thesis — see #16)
+  - `document_researcher` (LLM + tools — fetches docs AND extracts
+    claims; the researcher's `ResearchFindings` schema produces
+    claims with evidence quotes in one turn loop, so a separate
+    `claim_extractor` behavior is redundant)
+  - `evidence_linker` (deterministic — safety net for evidence
+    objects that lack a `supports` edge to their claim)
+  - `contradiction_detector` (pattern subscription, deterministic)
+  - `risk_identifier` (LLM, `activate_after=8` so it fires once
+    claims have accumulated)
+  - `memo_synthesizer` (LLM)
+
+**Tools** (3, all pack-scoped):
+  `fetch_company_docs`, `search_filings`, `summarize_document`.
+For v0.9 these are stub tools backed by recorded fixtures (#17).
+
+**Policies** (2): `memo_approval` (memo writes require approval),
+`risk_approval` (risk objects require approval). Claim creation
+auto-applies.
+
+**Prompts**: one per LLM behavior, in `prompts/` with TOML
+frontmatter. Four total (`question_generator`,
+`document_researcher`, `risk_identifier`, `memo_synthesizer`).
+
+**Settings** (`DiligenceSettings`):
+  `llm_model: str = "claude-sonnet-4-5"`,
+  `max_documents_per_company: int = 5`,
+  `max_claims_per_document: int = 20`,
+  `confidence_threshold_for_review: float = 0.7`,
+  `min_questions: int = 8`, `max_questions: int = 15`.
+
+## v0.9 #16. Question generation is one-shot in v0.9
+
+(Decision 6 from lock-in.)
+
+The question generator runs ONCE per goal, produces between
+`min_questions` and `max_questions` questions from the thesis, and
+the run terminates when "all questions addressed or budget
+exhausted." Adaptive question generation (re-generating questions as
+claims and contradictions accumulate) is **v1.0** — it requires an
+evaluation story we don't have yet.
+
+The killer demo description is updated to reflect this: "watches
+questions get worked through, claims accumulate, contradictions
+surface" — questions don't grow over time, they get answered.
+
+## v0.9 #17. No contradiction resolver in v0.9
+
+(Decision 6 from lock-in.)
+
+The contradiction **detector** (pattern subscription on
+`(c1:claim)-[r:contradicts]->(c2:claim)`) is in scope and creates
+`contradiction` objects. The contradiction **resolver** (an LLM
+behavior that picks a winning claim) is **deferred to v1.0**.
+
+Why: the resolver adds a second LLM loop with its own prompt, its
+own determinism story, and its own evaluation problem ("did it
+resolve correctly?"). v0.9 surfaces contradictions as items
+requiring human review; the memo synthesizer lists them as "open
+questions / risks pending review."
+
+This is honest about what the pack can do today.
+
+## v0.9 #18. Recorded fixtures ship with the pack
+
+`activegraph/packs/diligence/fixtures/` ships inside the pack
+package. The fixtures contain LLM responses and tool outputs for
+three small companies. `examples/diligence_real_run.py`:
+
+  - Runs in **under 30 seconds in CI** without an API key, without
+    network access.
+  - Produces **three memos**, one per company, byte-for-byte
+    reproducible across runs.
+  - Is the integration test for the whole pack.
+  - Goes in the README's main example slot.
+
+Convention documented in the pack authoring guide: `fixtures/` is a
+sub-package of the pack. Third-party packs are encouraged to follow
+the same layout for reproducible demos.
+
+## v0.9 #19. The killer demo is the spec (verifiable memo bar)
+
+`examples/diligence_real_run.py`:
+
+  1. Imports `activegraph.packs.diligence`.
+  2. Creates a `Runtime` with Postgres backing (configurable; falls
+     back to SQLite for the demo), Prometheus metrics, JSON logging.
+  3. Loads the diligence pack with explicit `DiligenceSettings`.
+  4. Runs a goal against three fixture companies.
+  5. Watches questions get answered, claims accumulate, contradictions
+     surface, risks identified, memos drafted.
+  6. Inspects the trace — every diligence-owned behavior shows
+     `diligence.` prefix.
+  7. Demonstrates the `memo_approval` policy gating a memo write.
+  8. Forks one company's run with an alternative thesis setting.
+  9. Diffs to show which claims changed.
+  10. Exports the trace as JSONL.
+
+**Verifiable memo bar**:
+
+  - Three memos produced, one per company.
+  - Each memo has sections: Summary, Thesis Questions Addressed,
+    Key Claims (with evidence citations), Open Contradictions, Risks.
+  - Each memo cites evidence for every claim (zero uncited claims).
+  - Each memo surfaces ≥1 contradiction OR explicitly states "no
+    contradictions found" if fixtures don't produce any.
+  - Each memo surfaces ≥1 risk.
+  - The integration test asserts this structure exactly. Memo
+    *content quality* is bounded by the fixtures; the test is for
+    structure and provenance, not prose quality.
+
+## v0.9 #20. runtime.status() is log-derived (re-affirm)
+
+Already true for v0.8 but worth pinning here: `runtime.status()` is
+computed from the event log, not from in-memory caches. After
+`load_pack`, status reflects the `pack.loaded` event. Live runtime
+and `activegraph inspect` see identical state because both read from
+the same source of truth. This is the property that lets operators
+trust the dashboard.
+
+The operator guide gets a short section on this property.
+
+## v0.9 #21. Backward compatibility is absolute
+
+Every v0–v0.8 test passes unchanged. No existing API changes shape.
+`Runtime.__init__` is unchanged. The global `@behavior` / `@tool`
+decorators behave exactly as before. The `Graph.add_object` path is
+unchanged in the no-packs-loaded case.
+
+Schema validation is a load-order-asymmetric ADDITION (#5): it
+applies only when a typed pack has been loaded for that object type.
+Pre-load and unloaded-type behavior is the v0.8 behavior.
+
+## v0.9 #22. v0.7 diligence example stays in place
+
+(Decision 14 from the original plan.)
+
+`examples/diligence_with_tools.py` from v0.7 is **not** removed and
+**not** rewritten. The pack is a new, hardened version. The example
+demonstrates building a custom diligence behavior from primitives;
+the pack demonstrates *using* a pre-built diligence system. Two
+different audiences, both supported. The README points new users at
+the pack; the v0.7 example remains the canonical custom-behavior
+walkthrough.
+
+## v0.9 #23. Python version floor: 3.11
+
+(Decision 2 from lock-in: tomllib is stdlib in 3.11+.)
+
+`pyproject.toml`'s `requires-python` moves from `>=3.10` to
+`>=3.11`. The 3.10 classifier is dropped. tomllib is used in the
+prompt loader; no third-party YAML/TOML dependency is added.
+
+## v0.9 #24. Documentation is part of the pack
+
+Each pack ships a `docs/` directory in its package with at minimum:
+README, settings reference, behavior reference, prompt reference. The
+shipped Diligence pack does this. The scaffolding command creates
+stubs. The pack authoring guide (`docs/pack_authoring.md`) is the
+shared reference for the pack format itself.
+
+## v0.9 #25. Trace format additions
+
+The trace printer gains rendering for `pack.loaded` events:
+
+```
+[pack.loaded]    diligence v0.1.0 (8 object_types, 6 relation_types,
+                 7 behaviors, 3 tools, 2 policies, 5 prompts)
+```
+
+Trace causal chains follow `pack.loaded` provenance back to the
+`load_pack` call site (recorded `caused_by` is the lifecycle event
+that triggered the load).
+
+The JSONL export includes `pack.loaded` events verbatim.
+
+## v0.9 #26. What v0.9 deliberately does NOT add
+
+- Pack marketplace, registry, or distribution mechanism (v1.0+)
+- Multiple reference packs — Memory pack, Research pack (v1.0)
+- Pack versioning beyond a string in the manifest (v1.0+)
+- Pack signing or trust (v1.0+)
+- Pack sandboxing or capability restrictions (intentional; #12)
+- Streaming LLM responses (v1.0+)
+- Multi-model routing (v1.0+)
+- Adaptive question generation (#16)
+- Contradiction resolution as an LLM behavior (#17)
+- Web UI (never, per prior decisions)
+
+Stay scoped. v0.9 is the first milestone with a "product" in it —
+the Diligence pack must be polished enough that a developer who
+installs activegraph + activegraph.packs.diligence and follows the
+README can produce a useful memo on day one. If the pack feels like
+a toy, the milestone hasn't shipped. Polish over breadth.

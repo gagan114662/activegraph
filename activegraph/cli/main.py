@@ -132,6 +132,61 @@ def cli() -> None:
     """Inspect, replay, fork, diff, export, and migrate activegraph runs."""
 
 
+# ---- pack ---------------------------------------------------------------
+
+
+@cli.group("pack")
+def cmd_pack() -> None:
+    """Pack-related commands: scaffolding, listing installed packs."""
+
+
+@cmd_pack.command("new")
+@click.argument("name")
+@click.option(
+    "-o", "--output-dir", default=".", show_default=True,
+    help="Parent directory under which the new pack package is created.",
+)
+def cmd_pack_new(name: str, output_dir: str) -> None:
+    """Scaffold a new pack package skeleton (CONTRACT v0.9 #14).
+
+    Generates: pyproject.toml, the Python package with stubs for
+    object types, behaviors, tools, settings, an example prompt, a
+    smoke test, and a README.
+    """
+    from pathlib import Path
+
+    from activegraph.packs.scaffold import scaffold_pack
+
+    try:
+        root = scaffold_pack(Path(output_dir), name)
+    except FileExistsError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(EXIT_GENERIC_ERROR)
+    except ValueError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(EXIT_USAGE_ERROR)
+    click.echo(f"created {root}")
+    click.echo("next steps:")
+    click.echo(f"  cd {root}")
+    click.echo("  pip install -e .")
+    click.echo("  pytest")
+
+
+@cmd_pack.command("list")
+def cmd_pack_list() -> None:
+    """List installed packs discovered via the activegraph.packs entry
+    point group (CONTRACT v0.9 #11).
+    """
+    from activegraph.packs import discover
+
+    entries = discover()
+    if not entries:
+        click.echo("no packs installed")
+        return
+    for entry in entries:
+        click.echo(f"  {entry.name:24s} {entry.version:10s} {entry.entry_point}")
+
+
 # ---- inspect ------------------------------------------------------------
 
 
