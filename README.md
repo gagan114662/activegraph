@@ -154,6 +154,8 @@ Expected trace:
 [object.created]          claim#3 "Market appears early but growing."
 [event.emitted]           task.completed task_id=task#1
 [behavior.completed]      researcher
+[behavior.started]        researcher  (matched object.created: task#2)
+[behavior.completed]      researcher
 [relation_behavior.started] unblock  (matched task.completed on depends_on edge)
 [patch.applied]           task#2 status: blocked -> open
 [behavior.completed]      unblock

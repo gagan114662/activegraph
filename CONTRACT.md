@@ -7,7 +7,7 @@ relevant section.
 
 ## 1. Identity and IDs
 
-- Object IDs: `{type}#{n}` — e.g. `task#1`, `claim#3`. Per-type monotonic counter starting at 1.
+- Object IDs: `{type}#{n}` — e.g. `task#1`, `task#2`, `claim#3`. Single **global** monotonic counter prefixed by the object's type (so the third object created in a run gets `#3` regardless of type). This matches the README's expected quickstart trace.
 - Event IDs: `evt_NNN` zero-padded to at least 3 digits, monotonic per graph, starting at `evt_001`.
 - Relation IDs: `rel_NNN`.
 - Patch IDs: `patch_NNN`.
