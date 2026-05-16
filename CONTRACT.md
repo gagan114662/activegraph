@@ -337,6 +337,18 @@ and compares the new event stream to the recorded one. First mismatch
 raises `ReplayDivergenceError(event_id, expected, actual)`. Debugging
 mode, not always-on.
 
+### Known limitation: payload drift
+
+v0.5 compares the event-type stream (id, type). It catches categorical
+non-determinism — different number of events, different types in
+different positions — which is what actually breaks resume in v0.5.
+Payload-only drift (same shape, different values, e.g. a random number
+inside a payload) is NOT detected. This is deferred to v0.6, when LLM
+behaviors land and payload non-determinism becomes the dominant failure
+mode (temperature, sampling). The v0.6 tightening will compare full
+event payloads with a configurable allow-list of fields that may drift
+(e.g. timestamps).
+
 ## v0.5 #8. In-flight loss + unfired re-queue
 
 In-flight behavior loss on crash is accepted: behaviors that started

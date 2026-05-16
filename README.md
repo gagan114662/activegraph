@@ -597,10 +597,15 @@ boundary:
 [runtime.idle]            ready to resume
 ```
 
-After replay, events that were sitting in the queue when the runtime
-stopped (e.g. budget exhausted) are re-queued and fire on the next
-`run_until_idle` / `run_goal`. Events that already had a behavior start
-on them are not re-fired.
+### Queue recovery on load
+
+When the runtime stops (budget exhausted, deliberate pause, process
+crash), there may be events that were already emitted but not yet
+popped from the queue. On load, those events are detected — any event
+that has no `behavior.started` referencing it in the log — and pushed
+back into the queue so they fire on the next `run_until_idle` /
+`run_goal`. Events that already had a behavior start on them are not
+re-fired.
 
 **Caveat (in-flight loss):** if a behavior was *mid-execution* when the
 runtime died (`behavior.started` emitted but no `behavior.completed` /

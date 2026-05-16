@@ -421,6 +421,11 @@ class Runtime:
 
         If `run_id` is None, loads the most recently appended-to run
         (CONTRACT v0.5 #6).
+
+        `replay_strict=True` re-fires behaviors from the recorded seed
+        events and compares the resulting event-type stream (id, type) to
+        the log. KNOWN LIMITATION (v0.5): payload-only drift is not
+        detected; see CONTRACT v0.5 #7. Tightens in v0.6 with LLMs.
         """
         from activegraph.store.sqlite import SQLiteEventStore
 
@@ -554,6 +559,18 @@ def _requeue_unfired(rt: "Runtime", events: list[Event]) -> None:
     """Push events that haven't yet triggered any behavior back into the queue.
 
     See CONTRACT v0.5 diff #8 in CONTRACT.md for the rationale.
+
+    INVARIANT (v0.5 only): under the single-threaded, run-to-completion loop
+    (CONTRACT #10), an event has either been popped — in which case ALL
+    matching behaviors have already had behavior.started emitted on it, or
+    the runtime crashed before the loop could pop the next event. There is
+    no partial-fanout state. So "no behavior.started ever referenced this
+    event id" is equivalent to "this event was still in the queue when the
+    runtime stopped". When v1 introduces parallelism (decision #16: out of
+    scope for v0.5), this heuristic breaks — a fanout where 2 of 5 matched
+    behaviors started before the crash would be re-queued, double-firing
+    the 2 that did start. Revisit this function at the same time as the
+    parallel-loop redesign.
     """
     fired_on: set[str] = set()
     for e in events:
