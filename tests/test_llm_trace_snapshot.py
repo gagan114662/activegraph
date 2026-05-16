@@ -46,7 +46,7 @@ class _DeterministicProvider:
     latency — required for trace stability across runs."""
 
     def complete(self, *, system, messages, model, max_tokens, temperature,
-                 top_p, output_schema, timeout_seconds):
+                 top_p, output_schema, timeout_seconds, tools=None):
         parsed = ClaimList(claims=[Claim(text="Sample claim.", confidence=0.9)])
         return LLMResponse(
             raw_text=parsed.model_dump_json(),

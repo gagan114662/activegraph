@@ -52,6 +52,7 @@ class ScriptedProvider:
         top_p: float,
         output_schema: Optional[type],
         timeout_seconds: float,
+        tools: Optional[list] = None,
     ) -> LLMResponse:
         self.call_log.append(
             {
@@ -63,6 +64,7 @@ class ScriptedProvider:
                 "output_schema": output_schema,
                 "max_tokens": max_tokens,
                 "timeout_seconds": timeout_seconds,
+                "tools": list(tools) if tools else None,
             }
         )
         out = self.respond_fn(messages, output_schema)

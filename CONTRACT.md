@@ -856,3 +856,421 @@ The honest framing: drift is now detected at prompt-construction
 time; provider-side response drift remains best-effort. Revisits
 with v0.7 multi-provider routing, when the question becomes
 unavoidable.
+
+---
+
+# Active Graph v0.7 — Tools + advanced matching addendum
+
+v0.7 makes tool use a first-class primitive (not buried inside LLM
+behaviors) and lands Cypher-style pattern subscriptions plus
+event-count temporal predicates. The two are bundled because they
+share a hard problem: non-determinism the runtime didn't cause. A
+tool call hits an external system whose response can change between
+runs; a pattern subscription fires based on graph shape that depends
+on past behavior. Both stress the replay and audit guarantees in
+similar ways. Solving them together produces a coherent v0.7.
+v0/v0.5/v0.6 decisions all remain in force; the items below are
+additions and a handful of explicit narrowings.
+
+## v0.7 #1. Tools are not LLM behaviors
+
+Tools are a primitive. `@tool` registers a callable with metadata and
+schemas; the runtime invokes them via an event pair
+(`tool.requested` / `tool.responded`) the same way LLM calls flow
+through `llm.requested` / `llm.responded`. An LLM behavior that uses
+tools is composing two primitives: an LLM call and one or more tool
+calls. The runtime orchestrates the loop between them. This is what
+keeps tool-using behaviors auditable.
+
+## v0.7 #2. `@tool` and the global tool registry
+
+```python
+@tool(
+    name="web_fetch",
+    description="...",
+    input_schema=WebFetchInput,
+    output_schema=WebFetchOutput,
+    cost_per_call=Decimal("0.001"),
+    timeout_seconds=10.0,
+    deterministic=False,
+)
+def web_fetch(args, ctx): ...
+```
+
+Decorator pushes into a module-level `_TOOL_REGISTRY` parallel to the
+behavior registry. Tests call `clear_tool_registry()`. `Runtime(graph,
+tools=[...])` overrides the global registry, mirroring `behaviors=[...]`.
+Each LLM behavior's `tools=[t1, t2, ...]` is resolved at startup;
+missing tools raise `MissingToolError` at `_ensure_registry()` time.
+
+`Tool.fn(args: InputSchema, ctx: ToolContext) -> OutputSchema` is the
+signature. Inputs are validated before invocation; outputs after.
+Mismatches map to `tool.invalid_input` / `tool.invalid_output`.
+
+## v0.7 #3. Tool invocation is an event pair
+
+`tool.requested` payload: `behavior`, `tool`, `args_hash`, `args`
+(canonicalized), `call_id` (LLM-provided), `cache_hit`,
+`deterministic`. `tool.responded` payload: same plus `output`,
+`error` (None on success, `{reason, message, ...}` on failure),
+`latency_seconds`, `cost_usd`. Cache key:
+`sha256(canonical_json({tool_name, args_normalized}))`.
+Args normalization: Pydantic models → `model_dump(mode="json")`,
+Decimal → str, dicts sorted by key at JSON-dump time.
+
+## v0.7 #4. LLM ↔ tool turn loop is the runtime's job
+
+When an `@llm_behavior` declares `tools=[...]`, the runtime owns the
+multi-turn loop:
+
+1. Call LLM with tools in the request
+2. If response carries `tool_calls`, dispatch each: emit
+   `tool.requested`, invoke, emit `tool.responded`, append result as
+   `role="tool"` message
+3. Re-call LLM
+4. Repeat until non-tool response or `max_tool_turns` (default 6) hits
+
+The handler signature stays `(event, graph, ctx, llm_output) -> None`.
+Handler sees only the final parsed output — never raw tool calls.
+
+`LLMMessage` gains `role="tool"` and `tool_use_id` + `tool_name`
+fields so providers can echo results back. `LLMResponse` gains
+`tool_calls: Optional[list[ToolCall]]`. `LLMProvider.complete()` gains
+`tools: Optional[list[dict]] = None`. All backward-compatible: omitted
+defaults preserve v0.6 behavior.
+
+## v0.7 #5. Tool context is restricted
+
+```python
+@dataclass
+class ToolContext:
+    behavior_name: str
+    event_id: str
+    frame: Optional[Frame]
+    idempotency_key: str
+    timeout_seconds: float
+    logger: logging.Logger
+```
+
+NO graph reference. Tools that need graph read access close over a
+`Graph` via a factory — see `make_graph_query_tool(graph)`. The
+constraint is intentional: tools that touch the graph should be
+obvious, not ambient. `idempotency_key` is an opaque pass-through:
+tool authors forward it to external APIs that support idempotency
+tokens; the runtime never uses it for dedupe (that's the cache's job).
+
+Tools cannot mutate the graph directly. If a tool wants to record
+information, it returns it in its output and the calling behavior's
+handler writes the mutation. Same constraint as `BehaviorGraph` for
+behaviors: actions are explicit, mutations are auditable.
+
+## v0.7 #6. Tool failure modes are structured
+
+Mirror of v0.6 #11. `ToolError(reason, message, payload_extras)` is
+the carrier; the runtime maps it into `tool.responded.error` AND
+`behavior.failed.reason`. Codes:
+
+- `tool.timeout` — exceeded `timeout_seconds`
+- `tool.network_error` — provider / network failure
+- `tool.invalid_input` — input schema validation failed
+- `tool.invalid_output` — output schema validation failed
+- `tool.execution_error` — tool function raised
+- `tool.unknown_tool` — LLM asked for a tool the behavior didn't declare
+- `tool.fixture_missing` — `RecordedToolProvider` had no fixture
+- `tool.max_turns_exhausted` — exceeded `max_tool_turns`
+- `budget.tool_calls_exhausted` — would exceed `max_tool_calls`
+- `budget.cost_exhausted` — tool cost would exceed `max_cost_usd`
+
+No silent retries. If a developer wants retry behavior, they subscribe
+to `behavior.failed`.
+
+## v0.7 #7. Tool determinism — DECISION: serve-from-cache by default
+
+**Locked decision (per push-back exchange):**
+
+ALL tools (deterministic or not) serve from cache by default on
+replay. The opt-in `Runtime(replay_reinvoke_deterministic=True)`
+flag is what actually lets deterministic tools re-invoke during
+replay.
+
+The reasoning: even a deterministic tool's correctness depends on
+the reconstructed graph state matching the recorded state at the
+moment of the call. The runtime cannot cheaply verify that without
+doing essentially the same work as the cache lookup. Cheaper and
+more honest to cache-by-default; `replay_reinvoke_deterministic`
+stays available for the "would this still hold?" workflow.
+
+A divergent prior event poisons every deterministic-tool call after
+it — by serving from cache by default we localize the failure to a
+visible cache mismatch rather than a silent re-invocation against
+wrong inputs.
+
+## v0.7 #8. Cypher subset — LOCKED grammar
+
+A strict subset, refused with `UnsupportedPatternError` pointing at
+the offending token. The full subset:
+
+**Supported**:
+- Node patterns: `(var:type {prop: value})` — properties are EQUALITY ONLY
+- Relationships: `(a)-[var:rel_type]->(b)` and `(a)<-[var:rel_type]-(b)`
+- Multi-hop linear chains: `(a)-[:r1]->(b)-[:r2]->(c)`
+- WHERE clauses with `AND` and `NOT`
+- `NOT EXISTS { sub_match }`
+- Property access: `a.confidence > 0.7` (auto-routes through `a.data.<field>`)
+- Comparison operators: `=`, `<`, `>`, `<=`, `>=`, `!=`, `<>`
+- Literals: int, float, string (single or double quoted), `TRUE`,
+  `FALSE`, `NULL`
+- Relationship variable binding `[r:type]` — included per push-back
+  exchange because it's cheap and a contradiction-handler that wants
+  to delete the relation needs it
+
+**Refused** (with token-pinned error):
+- `OR` in WHERE — register two behaviors instead. Disjunction makes
+  matchers either back-track or eval-both-paths; register-two is
+  cleaner.
+- `RETURN` — patterns produce bindings via `ctx.matches`, not via a
+  RETURN clause; precise parser error saves an hour of confusion
+- `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `MERGE`, `CREATE`,
+  `SET`, `DELETE`, `DETACH`, `REMOVE`, `FOREACH`, `CALL`, `LIMIT`,
+  `SKIP`, `ORDER`
+- Variable-length paths (`-[*]-`)
+- Aggregation
+- Subqueries beyond `NOT EXISTS`
+- Undirected edges (`(a)-[:r]-(b)`) — use a directed shape
+- Edges without a type (`(a)-[]->(b)`)
+- Node `{prop: value}` with non-literal values — comparisons go in WHERE
+
+## v0.7 #9. Pattern compilation happens at registration
+
+The decorator parses + compiles immediately. Invalid syntax fails at
+import time, not at runtime. The compiled `PatternMatcher` is stored
+on the behavior dataclass; `runtime.Registry.match()` calls
+`matcher.matches(event, graph)` on every dispatch.
+
+## v0.7 #10. Pattern evaluation bound — DECISION: live-only
+
+Wall-clock budgets on replay produce spurious divergence on slower
+CI. Pattern-evaluation budgets are enforced live only, skipped on
+replay. This matches how any timeout should be handled on replay —
+replay is not subject to live-time constraints because the events
+already happened. v0.7 does not actually ship a configurable
+`max_pattern_evaluation_ms` knob; instead, evaluation is bounded by
+the natural graph size and complexity. If pattern evaluation becomes
+an actual bottleneck before v1, we add the knob (and document it as
+live-only).
+
+## v0.7 #11. Behaviors can mix event-type and pattern subscriptions
+
+With both `on=[...]` and `pattern=...`, BOTH must hold. Pattern-only
+behaviors (no `on=`) check every non-lifecycle event. Lifecycle
+events (`behavior.*`, `relation_behavior.*`, `runtime.*`, `llm.*`,
+`tool.*`, `pattern.*`) are excluded from pattern-only checks —
+otherwise patterns would re-fire endlessly on their own scheduling
+events.
+
+Either-or semantics? Register two behaviors. Don't add OR to the
+pattern grammar.
+
+## v0.7 #12. Pattern matches are passed via `ctx.matches`
+
+`ctx.matches: list[Match]` where each `Match` binds variable names to
+object ids (for nodes) or relation ids (for `[r:type]` rels). Empty
+list for behaviors without a pattern. **Fire-once-per-event**, not
+once per match — iterating bindings is the developer's job.
+
+## v0.7 #13. `activate_after` — LOCKED: event-count only
+
+```python
+@behavior(on=["object.created"], activate_after=2)        # int
+@behavior(on=["object.created"], activate_after="2 events")  # string form
+```
+
+Per the push-back exchange: event-count only for v0.7. Wall-clock
+delays drag in a clock-source abstraction (full subsystem), break
+determinism under replay, and change nothing about the demos.
+Event-count composes with the tick model and replays for free.
+
+Wall-clock unit strings (`"5 minutes"`, `"2 seconds"`, etc.) raise
+`ValueError` at decoration with a pointer to this contract item.
+
+The runtime maintains a `DelayedQueue` alongside the main FIFO. On
+schedule: emit `behavior.scheduled` and push an entry tagged with
+`fire_at_event_count = current_tick + N`. The main loop drains the
+queue first, then checks the delayed queue for due entries.
+
+**At fire time, `where=` is re-checked against the current graph
+state.** If it no longer holds, the invocation is silently skipped
+(no extra event). The trace shows the original `behavior.scheduled`
+without a matching `behavior.started` — sufficient evidence the
+condition lapsed.
+
+Escape hatch for wall-clock: the user calls `runtime.tick()` from
+their own loop and injects `timer.fired` events on a wall-clock
+schedule. v1+ extension point if anyone actually needs it.
+
+## v0.7 #14. Tool budget integration
+
+`max_tool_calls: int | None` added to known budget keys (already
+shipped as a stub in v0.6). When a tool call would exceed, the tool
+is not invoked, `behavior.failed reason="budget.tool_calls_exhausted"`
+fires, the loop continues. `max_cost_usd` is shared between LLM and
+tool costs — they're both dollars.
+
+`_budget_reason()` maps internal limit names (e.g. `max_tool_calls`)
+to v0.7 reason codes (`budget.tool_calls_exhausted`) so users see the
+consistent vocabulary instead of internal keys.
+
+## v0.7 #15. Recorded tool mode
+
+`RecordedToolProvider(fixtures_dir)` reads `<tool_name>/<args_hash>.json`
+and serves on hit; misses raise `ToolError(reason="tool.fixture_missing")`.
+`RecordingToolProvider(inner_invoker, fixtures_dir)` wraps another
+invoker and persists each response as a fixture. Use once with
+`@pytest.mark.records_tools` opt-in to seed fixtures, then commit and
+run thereafter against `RecordedToolProvider`.
+
+Fixture file shape — `recorded_at` OUTSIDE the hashed body, same as
+v0.6 LLM fixtures:
+
+```json
+{
+  "tool":        "web_fetch",
+  "args_hash":   "<sha256_hex>",
+  "recorded_at": "2026-05-15T10:32:01Z",
+  "args":        { ... only this contributes to the hash ... },
+  "output":      { ... },
+  "error":       null,
+  "latency_seconds": 0.8,
+  "cost_usd":    "0.001"
+}
+```
+
+## v0.7 #16. Two reference tools
+
+- `web_fetch` (`activegraph.tools.web_fetch`) — stdlib `urllib` HTTP
+  GET. No third-party dependency. `deterministic=False`. Production
+  use should generally wrap a real HTTP client.
+- `graph_query` — built via `make_graph_query_tool(graph)` factory.
+  Operates on the graph itself through the same event-sourced
+  invocation path as any other tool. Marked `deterministic=True`
+  (subject to the v0.7 #7 replay caveat).
+
+`graph_query` is the demonstration that the tool primitive is
+general — not just an "external API" escape hatch.
+
+## v0.7 #17. Demo is the contract
+
+`examples/diligence_with_tools.py` was written before any of the
+v0.7 runtime existed. Same discipline as v0 #17, v0.5 #20, v0.6 #16.
+The demo exercises:
+
+- `@behavior` planner that bootstraps the run
+- `@llm_behavior` `question_generator` (no tools)
+- `@llm_behavior` `researcher` (tools=[web_fetch, graph_query])
+- pattern-subscribed `@llm_behavior` `critic` for contradictions
+- `@behavior` `nag` with `activate_after=2`
+- save + fork with `replay_llm_cache=True` AND `replay_tool_cache=True`
+- causal chain that crosses both LLM and tool boundaries
+- two traces printed: parent with live calls, fork with all-cached
+
+## v0.7 #18. Trace format additions
+
+New `[...]` tags, all snapshot-tested:
+
+```
+[tool.requested]      evt_NNN  behavior  tool=name args_hash=AAA cache_hit=false deterministic=true
+[tool.responded]      evt_NNN  behavior  tool=name latency=X.Xs cost=$X.XXX
+[pattern.matched]     evt_NNN  behavior  matches=N
+[behavior.scheduled]  evt_NNN  behavior  activate_after=N_events
+```
+
+`args_hash` is truncated to the first 8 hex chars in the trace for
+readability (full hash is in the event payload). Cache hits omit
+`latency` and `cost`. Tool errors render with `error=tool.<reason>`.
+
+`[llm.requested]` gains `turn=N` (omitted for turn 0) and
+`prompt_normalized=true` (the v0.6 follow-up: surfaces that
+volatile-field stripping ran in prompt assembly, so when fork-cache
+behavior surprises someone six months from now the trace tells them
+what happened without them having to read the assembler source).
+
+## v0.7 #19. Provenance gets `tool_request_event_ids`
+
+When an object/relation/patch is created inside an `@llm_behavior`
+handler whose turn loop invoked tools, its provenance includes
+`tool_request_event_ids: list[str]` enumerating every `tool.requested`
+event that contributed to the final LLM output. Auto-stamped by
+`BehaviorGraph._tool_request_event_ids`; behaviors cannot set it.
+
+`trace.causal_chain(object_id)` walks the LLM round-trip first
+(`llm.requested` + `llm.responded`), then enumerates each tool
+round-trip (`tool.requested` + `tool.responded`), then continues up
+the `caused_by` chain to the source event. One walk: full lineage
+from a claim → LLM call → every tool call → source documents → goal.
+
+## v0.7 #20. Per-turn LLM/tool cache with ordering verification
+
+Per push-back agreement: per-turn cache (not consolidated). The
+sequence `(llm_response, tool_call, tool_response, llm_response, ...)`
+is itself a small state machine. Strict-replay verifies each turn's
+prompt hash against the recorded sequence; mismatch raises
+`ReplayDivergenceError` pinned to the offending `llm.requested` event
+id (same divergence-pinning pattern as v0.6 #8).
+
+Per-turn keys preserve the fork-and-mutate-one-tool workflow.
+Consolidated keys would lock the loop into all-or-nothing replay.
+
+## v0.7 #21. LLM cache round-trips `tool_calls`
+
+`LLMCache.get()` / `record()` / `from_events()` all preserve
+`tool_calls` so a cached LLM response produces the same turn-loop
+shape as a live one. Without this, a fork's cached first turn would
+not trigger the tool re-dispatch and would fail with
+`llm.parse_error`. Test coverage: `tests/test_tool_replay.py`.
+
+## v0.7 #22. Backward compatibility
+
+All v0 / v0.5 / v0.6 tests pass unchanged (147 of them). v0/v0.5/v0.6
+trace snapshots stay byte-identical EXCEPT the v0.6 `llm.requested`
+line, which gains the trailing `prompt_normalized=true` flag (the
+v0.6 follow-up bundled into v0.7). The v0.6 snapshot was updated
+in the same commit; the README's expected v0.6 trace block is updated
+to match.
+
+`Runtime(graph)` without `tools=` or `@tool` decorators behaves
+exactly as v0.6 did. The new `MissingToolError` only fires when an
+`@llm_behavior` declares a tool the runtime cannot find at startup.
+`LLMProvider.complete(..., tools=None)` is the default — providers
+that ignore the kwarg keep working.
+
+## v0.7 #23. Out of scope
+
+- Streaming LLM responses (v0.8+)
+- Multi-model routing / fallback (v0.8+)
+- Real-time graph subscriptions for external UIs (v1.0+)
+- Distributed runtime (v1.0+)
+- Packs (v1.0)
+- Wall-clock `activate_after` (v1+ if anyone actually needs it)
+- `OR` in pattern WHERE clauses (v1.0+ once indexing makes it cheap)
+- Variable-length paths in patterns (v1.0+)
+- Configurable `max_pattern_evaluation_ms` knob (added when an actual
+  bottleneck shows up)
+- Tool implementations beyond `web_fetch` + `graph_query`
+
+If a v0.7 PR drifts toward any of these, reject.
+
+## v0.7 #24. API-first
+
+`examples/diligence_with_tools.py` was written before any of the
+runtime existed. Same discipline as v0 #17, v0.5 #20, v0.6 #16.
+
+## v0.7 #25. Tests don't hit live anything
+
+CI runs the suite without `ANTHROPIC_API_KEY` and without network
+access. No test makes a real LLM call or a real HTTP fetch.
+`RecordedLLMProvider` + `RecordedToolProvider` are the production
+fixture paths. The `@tool web_fetch` reference implementation uses
+stdlib `urllib` so it's not a network dependency at import time, but
+no test actually calls it against a URL — the demo's scripted
+provider serves canned URL responses.
+

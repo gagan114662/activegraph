@@ -1,0 +1,13 @@
+[goal.created]            user: "Tool demo"
+[behavior.started]        planner
+[object.created]          doc#1 "d"
+[behavior.completed]      planner
+[behavior.started]        ex  (matched object.created: doc#1)
+[llm.requested]           evt_006  ex  model=claude-sonnet-4-5 prompt_normalized=true
+[llm.responded]           evt_007  ex  tokens_in=120 tokens_out=24 cost=$0.001 latency=0.5s
+[tool.requested]          evt_008  ex  tool=my_tool args_hash=c2318121 deterministic=true
+[tool.responded]          evt_009  ex  tool=my_tool latency=0.0s cost=$0.001
+[llm.requested]           evt_010  ex  model=claude-sonnet-4-5 turn=1 prompt_normalized=true
+[llm.responded]           evt_011  ex  tokens_in=120 tokens_out=24 cost=$0.001 latency=0.5s
+[behavior.completed]      ex
+[runtime.idle]            queue empty, budget remaining

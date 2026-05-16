@@ -36,6 +36,7 @@ class BehaviorGraph:
         caused_by: Optional[str],
         frame_id: Optional[str],
         llm_request_event_id: Optional[str] = None,
+        tool_request_event_ids: Optional[list[str]] = None,
     ) -> None:
         self._graph = graph
         self._actor = actor
@@ -45,6 +46,14 @@ class BehaviorGraph:
         # @llm_behavior handler, every object/relation/patch it creates
         # carries the originating llm.requested event id in provenance.
         self._llm_request_event_id = llm_request_event_id
+        # CONTRACT v0.7 #19: when the LLM behavior's turn loop invoked
+        # tools, the tool.requested event ids are stamped into the
+        # provenance of every object/relation/patch the handler
+        # creates. Causal-chain walks can then enumerate every tool
+        # call that contributed to a claim.
+        self._tool_request_event_ids: list[str] = list(
+            tool_request_event_ids or []
+        )
         self.counters = Counters()
 
     # ---- mutators ----
@@ -57,6 +66,7 @@ class BehaviorGraph:
             caused_by=self._caused_by,
             frame_id=self._frame_id,
             llm_request_event_id=self._llm_request_event_id,
+            tool_request_event_ids=self._tool_request_event_ids,
         )
         self.counters.objects_created += 1
         return obj
@@ -77,6 +87,7 @@ class BehaviorGraph:
             caused_by=self._caused_by,
             frame_id=self._frame_id,
             llm_request_event_id=self._llm_request_event_id,
+            tool_request_event_ids=self._tool_request_event_ids,
         )
         self.counters.relations_created += 1
         return rel
@@ -89,6 +100,7 @@ class BehaviorGraph:
             caused_by=self._caused_by,
             frame_id=self._frame_id,
             llm_request_event_id=self._llm_request_event_id,
+            tool_request_event_ids=self._tool_request_event_ids,
         )
         self.counters.patches_applied += 1
         return patch
@@ -111,6 +123,7 @@ class BehaviorGraph:
             caused_by=self._caused_by,
             frame_id=self._frame_id,
             llm_request_event_id=self._llm_request_event_id,
+            tool_request_event_ids=self._tool_request_event_ids,
         )
         self.counters.patches_proposed += 1
         return patch

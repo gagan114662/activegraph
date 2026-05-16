@@ -43,6 +43,13 @@ class Behavior:
     creates: list[str] = field(default_factory=list)
     budget: Optional[dict[str, Any]] = None
     priority: int = 0  # reserved; v0 ties resolved by registration order
+    # CONTRACT v0.7 #8 / #9 / #11. A Cypher subset pattern string.
+    # Compiled at registration time. None = event-type-only matching
+    # (CONTRACT #10).
+    pattern: Optional[str] = None
+    pattern_matcher: Any = None  # PatternMatcher; set by Registry at startup
+    # CONTRACT v0.7 #13. Event-count delay. None = fire immediately.
+    activate_after: Optional[int] = None
 
     def run(self, event, graph, ctx) -> None:
         self.fn(event, graph, ctx)
@@ -59,6 +66,11 @@ class RelationBehavior:
     creates: list[str] = field(default_factory=list)
     budget: Optional[dict[str, Any]] = None
     priority: int = 0
+    # Pattern subscriptions also work on relation behaviors. The match
+    # fires once per (event, relation) pair when the pattern matches.
+    pattern: Optional[str] = None
+    pattern_matcher: Any = None
+    activate_after: Optional[int] = None
 
     def run(self, relation, event, graph, ctx) -> None:
         self.fn(relation, event, graph, ctx)
@@ -72,6 +84,11 @@ class LLMBehavior(Behavior):
     event emission, and structured-output parsing. The developer's
     `handler` is invoked only after the LLM has responded (or a cached
     response was found) and the output was successfully parsed.
+
+    CONTRACT v0.7: `tools=` declares a list of `Tool` objects (or
+    strings naming globally-registered tools) the LLM can call during
+    the turn loop. The runtime orchestrates the loop; the handler
+    receives only the final structured output, never raw tool calls.
     """
 
     handler: Optional[Callable[..., None]] = None
@@ -84,6 +101,9 @@ class LLMBehavior(Behavior):
     top_p: float = 1.0
     timeout_seconds: float = 60.0
     prompt_template: Optional[str] = None
+    # v0.7
+    tools: list = field(default_factory=list)
+    max_tool_turns: int = 6
 
     def build_prompt(
         self,
