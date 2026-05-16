@@ -223,6 +223,27 @@ $ activegraph fork /tmp/activegraph_quickstart/01J... \
 # changed ONE setting and only the events downstream of evt_620 actually
 # re-ran. This is when they realize what fork-and-diff actually means.
 
+# [NOTE] v1.0 implementer constraints for `--set`:
+#   - Syntax is `--set <dotted_key>=<value>`. Multiple --set flags compose
+#     (later wins on collision). Familiar to anyone who has used helm,
+#     terraform, or kubectl, so we don't have to teach the ergonomics.
+#   - <dotted_key> is `<pack_name>.<settings_field>` — a path INTO pack
+#     settings ONLY. `diligence.confidence_threshold_for_review=0.9` is in
+#     scope. `runtime.budget.max_cost_usd=10` is OUT of scope: forks are
+#     for testing alternative hypotheses against pack-level decisions,
+#     not for re-configuring the runtime. The CLI help text and the fork
+#     doc page must state this constraint explicitly.
+#   - Type coercion is Pydantic's job. The settings schema decides
+#     whether "0.9" becomes a float, a Decimal, or a string. The CLI
+#     never tries to parse — it hands the string to the settings model
+#     and lets validation produce the typed value.
+#   - Unknown keys fail loud at fork-time, NOT at run-time. If
+#     `diligence.confidnece_threshold_for_review` (typo) is passed,
+#     the fork errors before any replay starts, with a
+#     `RegistrationError` naming the typo and listing the valid keys on
+#     the settings model. The framework knows the schema; the user
+#     shouldn't discover the typo three minutes into replay.
+
 $ activegraph diff 01J... 01K...
 > shared events:        619
 > parent-only events:    52  (memo#41 with 5 claims kept at conf>=0.7)
@@ -255,6 +276,18 @@ $ activegraph diff 01J... 01K...
 # whether the API is something they can write into without a 200-page guide.
 # We answer with `activegraph quickstart --interactive`, which walks them
 # through writing one custom behavior with prompts and explanations.
+#
+# v1.0 LOCK: zero new runtime capability in this beat. No file-watching,
+# no auto-reload, no inotify/FSEvents integration. The interactive command
+# is a CLI shell that prompts, scaffolds files, and runs the goal —
+# nothing it does requires a runtime change. Auto-reload of behavior
+# modules is genuinely cursed in Python (state in closures, decorators
+# registered at import time, the __pack_meta__ model we locked
+# specifically to avoid this, plus unobvious interactions with the event
+# log — does a reloaded behavior re-fire against historical events?
+# in-flight ones? in replay?) and v1.0 is the wrong milestone to answer
+# those questions. If auto-reload turns out to be a real adoption blocker
+# post-1.0, it's a v1.2 or v1.3 feature with its own design pass.
 
 $ activegraph quickstart --interactive
 > activegraph quickstart --interactive — write your first behavior.
@@ -283,16 +316,20 @@ $ activegraph quickstart --interactive
 >
 > Step 2 of 4 — fill in the TODO.
 >
-> Open the file in your editor. The framework will tail it and pick up
-> changes automatically. Press enter when you're ready to test.
+> Open examples/my_first_behavior.py in your editor and replace the TODO
+> with the parsing logic. When you've saved the file, come back here and
+> type `continue` to test it. (We don't watch your filesystem — explicit
+> over magic.)
 
-# [PAUSE] 2-3 minutes. They open the file, replace the TODO with a regex,
-# emit the event. Some hit syntax errors; the framework's error message
-# tells them what's wrong and where (v1.0 #7 — errors name names).
+# [PAUSE] 2-3 minutes. They open the file in their editor, replace the
+# TODO with a regex, save. Some hit syntax errors when they come back
+# and type `continue`; the framework's error message tells them what's
+# wrong and where (v1.0 #7 — errors name names).
 
-> [enter]
+> continue
 
 > Step 3 of 4 — run your behavior against the fixture data.
+> Importing examples/my_first_behavior.py...   ok (1 behavior registered)
 > Running diligence on Northwind Robotics with your behavior registered...
 >
 > [trace.flags]             prompt_normalized=true (8 llm requests)
@@ -310,6 +347,24 @@ $ activegraph quickstart --interactive
 >   - claim#27 (Stellar, 31% growth)
 >   - claim#34 (Pinecone, 42% growth — preclinical metric, false positive)
 >
+> Want to iterate? Edit the file again, then type `continue`. Type
+> `quit` to end the tutorial.
+
+# [NOTE] The "edit, then type continue" rhythm is the v1.0 contract. Each
+# `continue` re-imports the module fresh (a child subprocess; not
+# importlib.reload) and runs the goal. Each iteration is a clean run with
+# a fresh event log. This is mechanically the same as if the user ran
+# `python examples/my_first_behavior.py` twice — no new runtime concepts.
+
+> continue
+
+> Importing examples/my_first_behavior.py...   ok (1 behavior registered)
+> Running diligence on Northwind Robotics with your behavior registered...
+> ...
+> Your behavior fired 5 times across the run.
+
+> quit
+
 > Step 4 of 4 — read about pattern subscriptions.
 >
 > Your behavior fired on every object.created with object.type=claim.
@@ -326,10 +381,10 @@ $ activegraph quickstart --interactive
 # Monday.
 
 # [NOTE] The interactive command is conversational, not a wizard. Each
-# step pauses for `[enter]`; errors fall through with clear messages; the
-# file scaffolded is real Python that runs without modification. The
-# pause beats are real time — the framework tails the file and reacts
-# when it sees a save event (inotify on Linux, FSEvents on macOS).
+# step pauses for the user to type `continue` (or `quit`); errors fall
+# through with clear messages; the file scaffolded is real Python that
+# runs without modification. No filesystem watching — explicit `continue`
+# every time, so the rhythm is predictable and the runtime stays clean.
 
 ----------------------------------------------------------------------------
  BEAT 6 — point them at the docs (15 seconds)
@@ -375,6 +430,18 @@ if..." additions:
   docs/guides/operating-in-production.md, not the quickstart.
 - Multi-model routing ("Try with claude-haiku for cheaper runs"). Out;
   v1.0 #10.
+- Auto-reload of behavior modules in `--interactive` mode (file-watch via
+  inotify/FSEvents, importlib.reload, hot-reload of decorator
+  registrations). Dropped — zero new runtime in v1.0. Reasons: module
+  reload semantics in Python are genuinely cursed (state in closures,
+  decorators registered at import time, the __pack_meta__ model we
+  locked specifically to avoid this), and the interaction with the event
+  log is unobvious (does a reloaded behavior re-fire against historical
+  events? against in-flight ones? in replay?). Those questions deserve
+  real answers and v1.0 is the wrong milestone to answer them. Manual
+  re-run via `continue` is the v1.0 contract. If auto-reload turns out
+  to be an actual adoption blocker post-1.0, it's a v1.2 or v1.3 feature
+  with its own design pass.
 
 If a v1.0 PR proposes any of these, link to this section and decline.
 
@@ -395,11 +462,14 @@ BEAT 4  -> `activegraph fork --set <pack>.<key>=<value>` flag (new in v1.0;
            -> `activegraph diff` output format above (existing in v0.9; the
               divergent-objects section may need polish to match spec)
            -> Replay cache hit behavior (existing since v0.7)
-BEAT 5  -> `activegraph quickstart --interactive` mode
-           -> File-watch + auto-reload of behavior modules (new in v1.0;
-              this is the only piece of new RUNTIME capability in v1.0.
-              If it's hard to ship cleanly, fall back to a manual re-run
-              after each edit; the tutorial copy adjusts accordingly.)
+BEAT 5  -> `activegraph quickstart --interactive` mode (CLI shell only;
+              no new runtime capability)
+           -> Each `continue` re-imports the user's behavior module in a
+              fresh subprocess and runs the goal. No file-watching, no
+              importlib.reload, no auto-reload of any kind. The rhythm
+              is explicit: edit → save → type `continue` → see trace.
+              Auto-reload was considered and dropped — see the BACKED-OUT
+              BEATS section above for the rationale.
            -> Scaffold file written to examples/ (new in v1.0)
 BEAT 6  -> `activegraph --help` polish + final URL pointer
 
