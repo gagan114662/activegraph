@@ -35,11 +35,16 @@ class BehaviorGraph:
         actor: str,
         caused_by: Optional[str],
         frame_id: Optional[str],
+        llm_request_event_id: Optional[str] = None,
     ) -> None:
         self._graph = graph
         self._actor = actor
         self._caused_by = caused_by
         self._frame_id = frame_id
+        # CONTRACT v0.6 #15: when this BehaviorGraph was created for an
+        # @llm_behavior handler, every object/relation/patch it creates
+        # carries the originating llm.requested event id in provenance.
+        self._llm_request_event_id = llm_request_event_id
         self.counters = Counters()
 
     # ---- mutators ----
@@ -51,6 +56,7 @@ class BehaviorGraph:
             actor=self._actor,
             caused_by=self._caused_by,
             frame_id=self._frame_id,
+            llm_request_event_id=self._llm_request_event_id,
         )
         self.counters.objects_created += 1
         return obj
@@ -70,6 +76,7 @@ class BehaviorGraph:
             actor=self._actor,
             caused_by=self._caused_by,
             frame_id=self._frame_id,
+            llm_request_event_id=self._llm_request_event_id,
         )
         self.counters.relations_created += 1
         return rel
@@ -81,6 +88,7 @@ class BehaviorGraph:
             actor=self._actor,
             caused_by=self._caused_by,
             frame_id=self._frame_id,
+            llm_request_event_id=self._llm_request_event_id,
         )
         self.counters.patches_applied += 1
         return patch
@@ -102,6 +110,7 @@ class BehaviorGraph:
             evidence=evidence,
             caused_by=self._caused_by,
             frame_id=self._frame_id,
+            llm_request_event_id=self._llm_request_event_id,
         )
         self.counters.patches_proposed += 1
         return patch

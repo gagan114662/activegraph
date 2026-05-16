@@ -662,39 +662,224 @@ strongest reasons to use this runtime over a chat-based framework.
 
 ## LLM behaviors
 
-LLM behaviors are first-class but opt-in.
+LLM behaviors are first-class but opt-in. The substrate keeps making sense
+— every LLM call is two events in the log, every claim traces back to the
+prompt and response that produced it, every fork can re-run for free against
+the parent's recorded responses.
+
+### Hello world
 
 ```python
-from activegraph.llm import llm_behavior
+from pydantic import BaseModel
+from activegraph import Graph, Runtime, behavior, llm_behavior
+from activegraph.llm import AnthropicProvider
+
+
+class Claim(BaseModel):
+    text: str
+    confidence: float
+    evidence_span: str
+
+
+class ClaimList(BaseModel):
+    claims: list[Claim]
+
+
+@behavior(name="planner", on=["goal.created"])
+def planner(event, graph, ctx):
+    graph.add_object("document", {"title": "Q3 summary", "body": "..."})
+
 
 @llm_behavior(
     name="claim_extractor",
-    on=["document.added"],
-    model="claude-sonnet-4-6",
-    output_schema={
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string"},
-                "confidence": {"type": "number"},
-                "evidence_span": {"type": "string"}
-            }
-        }
-    },
+    on=["object.created"],
+    where={"object.type": "document"},
+    description="Extract verifiable factual claims from the document.",
+    model="claude-sonnet-4-5",
+    output_schema=ClaimList,
+    view={"around": "event.payload.object.id", "depth": 1},
     creates=["claim"],
-    view={"around": "event.payload.document.id", "depth": 1, "token_budget": 8000}
+    deterministic=True,
+    budget={"max_llm_calls": 10},
 )
 def claim_extractor(event, graph, ctx, llm_output):
-    for claim in llm_output:
-        graph.add_object("claim", {
-            "text": claim["text"],
-            "confidence": claim["confidence"],
-            "evidence": [event.payload["document"]["id"]]
+    doc_id = event.payload["object"]["id"]
+    for c in llm_output.claims:
+        claim = graph.add_object("claim", {
+            "text": c.text,
+            "confidence": c.confidence,
+            "evidence_span": c.evidence_span,
         })
+        graph.add_relation(claim.id, doc_id, "supports")
+
+
+graph = Graph()
+runtime = Runtime(graph, llm_provider=AnthropicProvider())
+runtime.run_goal("Audit the document")
+runtime.print_trace()
 ```
 
-The wrapper handles prompt construction (including frame goal and constraints), structured output parsing, retries, and cost accounting against the budget. If the LLM call fails, a `behavior.failed` event is emitted with the error payload — failures are visible, not silent.
+The runtime writes the prompt, calls the model, parses the structured
+output, records the events, and stamps provenance. The developer's
+handler runs only after a parsed `ClaimList` is in hand.
+
+### The shape of the API
+
+- The handler is `(event, graph, ctx, llm_output) -> None`. The 4th arg
+  is a Pydantic instance of whatever you passed as `output_schema=`.
+- The wrapper is opinionated about the prompt: every prompt is assembled
+  by the runtime from four sources, in this fixed order — frame goal +
+  constraints + behavior `description=` + output-schema reminder
+  (system), a serialized view of the graph (objects + relations +
+  recent events), the triggering event, and a one-sentence task
+  derived from `creates=` and `output_schema=`.
+- The view block is part of the public contract. Snapshot-tested.
+- `prompt_template=` lets you reorder those four sections via Python
+  `str.format` placeholders (`{system}`, `{view}`, `{event}`,
+  `{instruction}`), but you can't bypass them — there is no raw
+  string-concat path in user code.
+- `claim_extractor.build_prompt(event, graph)` is public. Use it to
+  inspect the exact bytes that would be sent — no API call needed.
+
+### Providers
+
+```python
+from activegraph.llm import (
+    AnthropicProvider,        # reference implementation
+    RecordedLLMProvider,      # reads fixtures by prompt hash; tests use this
+    RecordingLLMProvider,     # wraps a real provider, writes fixtures
+)
+```
+
+Any object implementing the `LLMProvider` protocol works:
+
+```python
+class LLMProvider(Protocol):
+    def complete(self, *, system, messages, model, max_tokens,
+                 temperature, top_p, output_schema, timeout_seconds) -> LLMResponse: ...
+    def estimate_cost(self, *, input_tokens, output_tokens, model) -> Decimal: ...
+    def count_tokens(self, *, system, messages, model) -> int: ...
+```
+
+`AnthropicProvider` reads `ANTHROPIC_API_KEY` from the environment.
+Never from code, never from a checked-in config. Install with
+`pip install activegraph[llm]`.
+
+### Determinism and best-effort replay
+
+Pass `deterministic=True` to set `temperature=0` and `top_p=1`. The
+Anthropic messages API has no `seed` parameter, so determinism is
+best-effort — the runtime documents this honestly and the response's
+`seed` field stays `None`. Even with determinism on, provider-side
+sampling is not guaranteed bit-stable across calls.
+
+### Failure handling — failures are first-class graph citizens
+
+There are no silent retries and no hidden backoff. Every failure mode
+emits a `behavior.failed` event with a `reason` code:
+
+| Reason                       | When                                                    |
+|------------------------------|---------------------------------------------------------|
+| `llm.network_error`          | Connection error / timeout from the provider            |
+| `llm.rate_limited`           | 429-shaped error; `retry_after_seconds` if available    |
+| `llm.parse_error`            | Response contained no parseable JSON                    |
+| `llm.schema_violation`       | JSON parsed but failed Pydantic validation              |
+| `llm.fixture_missing`        | `RecordedLLMProvider` had no fixture for the prompt     |
+| `budget.cost_exhausted`      | Pre-call estimate would push `max_cost_usd` over the cap|
+
+If you want retries, write a retry behavior that subscribes to
+`behavior.failed` with the appropriate `where=` filter. Retries become
+first-class events, not middleware.
+
+### Cost accounting
+
+`budget={"max_cost_usd": "0.10"}` enforces a Decimal-precise cap.
+Before each LLM call the runtime asks the provider for an input-token
+count (Anthropic's official `count_tokens`), assumes the worst-case
+output (`max_tokens` reservation), checks the projection against the
+cap, and either lets the call proceed or fails with
+`reason="budget.cost_exhausted"` — without making the API call. After
+the call, the actual cost (from `usage`) replaces the estimate.
+
+The pre-call `count_tokens` is only paid when (a) `max_cost_usd` is
+set AND (b) no cached response was found. Cache-hit paths are free.
+Budget-less runs are free.
+
+### Replay and cached forks
+
+LLM calls record two events:
+
+- `llm.requested` — model, full prompt + params, prompt hash, estimated
+  cost, deterministic flag, cache_hit flag
+- `llm.responded` — raw text, parsed output, token counts, actual cost,
+  latency, finish reason
+
+Pass `replay_llm_cache=True` to `Runtime.load(...)` or `runtime.fork(...)`
+to populate a content-keyed cache (`sha256(canonical_json(prompt+params))`)
+from those recorded events. A fork that regenerates an identical prompt
+serves it from cache — zero new API calls. A fork that diverges falls
+through to the provider for the new prompts.
+
+Combined with `replay_strict=True` the runtime additionally verifies
+that the re-assembled prompt's hash matches the recorded one. A
+mismatch raises `ReplayDivergenceError` pinned to the `llm.requested`
+event id — the cache cannot silently paper over real drift in prompt
+construction.
+
+### Tracing
+
+LLM calls appear in the trace alongside everything else:
+
+```
+[behavior.started]        claim_extractor  (matched object.created: document#1)
+[llm.requested]           evt_006  claim_extractor  model=claude-sonnet-4-5 tokens_in~120 budget_remaining=$1.000
+[llm.responded]           evt_007  claim_extractor  tokens_in=120 tokens_out=24 cost=$0.001 latency=0.5s
+[object.created]          claim#2 "Sample claim."
+[behavior.completed]      claim_extractor
+```
+
+`~` marks estimated token counts; bare counts are from the actual
+response. Cache hits render as `cache_hit=true` and omit cost/latency.
+
+### Causal chain crosses the LLM boundary
+
+Objects created inside an LLM handler carry `llm_request_event_id` in
+their provenance. The causal-chain walk uses it:
+
+```
+claim#3 (claim) "SMB segment grew 14% YoY in Q3."
+  ← claim_extractor (evt_008) llm.requested  model=claude-sonnet-4-5
+    (evt_009) llm.responded cost=$0.001
+  ← claim_extractor (evt_010) object.created
+    ← planner (evt_003) object.created
+      ← user (evt_001) goal.created
+```
+
+One walk, full lineage: claim → LLM call (prompt + response + cost) →
+source document → planner → goal.
+
+### Tests without network access
+
+Tests should never hit a live API. Two providers ship for this:
+
+```python
+# Reads fixtures by prompt hash from a directory.
+provider = RecordedLLMProvider("tests/fixtures/llm")
+
+# Wraps a real provider, persists every response as a fixture.
+# Run once with --record to seed fixtures, then commit them.
+provider = RecordingLLMProvider(AnthropicProvider(), "tests/fixtures/llm")
+```
+
+Fixtures are JSON files keyed by SHA-256 of the prompt-and-params
+canonical form. `recorded_at` is stored alongside the fixture but
+outside the hashed content so it doesn't perturb lookups but stays
+available when fixtures drift months later.
+
+See `examples/llm_claim_extraction.py` for the full demo — three
+documents, structured-output extraction, a low-confidence flag, a
+relation behavior, a cached fork, and a causal chain that crosses the
+LLM boundary.
 
 ## Patterns
 

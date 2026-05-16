@@ -1,0 +1,286 @@
+"""Reference provider: Anthropic.
+
+CONTRACT v0.6 #4. The SDK is imported lazily so the rest of the LLM
+package works without `pip install anthropic`. API key comes from
+ANTHROPIC_API_KEY — never from code, never from a checked-in config.
+
+What this provider does:
+  * `complete()` — single non-streaming `messages.create` call.
+    Structured output is handled by the wrapper, not the provider —
+    we just hand back raw text plus token counts.
+  * `count_tokens()` — Anthropic's official `count_tokens` API.
+    Network roundtrip; the runtime only calls it when
+    `budget.max_cost_usd` is set AND no cached response was found
+    (decision-4 adjustment).
+  * `estimate_cost()` — table-driven, USD Decimals. Pricing as of
+    the model-family rates current in 2026; override via the
+    `pricing=` constructor kwarg to keep it accurate over time.
+
+No tool-use, no streaming, no multi-message orchestration. v0.6
+keeps the surface narrow on purpose.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+from decimal import Decimal
+from typing import Any, Mapping, Optional
+
+from activegraph.llm.errors import LLMBehaviorError
+from activegraph.llm.provider import LLMProvider
+from activegraph.llm.types import LLMMessage, LLMResponse
+
+
+# Per-million-token pricing in USD. Tracks the rates of the Claude 4.x
+# family available in May 2026. Provide your own `pricing=` to override.
+_DEFAULT_PRICING: dict[str, dict[str, str]] = {
+    "claude-opus-4": {"input": "15", "output": "75"},
+    "claude-sonnet-4": {"input": "3", "output": "15"},
+    "claude-haiku-4-5": {"input": "1", "output": "5"},
+}
+
+
+def _pricing_for(model: str, pricing: Mapping[str, Mapping[str, str]]) -> tuple[Decimal, Decimal]:
+    """Lookup by longest matching family prefix.
+
+    `claude-sonnet-4-6` resolves to the `claude-sonnet-4` family entry.
+    Unknown models fall back to sonnet-4 pricing and emit a warning
+    via the returned `Decimal` (caller can detect by comparing to
+    family default).
+    """
+
+    best_key: Optional[str] = None
+    for key in pricing:
+        if model.startswith(key) and (best_key is None or len(key) > len(best_key)):
+            best_key = key
+    if best_key is None:
+        best_key = "claude-sonnet-4"
+    entry = pricing[best_key]
+    return Decimal(str(entry["input"])), Decimal(str(entry["output"]))
+
+
+class AnthropicProvider(LLMProvider):
+    def __init__(
+        self,
+        *,
+        api_key_env: str = "ANTHROPIC_API_KEY",
+        client: Any = None,
+        pricing: Optional[Mapping[str, Mapping[str, str]]] = None,
+    ) -> None:
+        self._api_key_env = api_key_env
+        self._client_override = client
+        self._pricing: dict[str, dict[str, str]] = dict(pricing or _DEFAULT_PRICING)
+        self._client_cached: Any = None
+
+    # ---- client lazy-load ----
+
+    def _client(self) -> Any:
+        if self._client_override is not None:
+            return self._client_override
+        if self._client_cached is not None:
+            return self._client_cached
+        try:
+            from anthropic import Anthropic  # type: ignore
+        except ImportError as e:
+            raise RuntimeError(
+                "AnthropicProvider requires the `anthropic` SDK. "
+                "Install with `pip install activegraph[llm]` "
+                "or `pip install anthropic`."
+            ) from e
+        import os
+
+        if os.environ.get(self._api_key_env) is None:
+            raise RuntimeError(
+                f"AnthropicProvider needs {self._api_key_env} in the environment."
+            )
+        self._client_cached = Anthropic()
+        return self._client_cached
+
+    # ---- LLMProvider methods ----
+
+    def complete(
+        self,
+        *,
+        system: str,
+        messages: list[LLMMessage],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        output_schema: Optional[type],
+        timeout_seconds: float,
+    ) -> LLMResponse:
+        client = self._client()
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": int(max_tokens),
+            "messages": [m.to_dict() for m in messages],
+            "temperature": float(temperature),
+        }
+        if system:
+            kwargs["system"] = system
+        # top_p of 1.0 is the model default; only forward when narrowing.
+        if top_p < 1.0:
+            kwargs["top_p"] = float(top_p)
+
+        t0 = time.monotonic()
+        try:
+            raw = client.messages.create(timeout=timeout_seconds, **kwargs)
+        except Exception as e:
+            # Map provider exceptions to reason codes per CONTRACT v0.6 #11.
+            reason = _classify_provider_exception(e)
+            extras: dict[str, Any] = {
+                "model": model,
+                "exception_type": type(e).__name__,
+                "message": str(e),
+            }
+            ra = _retry_after_seconds(e)
+            if ra is not None:
+                extras["retry_after_seconds"] = ra
+            raise LLMBehaviorError(reason, str(e), payload_extras=extras) from e
+        latency = time.monotonic() - t0
+
+        text = _extract_text(raw)
+        parsed: Any = None
+        if output_schema is not None:
+            parsed = _parse_structured(text, output_schema)
+
+        in_tok = int(getattr(raw.usage, "input_tokens", 0) or 0)
+        out_tok = int(getattr(raw.usage, "output_tokens", 0) or 0)
+        cost = self.estimate_cost(
+            input_tokens=in_tok, output_tokens=out_tok, model=model
+        )
+        return LLMResponse(
+            raw_text=text,
+            parsed=parsed,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cost_usd=cost,
+            latency_seconds=latency,
+            model=getattr(raw, "model", model),
+            finish_reason=str(getattr(raw, "stop_reason", "end_turn") or "end_turn"),
+            seed=None,  # Anthropic messages API has no seed parameter.
+            cache_hit=False,
+        )
+
+    def estimate_cost(
+        self,
+        *,
+        input_tokens: int,
+        output_tokens: int,
+        model: str,
+    ) -> Decimal:
+        in_price, out_price = _pricing_for(model, self._pricing)
+        million = Decimal("1000000")
+        return (Decimal(input_tokens) * in_price / million) + (
+            Decimal(output_tokens) * out_price / million
+        )
+
+    def count_tokens(
+        self,
+        *,
+        system: str,
+        messages: list[LLMMessage],
+        model: str,
+    ) -> int:
+        client = self._client()
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": [m.to_dict() for m in messages],
+        }
+        if system:
+            kwargs["system"] = system
+        result = client.messages.count_tokens(**kwargs)
+        return int(getattr(result, "input_tokens", 0) or 0)
+
+
+# ---- helpers ---------------------------------------------------------------
+
+
+def _extract_text(raw: Any) -> str:
+    """Concatenate text from a `Message.content` block list."""
+    content = getattr(raw, "content", None)
+    if content is None:
+        return ""
+    parts: list[str] = []
+    for block in content:
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts)
+
+
+_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.DOTALL)
+_BRACE_RE = re.compile(r"(\{.*\}|\[.*\])", re.DOTALL)
+
+
+def _parse_structured(text: str, schema: type) -> Any:
+    """Parse JSON out of an LLM response and validate against `schema`.
+
+    Strategy: try direct JSON first; on failure, extract a fenced
+    ```json``` block; on failure, grab the first {...}/[...] span.
+    Two distinct failure modes flow back as `LLMBehaviorError`:
+
+      reason=llm.parse_error      — no JSON found / json.loads failed
+      reason=llm.schema_violation — JSON found but Pydantic rejected it
+    """
+
+    candidate = text.strip()
+    obj: Any = None
+    parse_err: Optional[Exception] = None
+    try:
+        obj = json.loads(candidate)
+    except Exception as e:
+        parse_err = e
+    if obj is None:
+        m = _FENCED_JSON_RE.search(text) or _BRACE_RE.search(text)
+        if m:
+            try:
+                obj = json.loads(m.group(1))
+                parse_err = None
+            except Exception as e:
+                parse_err = e
+    if obj is None:
+        raise LLMBehaviorError(
+            "llm.parse_error",
+            f"no JSON found in response: {parse_err}",
+            payload_extras={"raw_text": text, "underlying": str(parse_err)},
+        )
+
+    try:
+        return schema.model_validate(obj)
+    except Exception as e:
+        raise LLMBehaviorError(
+            "llm.schema_violation",
+            f"response did not match schema {schema.__name__}: {e}",
+            payload_extras={
+                "raw_text": text,
+                "schema": schema.__name__,
+                "validation_errors": str(e),
+            },
+        ) from e
+
+
+def _classify_provider_exception(e: Exception) -> str:
+    name = type(e).__name__.lower()
+    if "ratelimit" in name or "429" in str(e):
+        return "llm.rate_limited"
+    if "timeout" in name or "connect" in name:
+        return "llm.network_error"
+    return "llm.network_error"
+
+
+def _retry_after_seconds(e: Exception) -> Optional[float]:
+    response = getattr(e, "response", None)
+    headers = getattr(response, "headers", None) if response is not None else None
+    if headers is None:
+        return None
+    ra = headers.get("retry-after") if hasattr(headers, "get") else None
+    if ra is None:
+        return None
+    try:
+        return float(ra)
+    except (TypeError, ValueError):
+        return None
