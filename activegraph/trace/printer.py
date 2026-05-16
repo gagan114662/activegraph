@@ -140,16 +140,21 @@ def _fmt_behavior_failed(e: Event) -> str:
     return f'{_format_tag("behavior.failed")}{name}: {et}: {msg}'
 
 
-def _fmt_llm_requested(e: Event) -> str:
-    """CONTRACT v0.6 #14 (+ v0.7 turn_index + prompt_normalized):
+def _fmt_llm_requested(e: Event, *, hide_prompt_normalized: bool = False) -> str:
+    """CONTRACT v0.6 #14 (+ v0.7 turn_index + v0.9.1 prompt_normalized rollup):
     `[llm.requested] evt_NNN  behavior  model=... tokens_in~NNNN budget_remaining=$X.XX`
 
     The `~` prefix on `tokens_in` marks an estimate; absent if no
     pre-call count was made (no cost budget OR cache hit). The
     `budget_remaining=$...` segment is dropped if no cost budget.
-    v0.7 adds `turn=N` for tool-loop turns past the first, and
-    `prompt_normalized=true` to make the volatile-field-stripping
-    behavior explicit in the trace (CONTRACT v0.6 follow-up).
+    v0.7 adds `turn=N` for tool-loop turns past the first.
+
+    `prompt_normalized=true` was on every line in v0.7-v0.9. v0.9.1
+    rolls it up to a single `[trace.flags]` header when uniform across
+    all non-replayed `llm.requested` events, dropping the per-line
+    flag. Mixed-state traces (rare) keep the per-line flag for
+    precision. `hide_prompt_normalized=True` is set by the trace
+    facade when the rollup is active.
     """
     p = e.payload or {}
     name = p.get("behavior", "?")
@@ -163,7 +168,7 @@ def _fmt_llm_requested(e: Event) -> str:
         parts.append(f"tokens_in~{p['estimated_input_tokens']}")
     if p.get("budget_remaining_usd") is not None:
         parts.append(f"budget_remaining=${_money(p['budget_remaining_usd'])}")
-    if p.get("prompt_normalized"):
+    if p.get("prompt_normalized") and not hide_prompt_normalized:
         parts.append("prompt_normalized=true")
     return f'{_format_tag("llm.requested")}{"  ".join([parts[0], " ".join(parts[1:])])}'
 
@@ -329,9 +334,42 @@ _FORMATTERS = {
 }
 
 
-def format_event(event: Event) -> str:
+def format_event(event: Event, *, hide_prompt_normalized: bool = False) -> str:
+    if event.type == "llm.requested":
+        return _fmt_llm_requested(event, hide_prompt_normalized=hide_prompt_normalized)
     fn = _FORMATTERS.get(event.type, _fmt_event_emitted)
     return fn(event)
+
+
+# ---------- v0.9.1: prompt_normalized rollup ----------
+
+
+def _compute_prompt_normalized_rollup(
+    events: list[Event],
+    replayed: set[str],
+) -> dict | None:
+    """Return rollup info if every non-replayed `llm.requested` event carries
+    `prompt_normalized=true`. Returns None if there are no such events or if
+    the flag is mixed across them — in the mixed case the per-line flag is
+    kept (rare; signals a real divergence worth seeing).
+    """
+    llm_reqs = [
+        e for e in events
+        if e.type == "llm.requested" and e.id not in replayed
+    ]
+    if not llm_reqs:
+        return None
+    if not all((e.payload or {}).get("prompt_normalized") for e in llm_reqs):
+        return None
+    return {"prompt_normalized": True, "count": len(llm_reqs)}
+
+
+def _fmt_trace_flags(rollup: dict) -> str:
+    n = int(rollup["count"])
+    return (
+        f'{_format_tag("trace.flags")}'
+        f'prompt_normalized=true ({_plural(n, "llm request")})'
+    )
 
 
 # ---------- replay rendering (CONTRACT v0.5 #22) ----------
@@ -382,8 +420,13 @@ class Trace:
     def lines(self) -> list[str]:
         replayed = self._graph.replayed_ids
         replayed_count = len(replayed)
+        rollup = _compute_prompt_normalized_rollup(
+            list(self._graph.events), replayed
+        )
+        hide_per_line = rollup is not None
         out: list[str] = []
         emitted_boundary = False
+        emitted_flags = False
         seen_replayed = 0
         for e in self._graph.events:
             if e.id in replayed:
@@ -394,7 +437,10 @@ class Trace:
                 out.append(_fmt_replay_complete(replayed_count))
                 out.append(_fmt_replay_ready())
                 emitted_boundary = True
-            line = format_event(e)
+            if rollup is not None and not emitted_flags:
+                out.append(_fmt_trace_flags(rollup))
+                emitted_flags = True
+            line = format_event(e, hide_prompt_normalized=hide_per_line)
             out.append(line)
         if replayed_count > 0 and not emitted_boundary:
             out.append(_fmt_replay_complete(replayed_count))

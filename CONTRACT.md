@@ -2208,3 +2208,93 @@ the Diligence pack must be polished enough that a developer who
 installs activegraph + activegraph.packs.diligence and follows the
 README can produce a useful memo on day one. If the pack feels like
 a toy, the milestone hasn't shipped. Polish over breadth.
+
+# v0.9.1 — pending follow-ups bundle
+
+A small follow-up release with two items the v1.0 plan flagged as
+worth landing before the adoption-surface work starts, so the v1.0
+PR series begins from a baseline with no carryover debt. Both are
+quality-of-life, not new capability.
+
+## v0.9.1 #1. Granular approval-demo console output
+
+`examples/diligence_real_run.py` previously printed
+`pending approvals: N` followed by detail rows that left the
+operator guessing what was queued. The new output names every
+pending item up front and walks the gate in rounds:
+
+```
+pending approvals (1, initial): risk_northwind_001
+  - risk_northwind_001           approval_001  reason='risk_approval policy: customer concentration'
+pending approvals (1, round 2): memo_northwind
+  - memo_northwind               approval_002  reason='memo_approval policy: company company#1'
+after approval: 0 pending
+```
+
+The slug shape is `<object_type>_<company_short>` (memo) or
+`<object_type>_<company_short>_<approval_seq>` (risk). Lookup is
+through `runtime.graph.get_object(company_id)` so the slug uses the
+human company name, not the auto-generated id. The drain loop runs
+until `pending_approvals()` is empty, so the demo terminates at
+zero — approving a risk surfaces the memo, approving the memo
+clears the queue.
+
+The slug helper is example-local. The runtime does not pick names
+for pending approvals — that's a pack/operator concern.
+
+## v0.9.1 #2. `prompt_normalized=true` trace flag rollup
+
+The per-line `prompt_normalized=true` suffix on every
+`llm.requested` event (added as the v0.6 follow-up bundled into
+v0.7, CONTRACT v0.7 #22) clutters traces in real packs where a
+single goal produces dozens of LLM calls. v0.9.1 rolls it up.
+
+The `Trace.lines()` facade now emits a single `[trace.flags]`
+header when every non-replayed `llm.requested` event in the trace
+carries `prompt_normalized=true`:
+
+```
+[trace.flags]             prompt_normalized=true (27 llm requests)
+[goal.created]            user: "Diligence: Northwind Robotics"
+...
+[llm.requested]           evt_006  extractor  model=claude-sonnet-4-5 ...
+```
+
+Per-line flags are suppressed in this mode. Mixed-state traces
+(some events normalized, some not — should not happen in practice
+since normalization is a pack-level invariant) keep the per-line
+flag and suppress the header, so the divergence stays visible.
+
+`format_event(event, *, hide_prompt_normalized=False)` gains the
+suppress kwarg; only `Trace.lines()` sets it, and only when the
+rollup applies. JSONL export still includes `prompt_normalized`
+verbatim in the event payload — the rollup is a render-time
+concern, not a data change.
+
+### Snapshot drift
+
+Two snapshot files updated in the same commit:
+
+- `tests/snapshots/llm_trace.txt`
+- `tests/snapshots/tool_trace.txt`
+
+Both gain a leading `[trace.flags]` line and lose the trailing
+`prompt_normalized=true` on each `llm.requested` line. No other
+event types change. The 384 v0–v0.9 tests pass unchanged after
+the snapshot update.
+
+The v0.7 #22 backward-compat clause is now superseded for the
+`llm.requested` line. v1.0+ tests that need to see the per-line
+flag (mixed-state cases) call `_compute_prompt_normalized_rollup`
+to confirm uniformity.
+
+## v0.9.1 #3. Out of scope (re-affirm)
+
+The v1.0 plan locked these as out for v0.9.1 and v1.0 both:
+
+- Richer fixture cardinality (post-1.0 polish, not framework
+  work; v0.9 ships three companies producing three memos that
+  meet the verifiable bar — that is the contract)
+- A `--live` quickstart mode (dropped from v1.0 per pushback;
+  ships post-1.0 only if quickstart usage shows demand)
+- Web UI, streaming, multi-model routing (per v0.9 #26)
