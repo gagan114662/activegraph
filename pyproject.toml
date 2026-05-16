@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "activegraph"
-version = "0.0.1"
+version = "0.5.0"
 description = "An event-sourced reactive graph runtime for long-running, auditable, agentic systems."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,7 +24,7 @@ dependencies = []
 
 [project.optional-dependencies]
 llm = []        # placeholder: v0.6
-sqlite = []     # placeholder: v0.5
+sqlite = []     # SQLite is stdlib — no extra deps needed for the v0.5 store
 all = []
 dev = ["pytest>=7"]
 

@@ -3,8 +3,14 @@
 CONTRACT #2 (strict): Graph state is materialized from the event log.
 `emit(event)` is the only mutator. Convenience methods (`add_object`,
 `add_relation`, `patch_object`, `propose_patch`, `apply_patch`, etc.) all
-build an Event and call emit. `_project` is the only code that touches
-`_objects`/`_relations`/`_patches` dicts.
+build an Event and call emit.
+
+CONTRACT v0.5 #15: the projector is `apply_event(graph, event)`, a
+module-level function — the ONLY thing that mutates graph state. It is
+called from two paths:
+  - `Graph.emit` for live events (also persists + notifies listeners)
+  - `Graph._replay_event` for replay (silent: no persist, no notify)
+Two callers, one code path.
 
 CONTRACT #5 (provenance): every object/relation/patch carries a provenance
 dict written here, never by the behavior. Behaviors pass `data`; we strip
@@ -17,7 +23,7 @@ bumps on every patch.applied. Patches record `expected_version`.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from activegraph.core.clock import Clock
@@ -97,11 +103,14 @@ class Graph:
         self,
         ids: Optional[IDGen] = None,
         clock: Optional[Clock] = None,
+        run_id: Optional[str] = None,
     ) -> None:
         self.ids = ids or IDGen()
         self.clock = clock or Clock()
+        # CONTRACT v0.5 #6: every graph has a run_id.
+        self.run_id: str = run_id or self.ids.run()
 
-        # projected state — touched ONLY by _project
+        # projected state — touched ONLY by apply_event (CONTRACT v0.5 #15)
         self._objects: dict[str, Object] = {}
         self._relations: dict[str, Relation] = {}
         self._patches: dict[str, Patch] = {}
@@ -112,11 +121,22 @@ class Graph:
         # listeners (the runtime queue subscribes here)
         self._listeners: list[Callable[[Event], None]] = []
 
+        # CONTRACT v0.5 #14: track which events were replayed (not live).
+        # The trace printer renders them with a [replay.event] prefix.
+        self._replayed_ids: set[str] = set()
+
+        # Optional persistence sink (attached by Runtime when persist_to=...).
+        self._store = None  # type: ignore[assignment]
+
     # ---------- read API ----------
 
     @property
     def events(self) -> list[Event]:
         return list(self._events)
+
+    @property
+    def replayed_ids(self) -> frozenset[str]:
+        return frozenset(self._replayed_ids)
 
     def get_object(self, id_: str) -> Optional[Object]:
         return self._objects.get(id_)
@@ -199,15 +219,52 @@ class Graph:
     def add_listener(self, fn: Callable[[Event], None]) -> None:
         self._listeners.append(fn)
 
-    # ---------- the only mutator ----------
+    # ---------- store attachment (Runtime sets this) ----------
+
+    def attach_store(self, store) -> None:
+        """Wire an EventStore as the durability sink. Idempotent on the same
+        store. Calling with a *different* store after events exist is an error
+        — events would be persisted in two places and you'd lose history.
+        """
+        if self._store is store:
+            return
+        if self._store is not None:
+            raise RuntimeError("graph already has a store attached")
+        self._store = store
+
+    @property
+    def store(self):
+        return self._store
+
+    # ---------- the only mutator (live path) ----------
 
     def emit(self, event: Event) -> Event:
-        """Append to log, project, notify. The single mutation path (#2)."""
+        """Append to log, project, persist (if attached), notify. CONTRACT #2."""
+        # Fail-fast serialization check at emit time so bad payloads never
+        # land in the in-memory log either (CONTRACT v0.5 #4).
+        if self._store is not None:
+            from activegraph.store.serde import validate_event
+
+            validate_event(event)
         self._events.append(event)
-        self._project(event)
+        apply_event(self, event)
+        if self._store is not None:
+            self._store.append(event)
         for listener in self._listeners:
             listener(event)
         return event
+
+    # ---------- the only mutator (replay path) ----------
+
+    def _replay_event(self, event: Event) -> None:
+        """Apply a recorded event WITHOUT persisting or firing listeners.
+
+        Used only by `Runtime.load` and `Runtime.fork`. CONTRACT v0.5 #14:
+        replay rebuilds graph state; it does NOT fire behaviors.
+        """
+        self._events.append(event)
+        apply_event(self, event)
+        self._replayed_ids.add(event.id)
 
     # ---------- convenience builders (each builds an Event and emits) ----------
 
@@ -223,13 +280,7 @@ class Graph:
     ) -> Object:
         obj_id = self.ids.object(type)
         clean = _strip_provenance(copy.deepcopy(data))
-        provenance = {
-            "created_by": actor,
-            "caused_by_event": caused_by,
-            "frame_id": frame_id,
-            "timestamp": self.clock.now(),
-            "evidence": list(evidence or []),
-        }
+        provenance = self._provenance(actor, caused_by, frame_id, evidence)
         payload = {
             "object": {
                 "id": obj_id,
@@ -265,13 +316,7 @@ class Graph:
     ) -> Relation:
         rel_id = self.ids.relation()
         clean = _strip_provenance(copy.deepcopy(data or {}))
-        provenance = {
-            "created_by": actor,
-            "caused_by_event": caused_by,
-            "frame_id": frame_id,
-            "timestamp": self.clock.now(),
-            "evidence": [],
-        }
+        provenance = self._provenance(actor, caused_by, frame_id, [])
         payload = {
             "relation": {
                 "id": rel_id,
@@ -365,13 +410,7 @@ class Graph:
             rationale=rationale,
             evidence=list(evidence or []),
             status="applied",
-            provenance={
-                "created_by": actor,
-                "caused_by_event": caused_by,
-                "frame_id": frame_id,
-                "timestamp": self.clock.now(),
-                "evidence": list(evidence or []),
-            },
+            provenance=self._provenance(actor, caused_by, frame_id, evidence),
         )
         diff = _diff(obj.data, clean)
         event = Event(
@@ -417,13 +456,7 @@ class Graph:
             rationale=rationale,
             evidence=list(evidence or []),
             status="proposed",
-            provenance={
-                "created_by": proposed_by,
-                "caused_by_event": caused_by,
-                "frame_id": frame_id,
-                "timestamp": self.clock.now(),
-                "evidence": list(evidence or []),
-            },
+            provenance=self._provenance(proposed_by, caused_by, frame_id, evidence),
         )
         event = Event(
             id=self.ids.event(),
@@ -515,65 +548,91 @@ class Graph:
         )
         return self.emit(event)
 
-    # ---------- the projector — the only code that touches state dicts ----------
+    # ---------- provenance helper (CONTRACT v0.5 #13: includes run_id) ----------
 
-    def _project(self, event: Event) -> None:
-        t = event.type
-        p = event.payload
+    def _provenance(
+        self,
+        actor: str,
+        caused_by: Optional[str],
+        frame_id: Optional[str],
+        evidence: Optional[list[str]],
+    ) -> dict[str, Any]:
+        return {
+            "created_by": actor,
+            "caused_by_event": caused_by,
+            "frame_id": frame_id,
+            "timestamp": self.clock.now(),
+            "evidence": list(evidence or []),
+            "run_id": self.run_id,
+        }
 
-        if t == "object.created":
-            o = p["object"]
-            self._objects[o["id"]] = Object(
-                id=o["id"],
-                type=o["type"],
-                data=copy.deepcopy(o["data"]),
-                version=o["version"],
-                provenance=copy.deepcopy(o["provenance"]),
-            )
 
-        elif t == "object.removed":
-            self._objects.pop(p["id"], None)
-            # cascade: drop relations touching it
-            for rid in [
-                r.id for r in self._relations.values() if p["id"] in (r.source, r.target)
-            ]:
-                self._relations.pop(rid, None)
+# ---------- the projector — module-level, single mutation code path ----------
 
-        elif t == "relation.created":
-            r = p["relation"]
-            self._relations[r["id"]] = Relation(
-                id=r["id"],
-                source=r["source"],
-                target=r["target"],
-                type=r["type"],
-                data=copy.deepcopy(r["data"]),
-                provenance=copy.deepcopy(r["provenance"]),
-            )
 
-        elif t == "relation.removed":
-            self._relations.pop(p["id"], None)
+def apply_event(graph: Graph, event: Event) -> None:
+    """Project an event onto the graph's in-memory state.
 
-        elif t == "patch.proposed":
-            patch_dict = p["patch"]
-            self._patches[patch_dict["id"]] = _patch_from_dict(patch_dict)
+    The ONLY function that mutates `_objects` / `_relations` / `_patches`.
+    Called from `Graph.emit` (live) and `Graph._replay_event` (replay).
+    Pure projection — no I/O, no listener calls, no event log mutation.
+    """
+    t = event.type
+    p = event.payload
 
-        elif t == "patch.applied":
-            patch_dict = p["patch"]
-            patch = _patch_from_dict({**patch_dict, "status": "applied"})
-            self._patches[patch.id] = patch
-            obj = self._objects.get(patch.target)
-            if obj is not None:
-                if patch.op == "update":
-                    obj.data.update(patch.value)
-                elif patch.op == "replace":
-                    obj.data = copy.deepcopy(patch.value)
-                obj.version += 1
+    if t == "object.created":
+        o = p["object"]
+        graph._objects[o["id"]] = Object(
+            id=o["id"],
+            type=o["type"],
+            data=copy.deepcopy(o["data"]),
+            version=o["version"],
+            provenance=copy.deepcopy(o["provenance"]),
+        )
 
-        elif t == "patch.rejected":
-            existing = self._patches.get(p["patch_id"])
-            if existing is not None:
-                existing.status = "rejected"
-                existing.rejection_reason = p["reason"]
+    elif t == "object.removed":
+        graph._objects.pop(p["id"], None)
+        # cascade: drop relations touching it
+        for rid in [
+            r.id for r in graph._relations.values() if p["id"] in (r.source, r.target)
+        ]:
+            graph._relations.pop(rid, None)
+
+    elif t == "relation.created":
+        r = p["relation"]
+        graph._relations[r["id"]] = Relation(
+            id=r["id"],
+            source=r["source"],
+            target=r["target"],
+            type=r["type"],
+            data=copy.deepcopy(r["data"]),
+            provenance=copy.deepcopy(r["provenance"]),
+        )
+
+    elif t == "relation.removed":
+        graph._relations.pop(p["id"], None)
+
+    elif t == "patch.proposed":
+        patch_dict = p["patch"]
+        graph._patches[patch_dict["id"]] = _patch_from_dict(patch_dict)
+
+    elif t == "patch.applied":
+        patch_dict = p["patch"]
+        patch = _patch_from_dict({**patch_dict, "status": "applied"})
+        graph._patches[patch.id] = patch
+        obj = graph._objects.get(patch.target)
+        if obj is not None:
+            if patch.op == "update":
+                obj.data.update(patch.value)
+            elif patch.op == "replace":
+                obj.data = copy.deepcopy(patch.value)
+            obj.version += 1
+
+    elif t == "patch.rejected":
+        existing = graph._patches.get(p["patch_id"])
+        if existing is not None:
+            existing.status = "rejected"
+            existing.rejection_reason = p["reason"]
 
 
 def _patch_from_dict(d: dict[str, Any]) -> Patch:

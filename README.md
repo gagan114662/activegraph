@@ -555,26 +555,110 @@ When a budget is hit, the runtime stops gracefully, emits `runtime.budget_exhaus
 
 ## Replay and resume
 
-Because the event log is append-only and behaviors are deterministic given their view, runs are replayable.
+The event log is the source of truth. Every state change is appended, so
+runs can be paused, reopened, branched, and compared.
+
+### Persistence
 
 ```python
-runtime.save_state(path="run.activegraph")
-# ... later, even after a crash ...
-runtime = Runtime.load(path="run.activegraph")
+from activegraph import Graph, Runtime
+
+graph = Graph()
+runtime = Runtime(graph, persist_to="run.db")
+runtime.run_goal("Evaluate this startup")
+runtime.save_state()
+```
+
+`persist_to=PATH` attaches a SQLite-backed event store. Every emitted event
+is appended as it happens; `save_state()` is an explicit flush. Pass nothing
+to `save_state(path="run.db")` later if you want to keep the run in memory
+until you decide to durable-write it.
+
+### Resume
+
+```python
+runtime = Runtime.load("run.db")          # most recent run in the file
+runtime = Runtime.load("run.db", run_id=...)
 runtime.run_until_idle()
 ```
 
-You can also fork a run to explore alternative hypotheses:
+`Runtime.load` opens the file, picks a run (`run_id` or most-recent),
+replays the event log into a fresh `Graph`, and returns a runtime ready to
+continue. Behaviors are code, not state — re-register them (e.g. import
+the module that defines them) before loading.
+
+The trace marks replayed events distinctly so you can see the load
+boundary:
+
+```
+[replay.event]            evt_017 object.created task#1
+[replay.event]            evt_018 ...
+[replay.complete]         73 events replayed, graph reconstructed
+[runtime.idle]            ready to resume
+```
+
+### Queue recovery on load
+
+When the runtime stops (budget exhausted, deliberate pause, process
+crash), there may be events that were already emitted but not yet
+popped from the queue. On load, those events are detected — any event
+that has no `behavior.started` referencing it in the log — and pushed
+back into the queue so they fire on the next `run_until_idle` /
+`run_goal`. Events that already had a behavior start on them are not
+re-fired.
+
+**Caveat (in-flight loss):** if a behavior was *mid-execution* when the
+runtime died (`behavior.started` emitted but no `behavior.completed` /
+`behavior.failed`), its post-crash work is lost unless it had already
+emitted events. Transactional behavior execution is a v1+ feature.
+
+### Fork
 
 ```python
 fork = runtime.fork(at_event="evt_073", label="alternative-thesis")
-fork.add_object("claim", {"text": "Counter-hypothesis: market is saturated.", "confidence": 0.6})
+fork.graph.add_object("claim", {"text": "Counter-hypothesis", "confidence": 0.6})
 fork.run_until_idle()
-
-runtime.diff(fork)  # show divergent objects, relations, conclusions
+fork.save_state()
 ```
 
-Forking is uniquely cheap on an event-sourced graph and is one of the strongest reasons to use this runtime over a chat-based framework.
+Fork allocates a new `run_id`, copies the parent's event log up to and
+including `at_event` into the new run, and returns an independent runtime.
+The parent is untouched. Forks-of-forks work the same way.
+
+### Diff
+
+```python
+diff = runtime.diff(fork)
+diff.shared_events            # prefix common to both runs
+diff.parent_only_events       # what only happened in the parent
+diff.fork_only_events
+diff.divergent_objects        # objects that differ or only exist on one side
+diff.divergent_relations
+```
+
+Diff is structural — divergent objects, relations, and event partitions.
+Lifecycle events (`behavior.*`, `runtime.*`) are excluded from the event
+partition so the signal is the run's actual history, not scaffolding.
+Semantic comparison (does this claim *mean* the same thing as that one?)
+is a behavior's job, not the runtime's.
+
+### Storage details
+
+- Backend: SQLite. The schema is two tables (`events`, `runs`) plus a
+  `meta` table that pins the schema version from day one.
+- `events.payload` is JSON. Decimals serialize as strings, datetimes as
+  ISO 8601, sets as sorted lists. Anything non-serializable raises
+  `NonSerializableEventError` at emit time, never at save time.
+- One file can hold many runs. Each fork is a new run row.
+- ULID `run_id`s; in-run ids (`evt_017`, `task#1`) stay the short
+  human-readable forms and are reused across forks — `task#5` in a fork
+  is a different object than `task#5` in the parent, scoped by `run_id`.
+
+See `examples/resume_and_fork.py` for the end-to-end demo: start, pause,
+reload in a fresh process, fork, inject a counter-hypothesis, diff.
+
+Forking is uniquely cheap on an event-sourced graph and is one of the
+strongest reasons to use this runtime over a chat-based framework.
 
 ## LLM behaviors
 
@@ -636,7 +720,7 @@ A few patterns that fall out of the model naturally.
 
 ## Roadmap
 
-**v0 — Core runtime (current)**
+**v0 — Core runtime**
 
 - In-memory graph, objects, relations, event log
 - Function and class behaviors
@@ -648,12 +732,15 @@ A few patterns that fall out of the model naturally.
 - Trace printing and causal chain queries
 - Budgets
 
-**v0.5 — Resumability**
+**v0.5 — Resumability (current)**
 
-- Full event log persistence
-- Save and load runtime state
-- Fork and diff
-- SQLite-backed event store
+- Full event log persistence (SQLite, pluggable `EventStore`)
+- Save and load runtime state across processes
+- Replay: rebuild a graph from the log without re-firing behaviors
+- Fork from any historical event into an independent run
+- Structural diff between runs
+- Strict-replay mode for catching non-deterministic behaviors
+- Multiple runs per file; ULID `run_id`s; provenance carries `run_id`
 
 **v0.6 — LLM integration**
 

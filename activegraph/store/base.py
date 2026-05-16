@@ -1,0 +1,66 @@
+"""EventStore interface + run metadata. CONTRACT v0.5 #2 and #6.
+
+An EventStore is a per-run, append-only view onto an event log. Multiple
+runs may share a backing file (SQLite); the EventStore instance is scoped
+to one `run_id` and only sees that run's events.
+
+Methods are deliberately minimal — append, iterate, count, lookup,
+truncate-after. No queries, no indexes beyond what the backend ships. This
+is an event log, not a database.
+
+The accompanying `RunRecord` is the canonical row in the `runs` table:
+parent linkage for forks, an optional label, and the original goal/frame.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable, Iterator, Optional, Protocol
+
+from activegraph.core.event import Event
+
+
+@dataclass
+class RunRecord:
+    run_id: str
+    parent_run_id: Optional[str]
+    forked_at_event_id: Optional[str]
+    label: Optional[str]
+    created_at: str
+    goal: Optional[str]
+    frame_id: Optional[str]
+
+
+class EventStore(Protocol):
+    """Append-only per-run event log. CONTRACT v0.5 #2."""
+
+    run_id: str
+
+    def append(self, event: Event) -> None: ...
+
+    def iter_events(
+        self,
+        after: Optional[str] = None,
+        until: Optional[str] = None,
+    ) -> Iterator[Event]: ...
+
+    def get_event(self, event_id: str) -> Optional[Event]: ...
+
+    def count(self) -> int: ...
+
+    def truncate_after(self, event_id: str) -> None: ...
+
+    def close(self) -> None: ...
+
+
+def replay_into(graph, events: Iterable[Event]) -> int:
+    """Apply a stream of events to a Graph without firing listeners.
+
+    The single replay entry point — used by `Runtime.load` and `Runtime.fork`.
+    Returns the number of events replayed.
+    """
+    n = 0
+    for ev in events:
+        graph._replay_event(ev)  # noqa: SLF001 — internal seam by design
+        n += 1
+    return n
