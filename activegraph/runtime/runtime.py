@@ -56,7 +56,12 @@ from __future__ import annotations
 
 import json
 import random as _random
+import time as _time
 import traceback
+
+
+def _monotonic() -> float:
+    return _time.monotonic()
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -97,6 +102,16 @@ from activegraph.tools.errors import (
 )
 from activegraph.tools.recorded import DirectToolInvoker
 
+from activegraph.observability.logging import get_logger, runtime_log_extra
+from activegraph.observability.metrics import Metrics, NoOpMetrics
+from activegraph.observability.status import (
+    BehaviorInfo,
+    BudgetSnapshot,
+    EventSummary,
+    FrameSnapshot,
+    RuntimeStatus,
+)
+
 
 @dataclass
 class Context:
@@ -136,6 +151,8 @@ class Runtime:
         tool_cache: Any = None,  # ToolCache; Any to avoid import cycle
         replay_reinvoke_deterministic: bool = False,
         tool_invoker: Any = None,  # defaults to DirectToolInvoker()
+        # v0.8: observability
+        metrics: Optional[Metrics] = None,
     ) -> None:
         self.graph = graph
         self.frame = frame
@@ -177,6 +194,11 @@ class Runtime:
         if self.frame is not None and self.frame.id is None:
             self.frame.id = graph.ids.frame()
 
+        # v0.8: observability — metrics defaults to NoOp so the runtime
+        # is fully functional without any metrics backend configured.
+        self.metrics: Metrics = metrics if metrics is not None else NoOpMetrics()
+        self._log = get_logger("activegraph.runtime")
+
         self._queue = EventQueue()
         # v0.7: delayed queue for activate_after scheduling.
         self._delayed = DelayedQueue()
@@ -211,6 +233,14 @@ class Runtime:
     # ---------- listener ----------
 
     def _on_event(self, event: Event) -> None:
+        # v0.8: count every emitted event, lifecycle or not. The metric
+        # tag is the event type. The graph's listener fires for every
+        # event passing through emit(), including lifecycle events that
+        # we suppress from re-matching below.
+        self.metrics.counter(
+            "activegraph_events_emitted_total",
+            {"event_type": event.type},
+        )
         # Don't enqueue our own lifecycle events for re-matching.
         # v0.7 adds `llm.*`, `tool.*`, `pattern.*`, `behavior.scheduled`
         # to the suppression list — they're internal to the runtime's
@@ -226,8 +256,20 @@ class Runtime:
         ):
             return
         self._queue.push(event)
+        self.metrics.gauge(
+            "activegraph_queue_depth", {}, float(len(self._queue))
+        )
         # New activity → we're not idle anymore.
         self._idle_emitted = False
+        # INFO: one log line per enqueued event. High-volume; operators
+        # filter at WARNING in production dashboards.
+        self._log.info(
+            "event emitted",
+            extra=runtime_log_extra(
+                run_id=self.graph.run_id,
+                event_id=event.id,
+            ),
+        )
 
     # ---------- public entry points ----------
 
@@ -469,6 +511,13 @@ class Runtime:
             matches=list(matches or []),
         )
 
+        # v0.8: count and time the handler call. Only function behaviors
+        # are instrumented here; LLM and relation behaviors have their
+        # own invocation paths and their own metrics hooks.
+        self.metrics.counter(
+            "activegraph_behaviors_invoked_total", {"behavior": b.name}
+        )
+
         self._emit_lifecycle(
             "behavior.started",
             {
@@ -478,9 +527,30 @@ class Runtime:
                 "triggering_object_id": _maybe_object_id(event),
             },
         )
+        _t0 = _monotonic()
         try:
             b.run(event, bgraph, ctx)
         except Exception as e:
+            self.metrics.histogram(
+                "activegraph_behaviors_duration_seconds",
+                {"behavior": b.name},
+                _monotonic() - _t0,
+            )
+            self.metrics.counter(
+                "activegraph_behaviors_failed_total",
+                {"behavior": b.name, "reason": f"exception.{type(e).__name__}"},
+            )
+            self._log.error(
+                "behavior failed",
+                extra=runtime_log_extra(
+                    run_id=self.graph.run_id,
+                    event_id=event.id,
+                    behavior=b.name,
+                    reason=f"exception.{type(e).__name__}",
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                ),
+            )
             self._emit_lifecycle(
                 "behavior.failed",
                 {
@@ -493,6 +563,11 @@ class Runtime:
             )
             return
 
+        self.metrics.histogram(
+            "activegraph_behaviors_duration_seconds",
+            {"behavior": b.name},
+            _monotonic() - _t0,
+        )
         self._emit_lifecycle(
             "behavior.completed",
             {
@@ -1288,6 +1363,90 @@ class Runtime:
             },
         )
 
+    # ---------- v0.8: runtime.status ----------
+
+    def status(self, recent: int = 20) -> RuntimeStatus:
+        """Frozen snapshot of the runtime. CONTRACT v0.8 #11.
+
+        Cheap to call. No graph traversal beyond a tail-slice of the
+        event log. Returns immutable data; mutating any field raises.
+
+        ``recent`` controls the length of the ``recent_events`` tail.
+        The CLI's ``inspect --tail N`` passes through.
+        """
+        if recent < 0:
+            raise ValueError("recent must be >= 0")
+        snap = self.budget.snapshot()
+        budget_snap = BudgetSnapshot(
+            used=dict(snap.get("used") or {}),
+            limits=dict(snap.get("limits") or {}),
+            cost_used_usd=str(snap.get("cost_used_usd", "0")),
+            cost_limit_usd=snap.get("cost_limit_usd"),
+            exhausted_by=self.budget.exhausted_by(),
+        )
+
+        # State derivation: log-based, so a freshly loaded runtime and
+        # the runtime that saved the log agree. Walk back through the
+        # event log for the most recent terminal lifecycle event.
+        # CONTRACT v0.8 #11.
+        state: str = "stopped"
+        for ev in reversed(self.graph.events):
+            t = ev.type
+            if t == "runtime.budget_exhausted":
+                state = "exhausted"
+                break
+            if t == "runtime.idle":
+                state = "idle"
+                break
+
+        frame_snap: Optional[FrameSnapshot] = None
+        if self.frame is not None:
+            frame_snap = FrameSnapshot(
+                id=self.frame.id,
+                name=getattr(self.frame, "name", None),
+            )
+
+        # Behaviors: only enumerable if we've built the registry. Pre-run
+        # status() calls work fine but show an empty list (which is what
+        # the operator should see — registry isn't materialized yet).
+        b_infos: list[BehaviorInfo] = []
+        if self.registry is not None:
+            for b in self.registry.all():
+                kind = "function"
+                if isinstance(b, RelationBehavior):
+                    kind = "relation"
+                elif isinstance(b, LLMBehavior):
+                    kind = "llm"
+                b_infos.append(
+                    BehaviorInfo(
+                        name=b.name,
+                        kind=kind,
+                        subscribed_to=tuple(b.on or ()),
+                        pattern=getattr(b, "pattern", None),
+                        activate_after=getattr(b, "activate_after", None),
+                    )
+                )
+
+        events = self.graph.events
+        tail = events[-recent:] if recent > 0 else []
+        e_summaries = tuple(
+            EventSummary(
+                id=e.id, type=e.type, actor=e.actor, timestamp=e.timestamp
+            )
+            for e in tail
+        )
+
+        return RuntimeStatus(
+            run_id=self.graph.run_id,
+            state=state,  # type: ignore[arg-type]
+            queue_depth=len(self._queue),
+            events_processed=len(events),
+            budget=budget_snap,
+            frame=frame_snap,
+            registered_behaviors=tuple(b_infos),
+            recent_events=e_summaries,
+        )
+
     # ---------- lifecycle / idle emit (bypass queue) ----------
 
     def _emit_lifecycle(self, type_: str, payload: dict[str, Any]) -> Event:
@@ -1409,6 +1568,7 @@ class Runtime:
         tools: Optional[Iterable[Tool]] = None,
         replay_tool_cache: bool = False,
         replay_reinvoke_deterministic: bool = False,
+        metrics: Optional[Metrics] = None,
     ) -> "Runtime":
         """Open `path`, choose a run, replay its events, return a Runtime
         wired to continue from where the log left off.
@@ -1420,14 +1580,15 @@ class Runtime:
         events and compares the resulting event-type stream (id, type) to
         the log. KNOWN LIMITATION (v0.5): payload-only drift is not
         detected; see CONTRACT v0.5 #7. Tightens in v0.6 with LLMs.
-        """
-        from activegraph.store.sqlite import SQLiteEventStore
 
-        chosen = run_id or SQLiteEventStore.most_recent_run_id(path)
+        v0.8: ``path`` accepts a URL (sqlite:///... or postgres://...)
+        in addition to a bare SQLite path. Backward-compatible.
+        """
+        chosen = run_id or _most_recent_run_id(path)
         if chosen is None:
             raise FileNotFoundError(f"no runs found in {path}")
 
-        store = SQLiteEventStore(path, run_id=chosen)
+        store = _open_sqlite_store(path, run_id=chosen)
         graph = Graph(ids=IDGen(), run_id=chosen)
         events = list(store.iter_events())
         for ev in events:
@@ -1459,6 +1620,7 @@ class Runtime:
             replay_tool_cache=replay_tool_cache,
             tool_cache=tcache,
             replay_reinvoke_deterministic=replay_reinvoke_deterministic,
+            metrics=metrics,
         )
         # Make sure the run row exists (older files might predate it; in v0.5
         # they shouldn't, but be defensive).
@@ -1648,10 +1810,37 @@ def _first_goal(graph: Graph) -> Optional[str]:
     return None
 
 
-def _open_sqlite_store(path: str, run_id: str):
+def _most_recent_run_id(path_or_url: str) -> Optional[str]:
+    """Backend-aware most_recent_run_id used by Runtime.load."""
+    if "://" in path_or_url:
+        from activegraph.store.url import parse_store_url
+
+        parsed = parse_store_url(path_or_url)
+        if parsed.scheme == "postgres":
+            from activegraph.store.postgres import PostgresEventStore
+
+            return PostgresEventStore.most_recent_run_id(parsed.raw)
+        # sqlite via URL — fall through to the SQLite helper on the path
+        path_or_url = parsed.sqlite_path or ""
     from activegraph.store.sqlite import SQLiteEventStore
 
-    return SQLiteEventStore(path, run_id=run_id)
+    return SQLiteEventStore.most_recent_run_id(path_or_url)
+
+
+def _open_sqlite_store(path_or_url: str, run_id: str):
+    """Open a store by path (v0.5-v0.7 sugar) or URL (v0.8).
+
+    A bare path like ``/tmp/run.db`` is treated as a SQLite path —
+    preserves backward compatibility with all existing call sites.
+    Anything containing ``://`` is parsed as a connection URL.
+    """
+    if "://" in path_or_url:
+        from activegraph.store import open_store
+
+        return open_store(path_or_url, run_id=run_id)
+    from activegraph.store.sqlite import SQLiteEventStore
+
+    return SQLiteEventStore(path_or_url, run_id=run_id)
 
 
 def _requeue_unfired(rt: "Runtime", events: list[Event]) -> None:

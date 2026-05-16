@@ -28,9 +28,12 @@ from activegraph.runtime.runtime import Runtime
 from activegraph.store import (
     EventStore,
     InMemoryEventStore,
+    InvalidStoreURL,
     NonSerializableEventError,
     RunRecord,
     SQLiteEventStore,
+    open_store,
+    parse_store_url,
 )
 # v0.7 public surface for tools
 from activegraph.tools import (
@@ -42,6 +45,17 @@ from activegraph.tools import (
     clear_tool_registry,
     get_tool_registry,
     tool,
+)
+# v0.8 observability surface
+from activegraph.observability import (
+    Metrics,
+    MigrationReport,
+    MigrationRunReport,
+    NoOpMetrics,
+    PrometheusMetrics,
+    RuntimeStatus,
+    configure_logging,
+    migrate,
 )
 
 __all__ = [
@@ -58,19 +72,26 @@ __all__ = [
     "Graph",
     "IDGen",
     "InMemoryEventStore",
+    "InvalidStoreURL",
     "LLMBehavior",
     "LLMBehaviorError",
+    "Metrics",
+    "MigrationReport",
+    "MigrationRunReport",
     "MissingProviderError",
     "MissingToolError",
+    "NoOpMetrics",
     "NonSerializableEventError",
     "Object",
     "Patch",
     "Policy",
+    "PrometheusMetrics",
     "Relation",
     "RelationBehavior",
     "ReplayDivergenceError",
     "RunRecord",
     "Runtime",
+    "RuntimeStatus",
     "SQLiteEventStore",
     "TickingClock",
     "Tool",
@@ -82,11 +103,15 @@ __all__ = [
     "behavior",
     "clear_registry",
     "clear_tool_registry",
+    "configure_logging",
     "get_registry",
     "get_tool_registry",
     "llm_behavior",
+    "migrate",
+    "open_store",
+    "parse_store_url",
     "relation_behavior",
     "tool",
 ]
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

@@ -1274,3 +1274,330 @@ stdlib `urllib` so it's not a network dependency at import time, but
 no test actually calls it against a URL — the demo's scripted
 provider serves canned URL responses.
 
+
+---
+
+# Active Graph v0.8 — Persistence, observability, operator surface
+
+v0.8 is the milestone where the framework stops adding capability and
+starts hardening the boundary between the runtime and the world it has
+to live in. Three concerns: persistence beyond SQLite (Postgres),
+operator-grade observability (structured logs + metrics), and an
+operator-facing CLI. Backward compatibility with v0–v0.7 is absolute.
+
+## v0.8 #1. PostgresEventStore mirrors SQLiteEventStore
+
+Same schema (`events`, `runs`, `meta`), same protocol, same semantics
+including `UNIQUE(id, run_id)`. Postgres-native types where they
+matter: `BIGSERIAL` for `seq`, `TIMESTAMPTZ` for timestamps, `JSONB`
+for `payload`. Schema version is stored in `meta` and verified on
+every open; a mismatch is a hard error.
+
+The EventStore protocol is the contract. The two implementations are
+interchangeable behind it. No Postgres-specific methods leak through.
+
+## v0.8 #2. Stores are addressed by connection URL
+
+The framework addresses stores by URL everywhere (runtime, CLI,
+library APIs). The schemes follow the SQLAlchemy convention:
+
+- `sqlite:///relative/path.db` (three slashes — relative path)
+- `sqlite:////absolute/path/to/run.db` (four slashes — absolute)
+- `postgres://user:pass@host:port/dbname`
+- `postgresql://user:pass@host:port/dbname` (same scheme)
+
+A URL with no scheme is rejected with a message pointing at the right
+form. `activegraph inspect run.db` fails with "use sqlite:///run.db";
+the framework will not silently guess. `Runtime.load(path)` accepts
+either a URL or a bare SQLite path (the v0.5–v0.7 sugar form) so
+existing call sites are unchanged.
+
+`open_store(url, run_id)` is the single library entry point that
+dispatches on scheme; the Postgres dependency stays optional via lazy
+import.
+
+## v0.8 #3. Connection management is the user's job
+
+`PostgresEventStore` accepts a URL string (opens a dedicated
+connection), an existing `psycopg.Connection` (the store does not own
+lifecycle), or a `psycopg_pool.ConnectionPool` (the store does
+`getconn` / `putconn` per operation).
+
+The framework does NOT ship its own pool. Production users pass
+`psycopg_pool.ConnectionPool` with tuning they own. This keeps the
+framework's dependency surface tiny and avoids prescribing pool
+parameters we are not in a position to choose.
+
+Pinned: `psycopg>=3.1,<4`. Async is supported by psycopg 3 but the
+v0.8 runtime is sync; async is a v1+ conversation.
+
+## v0.8 #4. The event log is not queryable through the framework
+
+JSONB is queryable in Postgres, but we do not expose
+`EventStore.query_by_payload(...)`. The temptation is real; resist it.
+The event log is append-only and read-sequentially from the framework's
+side. Payload querying is a database concern. Users who want to run
+Postgres queries against the JSONB column directly are welcome to;
+the framework does not help.
+
+## v0.8 #5. Migration is transaction-per-run, idempotent, one-directional
+
+`activegraph migrate --from <url> --to <url>` copies runs from source
+to destination with these rules:
+
+- Each run migrates in **a single destination transaction**. A failure
+  mid-run rolls that run's destination state back. The destination
+  never holds a partially-written run.
+- Writes are idempotent at the event level via
+  `INSERT ... ON CONFLICT (id, run_id) DO NOTHING`. Re-running
+  migration after a partial failure resumes safely.
+- Runs migrate **independently**. A bad run does not block the others.
+  The CLI prints a per-run report; `--json` emits the same data
+  machine-readably.
+- Migration is **one-directional**. No `sync` mode, no rollback,
+  no bidirectional reconciliation. To go back, migrate the other way.
+
+This revises the earlier "copy + verify count" design. Verify-count
+without a transaction is meaningless: both sides of the comparison
+are computed against the broken intermediate state. The transaction-
+per-run model is strictly better and not more complex.
+
+## v0.8 #6. Structured logging schema
+
+Every log line is a single JSON object on one line. Fields that don't
+apply are **omitted, not nulled**. The schema is the operator
+contract; dashboards built against these field names keep working
+across framework versions.
+
+Schema (`LOG_FIELDS` in `activegraph/observability/logging.py`):
+
+  timestamp, level, logger, message, run_id, event_id, behavior,
+  tool, model, cache_hit, cost_usd, latency_seconds, reason,
+  error_type, error_message
+
+The framework does NOT auto-configure logging on import. By default
+it logs to `logging.getLogger("activegraph")` and lets the user's
+config handle output. `configure_logging(level, json_output=True,
+payload_redactor=None)` is the opinionated opt-in.
+
+Adding a field is a schema-version change. Removing or renaming a
+field is a breaking change.
+
+## v0.8 #7. Logging level discipline
+
+DEBUG    — view construction, prompt assembly, cache lookup, queue ops.
+INFO     — every event emitted, behavior invoked, tool call.
+WARNING  — budget approaching limits, retries, pattern eval slowness.
+ERROR    — `behavior.failed` with non-budget reasons.
+CRITICAL — event log inconsistency, schema mismatch, replay divergence.
+
+No `print()` calls anywhere in the framework. The trace printer is a
+developer tool; it writes to stdout and does not log.
+
+## v0.8 #8. Metrics protocol is three methods
+
+    class Metrics(Protocol):
+        def counter(self, name, tags, value=1.0): ...
+        def histogram(self, name, tags, value): ...
+        def gauge(self, name, tags, value): ...
+
+No timers (use a histogram with a latency value). No summaries
+(Prometheus-specific). No custom types. Three methods is the entire
+surface custom backends implement.
+
+Standard tag keys: `event_type`, `behavior`, `tool`, `model`,
+`reason`, `run_id` (gauges only — see #C4).
+
+## v0.8 #9. Standard metrics (operator contract)
+
+The runtime emits this fixed set of metrics. Adding a metric is a
+public API change; the table is documented in `docs/operating.md` and
+test-pinned in `activegraph/observability/metrics.py::METRIC_NAMES`.
+
+Names follow Prometheus conventions natively (`_total` for counters,
+`_seconds` for duration histograms, `_usd` for currency histograms).
+This avoids the `prometheus_client` silent dot-to-underscore renaming
+that would otherwise make documented names diverge from exported
+names.
+
+Counters:
+  activegraph_events_emitted_total{event_type}
+  activegraph_behaviors_invoked_total{behavior}
+  activegraph_behaviors_failed_total{behavior, reason}
+  activegraph_llm_calls_total{model}
+  activegraph_llm_cache_hits_total{model}
+  activegraph_llm_failed_total{model, reason}
+  activegraph_tools_calls_total{tool}
+  activegraph_tools_cache_hits_total{tool}
+  activegraph_tools_failed_total{tool, reason}
+  activegraph_patterns_evaluated_total
+  activegraph_replay_divergence_detected_total{reason}
+
+Histograms:
+  activegraph_behaviors_duration_seconds{behavior}
+  activegraph_llm_tokens_in{model}
+  activegraph_llm_tokens_out{model}
+  activegraph_llm_cost_usd{model}
+  activegraph_tools_duration_seconds{tool}
+  activegraph_patterns_evaluation_duration_seconds
+
+Gauges:
+  activegraph_queue_depth
+  activegraph_budget_cost_remaining_usd{run_id}
+  activegraph_budget_events_remaining{run_id}
+
+Note: cache hits are a **separate counter**, not a `cache_hit=true|false`
+tag on the unified call counter. This lets dashboards do
+`rate(cache_hits) / rate(calls)` as a one-line query instead of
+filtering by tag value. Success/failure follow the same pattern —
+separate counters, no `success` tag.
+
+## v0.8 #C4. The run_id cardinality rule (locked)
+
+> `run_id` MAY appear as a tag on **gauges of active state** (where
+> cardinality is bounded by the number of concurrently active runs).
+> `run_id` MUST NOT appear as a tag on **counters or histograms**.
+
+This rule prevents the most common Prometheus operational disaster:
+unbounded cardinality from per-run labels accumulating forever. The
+budget gauges are the only exception, and they live only for the
+duration of a run.
+
+The rule is enforced by `validate_cardinality_rule()` which runs at
+import time and in the test suite (`test_observability_metrics.py`).
+Any standard metric whose tag set violates the rule fails the build.
+
+## v0.8 #10. NoOpMetrics is the default; PrometheusMetrics is opt-in
+
+`NoOpMetrics` does nothing — three method bodies, each a single
+`return`. The runtime is fully functional without metrics.
+
+`PrometheusMetrics` lazy-imports `prometheus_client` (opt-in dep via
+`activegraph[prometheus]`). Custom backends — OpenTelemetry, Datadog,
+statsd — implement the three-method protocol directly. The framework
+does not ship adapters.
+
+## v0.8 #11. runtime.status() shape
+
+    @dataclass(frozen=True)
+    class RuntimeStatus:
+        run_id: str
+        state: Literal["idle", "running", "stopped", "exhausted"]
+        queue_depth: int
+        events_processed: int
+        budget: BudgetSnapshot
+        frame: FrameSnapshot | None
+        registered_behaviors: tuple[BehaviorInfo, ...]
+        recent_events: tuple[EventSummary, ...]
+
+`status(recent: int = 20)` — single parameter controls the tail
+length. The CLI's `inspect --tail N` passes through.
+
+State is derived **from the event log**, not from in-memory
+bookkeeping. This means a freshly-loaded runtime and the runtime that
+saved the log agree on state. Walk back through events: if the most
+recent terminal lifecycle event is `runtime.budget_exhausted` →
+`exhausted`; if it's `runtime.idle` → `idle`; otherwise `stopped`.
+`running` is reserved for cross-thread observation of an in-progress
+loop (single-threaded today; documented for future async use).
+
+There is **no `last_error` field**. Errors are events; filter
+`recent_events` for type `behavior.failed`, or query the event store
+directly. Convenience accessors that look like the source of truth
+but mean different things are bug-bait.
+
+## v0.8 #12. The CLI is a thin wrapper around library APIs
+
+No business logic in the CLI itself. Each subcommand parses arguments,
+calls into the library, and formats output. Programmatic callers do
+exactly the same things.
+
+Subcommands:
+
+    activegraph inspect      <url> [--run-id <id>] [--tail N] [--json]
+    activegraph replay       <url> --run-id <id> [--json]
+    activegraph fork         <url> --run-id <id> --at-event <id>
+                                   --label <label> [--to <url>] [--json]
+    activegraph diff         <url> --run-a <id> --run-b <id> [--json]
+    activegraph export-trace <url> --run-id <id>
+                                   [--format text|jsonl] [-o PATH]
+    activegraph migrate      --from <url> --to <url>
+                             [--run-id <id>] [--json]
+
+Built with `click`. The CLI is a hard dep (`click>=8,<9`) — it is
+part of the operator surface.
+
+## v0.8 #13. CLI exit codes (locked)
+
+  0  success
+  1  generic error
+  2  usage error (bad arguments, missing options — click default)
+  3  not found (run id does not exist, store path does not exist)
+  4  corruption (schema version mismatch, event log inconsistency)
+  5  divergence (replay-strict failure)
+
+Operators and CI systems wrap these. Changing a code is a breaking
+change.
+
+## v0.8 #14. Backward compatibility is absolute
+
+- Every v0–v0.7 test passes unchanged.
+- Trace printer output is byte-identical for non-LLM, non-tool runs
+  (snapshot-tested as before).
+- SQLite remains the default; Postgres is opt-in.
+- Metrics default to no-op.
+- Logging defaults to the user's existing config; the framework adds
+  no handlers on import.
+- `Runtime`, `Runtime.load`, and `runtime.save_state` accept bare
+  SQLite paths exactly as in v0.5+.
+
+The v0.8 stance on event payload schemas: **no new fields on existing
+event types**. New event types are fine; mutating existing payloads
+breaks every snapshot test and is a v1+ change. None are added in
+v0.8.
+
+## v0.8 #15. Logging is opt-in via configuration
+
+A library that auto-configures logging on import is hostile to
+operators who have their own setup. The framework attaches to
+`logging.getLogger("activegraph")` and propagates to whatever handler
+the user installed. `configure_logging(...)` is the explicit opt-in
+for the documented JSON schema.
+
+## v0.8 #16. The killer demo is the spec
+
+`examples/operate_a_run.py` was written before any implementation.
+The runtime, the CLI, and the operator guide are built backward to
+make it run. The example exercises every v0.8 surface:
+SQLite-backed run → status → CLI inspect → CLI fork → CLI diff →
+JSONL export → optional Postgres migration. The example is
+integration-tested (`tests/test_operate_example.py`); if the example
+breaks, the test catches it.
+
+## v0.8 #17. EventStoreConformance is the reusable test suite
+
+`activegraph.store.conformance.EventStoreConformance` is a mixin
+class. Concrete subclasses override `make_store(run_id)` and
+`cleanup()`; the same suite runs against InMemory, SQLite, and
+Postgres. Any future store implementation gets free coverage by
+subclassing.
+
+## v0.8 #18. Postgres tests are gated, never mocked
+
+`ACTIVEGRAPH_TEST_POSTGRES_URL` env var enables the Postgres
+conformance suite. Without it, the tests skip — local dev without
+Docker runs the other 320+ tests unaffected. Mocking Postgres
+produces false confidence; we don't.
+
+## v0.8 #19. What v0.8 deliberately does not add
+
+- Web UI
+- HTTP server
+- Real-time graph subscriptions (websockets, SSE)
+- Distributed runtime
+- Multi-model LLM routing
+- Streaming LLM responses
+- Packs (still v1.0)
+
+Stay scoped. v0.8 is less exciting than v0.6 and v0.7 by design; it
+is what makes the framework deployable.

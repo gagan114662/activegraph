@@ -1,0 +1,215 @@
+"""Metrics protocol + standard metric table — CONTRACT v0.8 #8–#10."""
+
+from __future__ import annotations
+
+import pytest
+
+from activegraph import Graph, Runtime, behavior, clear_registry
+from activegraph.observability.metrics import (
+    METRIC_BY_NAME,
+    METRIC_NAMES,
+    Metrics,
+    NoOpMetrics,
+    validate_cardinality_rule,
+)
+
+
+class RecordingMetrics:
+    """Test double — records every metric call so assertions are easy."""
+
+    def __init__(self):
+        self.counters: list[tuple[str, dict, float]] = []
+        self.histograms: list[tuple[str, dict, float]] = []
+        self.gauges: list[tuple[str, dict, float]] = []
+
+    def counter(self, name, tags, value=1.0):
+        self.counters.append((name, dict(tags), value))
+
+    def histogram(self, name, tags, value):
+        self.histograms.append((name, dict(tags), value))
+
+    def gauge(self, name, tags, value):
+        self.gauges.append((name, dict(tags), value))
+
+
+class TestProtocolShape:
+    def test_noop_satisfies_protocol(self):
+        m: Metrics = NoOpMetrics()
+        m.counter("x", {})
+        m.histogram("x", {}, 1.0)
+        m.gauge("x", {}, 1.0)
+
+    def test_noop_does_not_throw_on_unknown_names(self):
+        m = NoOpMetrics()
+        m.counter("never_registered", {"random": "tag"}, 42)
+
+
+class TestStandardMetricTable:
+    def test_cardinality_rule_passes_for_built_in_metrics(self):
+        validate_cardinality_rule(METRIC_NAMES)
+
+    def test_run_id_only_on_gauges(self):
+        for spec in METRIC_NAMES:
+            if "run_id" in spec.tags:
+                assert spec.kind == "gauge", (
+                    f"{spec.name} ({spec.kind}) lists run_id as a tag — "
+                    "forbidden by CONTRACT v0.8 #C4."
+                )
+
+    def test_cardinality_rule_catches_violation(self):
+        from activegraph.observability.metrics import MetricSpec
+
+        bad = (
+            MetricSpec("bad_counter_total", "counter", ("run_id",), "x"),
+        )
+        with pytest.raises(AssertionError, match="run_id"):
+            validate_cardinality_rule(bad)
+
+    def test_known_metric_names_present(self):
+        # Anchor a few well-known names so accidental renames fail loud.
+        for name in (
+            "activegraph_events_emitted_total",
+            "activegraph_behaviors_invoked_total",
+            "activegraph_behaviors_failed_total",
+            "activegraph_llm_calls_total",
+            "activegraph_llm_cache_hits_total",
+            "activegraph_tools_calls_total",
+            "activegraph_tools_cache_hits_total",
+            "activegraph_queue_depth",
+            "activegraph_budget_cost_remaining_usd",
+            "activegraph_replay_divergence_detected_total",
+        ):
+            assert name in METRIC_BY_NAME, f"missing standard metric: {name}"
+
+    def test_counters_end_in_total(self):
+        for spec in METRIC_NAMES:
+            if spec.kind == "counter":
+                assert spec.name.endswith("_total"), (
+                    f"counter {spec.name} should end with _total per "
+                    "Prometheus conventions."
+                )
+
+    def test_duration_histograms_end_in_seconds(self):
+        for spec in METRIC_NAMES:
+            if spec.kind == "histogram" and "duration" in spec.name:
+                assert spec.name.endswith("_seconds"), (
+                    f"duration histogram {spec.name} should end with _seconds."
+                )
+
+    def test_cost_histograms_end_in_usd(self):
+        for spec in METRIC_NAMES:
+            if spec.kind == "histogram" and "cost" in spec.name:
+                assert spec.name.endswith("_usd"), (
+                    f"cost histogram {spec.name} should end with _usd."
+                )
+
+
+class TestRuntimeEmitsExpectedMetrics:
+    def test_events_emitted_total_fires(self):
+        clear_registry()
+
+        @behavior(name="p", on=["goal.created"])
+        def p(event, graph, ctx):
+            graph.add_object("task", {"x": 1})
+
+        m = RecordingMetrics()
+        g = Graph()
+        rt = Runtime(g, metrics=m)
+        rt.run_goal("test")
+        names = [n for n, _, _ in m.counters]
+        assert "activegraph_events_emitted_total" in names
+        # Must carry the event_type tag
+        for name, tags, _ in m.counters:
+            if name == "activegraph_events_emitted_total":
+                assert "event_type" in tags
+
+    def test_behaviors_invoked_total_fires(self):
+        clear_registry()
+
+        @behavior(name="planner", on=["goal.created"])
+        def planner(event, graph, ctx):
+            pass
+
+        m = RecordingMetrics()
+        g = Graph()
+        rt = Runtime(g, metrics=m)
+        rt.run_goal("x")
+        invoked = [t for n, t, _ in m.counters if n == "activegraph_behaviors_invoked_total"]
+        assert len(invoked) == 1
+        assert invoked[0] == {"behavior": "planner"}
+
+    def test_behaviors_failed_total_fires_on_exception(self):
+        clear_registry()
+
+        @behavior(name="bad", on=["goal.created"])
+        def bad(event, graph, ctx):
+            raise ValueError("nope")
+
+        m = RecordingMetrics()
+        g = Graph()
+        rt = Runtime(g, metrics=m)
+        rt.run_goal("x")
+        failed = [(t, v) for n, t, v in m.counters if n == "activegraph_behaviors_failed_total"]
+        assert len(failed) == 1
+        tags, _ = failed[0]
+        assert tags["behavior"] == "bad"
+        assert "ValueError" in tags["reason"]
+
+    def test_behaviors_duration_histogram_fires(self):
+        clear_registry()
+
+        @behavior(name="p", on=["goal.created"])
+        def p(event, graph, ctx):
+            pass
+
+        m = RecordingMetrics()
+        g = Graph()
+        rt = Runtime(g, metrics=m)
+        rt.run_goal("x")
+        names = [n for n, _, _ in m.histograms]
+        assert "activegraph_behaviors_duration_seconds" in names
+
+    def test_queue_depth_gauge_updates(self):
+        clear_registry()
+
+        @behavior(name="p", on=["goal.created"])
+        def p(event, graph, ctx):
+            graph.add_object("t", {"x": 1})
+
+        m = RecordingMetrics()
+        g = Graph()
+        rt = Runtime(g, metrics=m)
+        rt.run_goal("x")
+        assert any(n == "activegraph_queue_depth" for n, _, _ in m.gauges)
+
+
+class TestPrometheusMetricsOptional:
+    """Prometheus is opt-in. If installed, basic emission works."""
+
+    def test_available_flag(self):
+        from activegraph.observability.prometheus import PrometheusMetrics
+
+        # Whether prometheus_client is installed or not, this is a boolean.
+        assert isinstance(PrometheusMetrics.available(), bool)
+
+    def test_emit_with_prometheus(self):
+        from activegraph.observability.prometheus import PrometheusMetrics
+
+        if not PrometheusMetrics.available():
+            pytest.skip("prometheus_client not installed")
+        import prometheus_client
+
+        registry = prometheus_client.CollectorRegistry()
+        m = PrometheusMetrics(registry=registry)
+        m.counter("activegraph_events_emitted_total", {"event_type": "goal.created"})
+        m.histogram(
+            "activegraph_behaviors_duration_seconds",
+            {"behavior": "p"},
+            0.01,
+        )
+        m.gauge("activegraph_queue_depth", {}, 2.0)
+        # Roundtrip via the registry — names should be present.
+        names = {metric.name for metric in registry.collect()}
+        assert "activegraph_events_emitted" in names  # _total suffix dropped
+        assert "activegraph_behaviors_duration_seconds" in names
+        assert "activegraph_queue_depth" in names

@@ -49,6 +49,7 @@ runtime.print_trace()
 - [Tracing](#tracing)
 - [Budgets and safety](#budgets-and-safety)
 - [Replay and resume](#replay-and-resume)
+- [Operating in production](#operating-in-production)
 - [LLM behaviors](#llm-behaviors)
 - [Patterns](#patterns)
 - [What this is not](#what-this-is-not)
@@ -660,6 +661,25 @@ reload in a fresh process, fork, inject a counter-hypothesis, diff.
 Forking is uniquely cheap on an event-sourced graph and is one of the
 strongest reasons to use this runtime over a chat-based framework.
 
+## Operating in production
+
+v0.8 adds the operator surface: structured logging, Prometheus
+metrics, a `runtime.status()` introspection primitive, an
+`activegraph` CLI for inspecting / forking / migrating runs, and
+`PostgresEventStore` for shared-state deployments. The operator guide
+([docs/operating.md](docs/operating.md)) is the document for people
+running this as part of a system other people depend on; the
+[`examples/operate_a_run.py`](examples/operate_a_run.py) demo
+exercises the whole loop end-to-end.
+
+```bash
+activegraph inspect sqlite:////tmp/run.db          # status snapshot
+activegraph fork    sqlite:////tmp/run.db \         # branch a run
+    --run-id run_01J... --at-event evt_42 --label what-if
+activegraph migrate --from sqlite:////tmp/dev.db \  # SQLite -> Postgres
+                    --to   postgres://localhost/prod
+```
+
 ## LLM behaviors
 
 LLM behaviors are first-class but opt-in. The substrate keeps making sense
@@ -929,6 +949,15 @@ cannot mutate the graph directly; if a tool wants to record
 information, it returns it in its output and the calling behavior
 writes the mutation.
 
+**Pattern: closures, not threaded graph refs.** The deliberate choice
+keeps the "tools cannot mutate the graph" invariant clean and avoids
+exposing graph methods through `ToolContext` that don't exist on
+`BehaviorGraph`. Write a factory that builds the tool over a captured
+`Graph` reference, register the factory's return value, and the tool
+gets the read access it needs without breaking the invariant. The
+graph_query tool in `activegraph/tools/graph_query.py` is the
+reference.
+
 ### An LLM behavior that uses tools
 
 ```python
@@ -1129,7 +1158,7 @@ A few patterns that fall out of the model naturally.
 - Frame-aware prompt construction
 - Cost accounting
 
-**v0.7 — Tools + advanced matching (current)**
+**v0.7 — Tools + advanced matching**
 
 - `@tool` decorator: tools as first-class primitives
 - LLM ↔ tool turn loop owned by the runtime
@@ -1142,6 +1171,25 @@ A few patterns that fall out of the model naturally.
 - Tool budgets + cost-sharing with LLM
 - Causal chain crosses tool boundaries
 - Trace integration for all new event types
+
+The headline property v0.7 unlocks: **forkable, replayable,
+cache-hit-by-default.** A run with N LLM calls and M tool calls can
+be forked and re-run from any historical event with zero new API
+calls, provided the re-run regenerates identical prompts and tool
+arguments. `examples/diligence_with_tools.py` demonstrates a fork
+that hits 9 cached LLM responses and 6 cached tool responses without
+talking to any provider. No other agent framework can do this.
+
+**v0.8 — Persistence beyond SQLite, observability, operator surface (current)**
+
+- `PostgresEventStore` behind the same `EventStore` protocol as SQLite
+- Connection-URL addressing everywhere (`sqlite:///`, `postgres://`)
+- `activegraph migrate` — transaction-per-run, idempotent, one-directional
+- Structured JSON logging with a documented schema
+- `Metrics` protocol + `NoOpMetrics` + `PrometheusMetrics`
+- `runtime.status()` — frozen snapshot for introspection
+- `activegraph` CLI: `inspect`, `replay`, `fork`, `diff`, `export-trace`, `migrate`
+- Operator guide ([docs/operating.md](docs/operating.md))
 
 **v1.0 — Packs**
 
@@ -1165,6 +1213,8 @@ MIT.
 ## Contributing
 
 The core runtime should stay small and sharp. Contributions to packs, backends, and LLM integrations are especially welcome. Open an issue before large changes — the abstractions are still settling.
+
+**Test discipline:** tests must remain deterministic. No live network calls in CI. LLM and tool tests use recorded fixtures (`RecordedLLMProvider`, `RecordedToolProvider`); HTTP tests use the scripted provider. If a contribution adds a test that would only pass with a live API key or live HTTP, it cannot land.
 
 ---
 
