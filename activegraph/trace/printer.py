@@ -140,6 +140,60 @@ def _fmt_behavior_failed(e: Event) -> str:
     return f'{_format_tag("behavior.failed")}{name}: {et}: {msg}'
 
 
+def _fmt_llm_requested(e: Event) -> str:
+    """CONTRACT v0.6 #14:
+    `[llm.requested] evt_NNN  behavior  model=... tokens_in~NNNN budget_remaining=$X.XX`
+
+    The `~` prefix on `tokens_in` marks an estimate; absent if no
+    pre-call count was made (no cost budget OR cache hit). The
+    `budget_remaining=$...` segment is dropped if no cost budget.
+    """
+    p = e.payload or {}
+    name = p.get("behavior", "?")
+    parts: list[str] = [f"{e.id}  {name}", f"model={p.get('model', '?')}"]
+    if p.get("cache_hit"):
+        parts.append("cache_hit=true")
+    if "estimated_input_tokens" in p:
+        parts.append(f"tokens_in~{p['estimated_input_tokens']}")
+    if p.get("budget_remaining_usd") is not None:
+        parts.append(f"budget_remaining=${_money(p['budget_remaining_usd'])}")
+    return f'{_format_tag("llm.requested")}{"  ".join([parts[0], " ".join(parts[1:])])}'
+
+
+def _fmt_llm_responded(e: Event) -> str:
+    """CONTRACT v0.6 #14:
+    `[llm.responded] evt_NNN  behavior  tokens_in=NNNN tokens_out=NNN cost=$X.XXX latency=X.Xs`
+
+    Cache hits render with `cache_hit=true` and no cost/latency segments
+    (latency is the cached response's recorded latency, not now).
+    """
+    p = e.payload or {}
+    name = p.get("behavior", "?")
+    parts: list[str] = [f"{e.id}  {name}"]
+    if p.get("cache_hit"):
+        parts.append("cache_hit=true")
+    in_tok = p.get("input_tokens")
+    out_tok = p.get("output_tokens")
+    if in_tok is not None:
+        parts.append(f"tokens_in={in_tok}")
+    if out_tok is not None:
+        parts.append(f"tokens_out={out_tok}")
+    cost = p.get("cost_usd")
+    if cost is not None and not p.get("cache_hit"):
+        parts.append(f"cost=${_money(cost)}")
+    lat = p.get("latency_seconds")
+    if lat is not None and not p.get("cache_hit"):
+        parts.append(f"latency={float(lat):.1f}s")
+    return f'{_format_tag("llm.responded")}{"  ".join([parts[0], " ".join(parts[1:])])}'
+
+
+def _money(v: Any) -> str:
+    try:
+        return f"{float(v):.3f}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
 def _fmt_runtime_idle(_: Event) -> str:
     return f'{_format_tag("runtime.idle")}queue empty, budget remaining'
 
@@ -177,6 +231,8 @@ _FORMATTERS = {
     "behavior.completed": _fmt_behavior_completed,
     "behavior.failed": _fmt_behavior_failed,
     "relation_behavior.started": _fmt_relation_behavior_started,
+    "llm.requested": _fmt_llm_requested,
+    "llm.responded": _fmt_llm_responded,
     "runtime.idle": _fmt_runtime_idle,
     "runtime.budget_exhausted": _fmt_runtime_budget_exhausted,
 }

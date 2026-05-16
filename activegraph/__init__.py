@@ -3,11 +3,12 @@
 The graph is the world. Behaviors are physics. The trace is the proof.
 """
 
-from activegraph.behaviors.base import Behavior, RelationBehavior
+from activegraph.behaviors.base import Behavior, LLMBehavior, RelationBehavior
 from activegraph.behaviors.decorators import (
     behavior,
     clear_registry,
     get_registry,
+    llm_behavior,
     relation_behavior,
 )
 from activegraph.core.clock import Clock, FrozenClock, TickingClock
@@ -17,6 +18,7 @@ from activegraph.core.ids import IDGen
 from activegraph.core.patch import Patch
 from activegraph.core.view import View
 from activegraph.frame import Frame
+from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
 from activegraph.policy import Policy
 from activegraph.runtime.budget import Budget
 from activegraph.runtime.diff import Diff, DivergentObject, DivergentRelation
@@ -44,6 +46,9 @@ __all__ = [
     "Graph",
     "IDGen",
     "InMemoryEventStore",
+    "LLMBehavior",
+    "LLMBehaviorError",
+    "MissingProviderError",
     "NonSerializableEventError",
     "Object",
     "Patch",
@@ -59,7 +64,8 @@ __all__ = [
     "behavior",
     "clear_registry",
     "get_registry",
+    "llm_behavior",
     "relation_behavior",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

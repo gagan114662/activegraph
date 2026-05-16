@@ -277,10 +277,13 @@ class Graph:
         caused_by: Optional[str] = None,
         frame_id: Optional[str] = None,
         evidence: Optional[list[str]] = None,
+        llm_request_event_id: Optional[str] = None,
     ) -> Object:
         obj_id = self.ids.object(type)
         clean = _strip_provenance(copy.deepcopy(data))
-        provenance = self._provenance(actor, caused_by, frame_id, evidence)
+        provenance = self._provenance(
+            actor, caused_by, frame_id, evidence, llm_request_event_id
+        )
         payload = {
             "object": {
                 "id": obj_id,
@@ -313,10 +316,13 @@ class Graph:
         actor: str = "system",
         caused_by: Optional[str] = None,
         frame_id: Optional[str] = None,
+        llm_request_event_id: Optional[str] = None,
     ) -> Relation:
         rel_id = self.ids.relation()
         clean = _strip_provenance(copy.deepcopy(data or {}))
-        provenance = self._provenance(actor, caused_by, frame_id, [])
+        provenance = self._provenance(
+            actor, caused_by, frame_id, [], llm_request_event_id
+        )
         payload = {
             "relation": {
                 "id": rel_id,
@@ -394,6 +400,7 @@ class Graph:
         frame_id: Optional[str] = None,
         rationale: Optional[str] = None,
         evidence: Optional[list[str]] = None,
+        llm_request_event_id: Optional[str] = None,
     ) -> Patch:
         """Auto-apply shortcut: build patch, version-check, emit applied/rejected."""
         obj = self._objects.get(target)
@@ -410,7 +417,9 @@ class Graph:
             rationale=rationale,
             evidence=list(evidence or []),
             status="applied",
-            provenance=self._provenance(actor, caused_by, frame_id, evidence),
+            provenance=self._provenance(
+                actor, caused_by, frame_id, evidence, llm_request_event_id
+            ),
         )
         diff = _diff(obj.data, clean)
         event = Event(
@@ -440,6 +449,7 @@ class Graph:
         evidence: Optional[list[str]] = None,
         caused_by: Optional[str] = None,
         frame_id: Optional[str] = None,
+        llm_request_event_id: Optional[str] = None,
     ) -> Patch:
         # Strip "object:" / "relation:" prefix if present (README sugar).
         normalized = target.split(":", 1)[1] if ":" in target else target
@@ -456,7 +466,9 @@ class Graph:
             rationale=rationale,
             evidence=list(evidence or []),
             status="proposed",
-            provenance=self._provenance(proposed_by, caused_by, frame_id, evidence),
+            provenance=self._provenance(
+                proposed_by, caused_by, frame_id, evidence, llm_request_event_id
+            ),
         )
         event = Event(
             id=self.ids.event(),
@@ -556,8 +568,9 @@ class Graph:
         caused_by: Optional[str],
         frame_id: Optional[str],
         evidence: Optional[list[str]],
+        llm_request_event_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        return {
+        p: dict[str, Any] = {
             "created_by": actor,
             "caused_by_event": caused_by,
             "frame_id": frame_id,
@@ -565,6 +578,12 @@ class Graph:
             "evidence": list(evidence or []),
             "run_id": self.run_id,
         }
+        # CONTRACT v0.6 #15: objects/relations/patches created inside an
+        # @llm_behavior handler carry the llm.requested event id so causal
+        # chain walks can cross the LLM boundary.
+        if llm_request_event_id is not None:
+            p["llm_request_event_id"] = llm_request_event_id
+        return p
 
 
 # ---------- the projector — module-level, single mutation code path ----------
