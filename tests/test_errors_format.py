@@ -20,12 +20,14 @@ import pytest
 
 from activegraph import (
     ActiveGraphError,
+    ApprovalNotFoundError,
     ConfigurationError,
     CorruptedEventPayloadError,
     DuplicateEventError,
     EventNotFoundError,
     ExecutionError,
     InvalidStoreURL,
+    LLMBehaviorError,
     NonSerializableEventError,
     PackError,
     PatternError,
@@ -34,6 +36,8 @@ from activegraph import (
     ReplayError,
     SchemaVersionMismatch,
     StorageError,
+    ToolError,
+    UnknownToolError,
     UnsupportedPatternError,
 )
 
@@ -588,3 +592,145 @@ def test_duplicate_event_is_a_value_error() -> None:
     store.append(e1)
     with pytest.raises(ValueError):
         store.append(e1)
+
+
+# ---------- PR-D: ExecutionError category ------------------------------
+
+
+def test_exec_leaves_inherit_from_execution_error() -> None:
+    """Every PR-D leaf is wired into the v1.0 hierarchy."""
+    for cls in (LLMBehaviorError, ToolError, UnknownToolError, ApprovalNotFoundError):
+        assert issubclass(cls, ExecutionError), cls
+        assert issubclass(cls, ActiveGraphError), cls
+
+
+def test_exec_leaves_preserve_legacy_base_classes() -> None:
+    """The carriers and lookup error preserve back-compat classes:
+    ToolError stays Exception; UnknownToolError keeps RuntimeError;
+    ApprovalNotFoundError keeps LookupError."""
+    assert issubclass(UnknownToolError, RuntimeError)
+    assert issubclass(ApprovalNotFoundError, LookupError)
+
+
+def test_llm_behavior_error_preserves_reason_signature() -> None:
+    """CONTRACT v0.6 #11 — the (reason, message, payload_extras)
+    constructor is the wire contract between LLM providers and the
+    runtime's behavior.failed event. PR-D preserves the signature so
+    the ~8 internal raise sites in providers do not need to change."""
+    err = LLMBehaviorError(
+        "llm.parse_error",
+        "no JSON found",
+        payload_extras={"raw_text": "<...>"},
+    )
+    assert err.reason == "llm.parse_error"
+    assert err.payload_extras == {"raw_text": "<...>"}
+    assert err.context["reason"] == "llm.parse_error"
+    assert err.context["payload_extras"] == {"raw_text": "<...>"}
+
+
+def test_tool_error_preserves_reason_signature() -> None:
+    err = ToolError(
+        "tool.timeout",
+        "took 31s, exceeds 30s ceiling",
+        payload_extras={"elapsed_seconds": 31.0},
+    )
+    assert err.reason == "tool.timeout"
+    assert err.payload_extras == {"elapsed_seconds": 31.0}
+
+
+def test_llm_behavior_error_parse_error_snapshot() -> None:
+    """The highest-traffic LLM failure mode — the model returned
+    something that wasn't JSON. Recovery names both fixture and live
+    cases."""
+    err = LLMBehaviorError(
+        "llm.parse_error",
+        "Expecting value: line 1 column 1 (char 0)",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("llm_behavior_error__parse_error", err)
+
+
+def test_llm_behavior_error_schema_violation_snapshot() -> None:
+    """The structural LLM failure — JSON parsed, but didn't match the
+    declared output_schema. Recovery walks through the typical fix
+    paths."""
+    err = LLMBehaviorError(
+        "llm.schema_violation",
+        "ClaimList: claims.0.confidence: Input should be a valid number",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("llm_behavior_error__schema_violation", err)
+
+
+def test_llm_behavior_error_fixture_missing_snapshot() -> None:
+    """The fork-and-replay failure — the recorded provider has no
+    matching fixture. Recovery walks through the re-recording flow."""
+    err = LLMBehaviorError(
+        "llm.fixture_missing",
+        "no recorded fixture for prompt_hash=a1b2c3d4 in /tmp/fixtures",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("llm_behavior_error__fixture_missing", err)
+
+
+def test_llm_behavior_error_unknown_reason_uses_fallback() -> None:
+    """A reason code outside the table still produces a format-compliant
+    message via the fallback prose."""
+    err = LLMBehaviorError(
+        "llm.custom_provider_error",
+        "model returned 503",
+    )
+    _assert_format_compliant(err)
+    assert "llm.custom_provider_error" in str(err)
+
+
+def test_tool_error_timeout_snapshot() -> None:
+    """The canonical tool failure — exceeded declared timeout. Recovery
+    explains the trade-off between raising the timeout vs. retrying in
+    the calling behavior."""
+    err = ToolError(
+        "tool.timeout",
+        "fetch_company_docs took 35.2s, exceeds 30s ceiling",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("tool_error__timeout", err)
+
+
+def test_tool_error_execution_error_snapshot() -> None:
+    """The catch-all tool failure — body raised. Recovery points at
+    payload_extras for the original exception."""
+    err = ToolError(
+        "tool.execution_error",
+        "TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("tool_error__execution_error", err)
+
+
+def test_unknown_tool_error_snapshot() -> None:
+    """The LLM asked for a tool the behavior didn't declare. Recovery
+    enumerates the declared tools so the operator can see the mismatch
+    without grep-ing source."""
+    err = UnknownToolError(
+        "LLM called tool 'web_search' which is not declared on @llm_behavior(tools=[...])",
+        tool_name="web_search",
+        behavior_name="diligence.researcher",
+        declared_tools=("diligence.fetch_company_docs", "diligence.fetch_filings"),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("unknown_tool_error", err)
+
+
+def test_approval_not_found_snapshot() -> None:
+    """Pending-approval lookup miss. Recovery points at rt.pending_approvals()
+    and the diligence demo's canonical pattern."""
+    err = ApprovalNotFoundError("approval_999", pending_count=2)
+    _assert_format_compliant(err)
+    _check_snapshot("approval_not_found", err)
+
+
+def test_approval_not_found_is_a_lookup_error() -> None:
+    """User code catching LookupError around the approval API keeps
+    working."""
+    err = ApprovalNotFoundError("approval_999", pending_count=0)
+    assert isinstance(err, LookupError)

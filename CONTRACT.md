@@ -2912,6 +2912,113 @@ plus 1 for the version-sync gate.
 
 437 tests pass (433 + 4). All v0–v0.9 tests pass unchanged.
 
+### v1.0 PR-D landed (ExecutionError, smallest scope of the series)
+
+The pre-series intuition was that PR-D would have a "probable cluster
+of bare-RuntimeError raises around behavior dispatch and budget
+enforcement." The audit found that intuition mostly wrong: behavior
+failures and budget exhaustion both use the **event-driven, not
+exception-driven** pattern, so there's no exception class to migrate
+for either. The bare-RuntimeError sites that exist around runtime
+dispatch are about runtime configuration constraints (fork on
+non-SQLite, etc.) and defer to PR-F (`ConfigurationError`).
+
+PR-D ends up the smallest in the series — exactly the kind of finding
+that makes audit-as-side-effect worthwhile. We confirm what's there,
+confirm what isn't there, and move on without making up scope.
+
+**Migrated (3 classes):**
+
+- `LLMBehaviorError(ExecutionError, Exception)` — the LLM-side carrier.
+  The ``(reason, message, payload_extras)`` constructor signature is
+  preserved (~8 internal raise sites in providers do not change).
+  Structured fields auto-derive from ``reason`` via the per-reason
+  prose table `_LLM_REASON_PROSE` — same pattern as PR-B's
+  `_KEYWORD_WORKAROUNDS`. Five reason codes have dedicated prose
+  (`llm.parse_error`, `llm.schema_violation`, `llm.fixture_missing`,
+  `llm.rate_limited`, `llm.network_error`); unknown reasons fall
+  through to a generic-but-format-compliant fallback.
+
+- `ToolError(ExecutionError, Exception)` — the tool-side carrier.
+  Same shape as LLMBehaviorError. Six reason codes with dedicated
+  prose (`tool.timeout`, `tool.network_error`, `tool.invalid_input`,
+  `tool.invalid_output`, `tool.execution_error`, `tool.fixture_missing`).
+
+- `UnknownToolError(ExecutionError, RuntimeError)` — direct
+  structured construction. Multi-inherits `RuntimeError` for back-compat.
+  Updated the one runtime call site to pass `tool_name`, `behavior_name`,
+  and `declared_tools` so the error names the mismatch concretely
+  instead of just the offending tool.
+
+**New leaf (1 class):**
+
+- `ApprovalNotFoundError(ExecutionError, LookupError)` — was bare
+  `LookupError` at 2 sites in `runtime.approve()`. Multi-inherits
+  `LookupError` for back-compat. Context includes `pending_count` so
+  the message can say "There are currently 2 pending approvals;
+  none match" — useful when the user has typo'd an approval id while
+  approvals do exist.
+
+**Considered-not-created (worth documenting):**
+
+The v1.0 plan listed `BehaviorFailedError` and `BudgetExhaustedError`
+as expected ExecutionError leaves. Neither exists today, and PR-D
+deliberately doesn't create them. The framework's design uses
+events (not exceptions) for non-fatal stops:
+
+- Behavior failures emit ``behavior.failed`` events with the
+  original exception preserved in the payload (CONTRACT v0.6 #13).
+  Downstream code reads the event; there's no exception class
+  escaping to user code.
+- Budget exhaustion emits ``runtime.budget_exhausted`` and the
+  runtime stops gracefully. No exception.
+
+Adding exception classes here would change the design pattern, not
+just rename existing surface. Out of scope for the rewrite series.
+
+**Flag-not-migrate (deferred to other PRs):**
+
+- `MissingProviderError` (RuntimeError) — registration-time → PR-E
+- `MissingToolError` (RuntimeError) — registration-time → PR-E
+- Bare ValueError / LookupError around behavior/tool/pack lookups in
+  `runtime.py` — registration-time → PR-E
+- Bare ValueError / TypeError around config args — PR-F
+- Bare RuntimeError at `runtime.py:1928` (fork requires SQLite-backed
+  runtime) — runtime configuration constraint → PR-F
+- Scheduler ValueError around `activate_after` parsing — behavior
+  registration → PR-E
+
+**Snapshot files:**
+
+- `llm_behavior_error__parse_error.txt`
+- `llm_behavior_error__schema_violation.txt`
+- `llm_behavior_error__fixture_missing.txt`
+- `tool_error__timeout.txt`
+- `tool_error__execution_error.txt`
+- `unknown_tool_error.txt`
+- `approval_not_found.txt`
+
+Tests added: 13 in `tests/test_errors_format.py`.
+
+450 tests pass (437 + 13). All v0–v0.9 tests pass unchanged. The
+diligence demo still runs end-to-end with byte-identical trace.
+
+**Hidden-surface count update:**
+
+- PR-A (ReplayError): 0 new leaves
+- PR-B (PatternError): 0 new + 17 keyword-workaround branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): **1 new** + 6 flagged (most flagged-to-other-PR
+  of any PR so far; the audit confirmed the existing scope is small
+  and the runtime/dispatch raise cluster is properly registration- or
+  configuration-flavored, not execution-flavored)
+
+Running total: 5 new leaves + ~17 in-message prose-table branches +
+10 flagged-for-other-PRs. Audit value remains positive but trending
+toward "the existing scope already covers most of the framework";
+PR-E and PR-F should see the bulk of remaining migration since
+they're where the bare-builtin clusters live.
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```

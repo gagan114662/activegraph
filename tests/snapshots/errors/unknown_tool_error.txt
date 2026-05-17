@@ -1,0 +1,15 @@
+UnknownToolError: LLM called tool 'web_search' which is not declared on @llm_behavior(tools=[...])
+
+What failed:
+  An LLM response asked to invoke a tool that the calling behavior did not declare.
+    tool requested: 'web_search'
+    declared on behavior 'diligence.researcher': 'diligence.fetch_company_docs', 'diligence.fetch_filings'
+
+Why:
+  @llm_behavior declares the exact set of tools the wrapped behavior is allowed to invoke. The runtime refuses any other tool call rather than silently execute it — an undeclared tool could perform side effects the behavior's audit trail doesn't account for, which would break replay determinism.
+
+How to fix:
+  Either add 'web_search' to the @llm_behavior's `tools=[...]` list (and confirm the tool is registered with @tool), or adjust the prompt so the model stops asking for it. If the model is consistently asking for an undeclared tool, the prompt may be implying capabilities the behavior doesn't have — be explicit about which tools are available.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/unknown-tool-error

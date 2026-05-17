@@ -33,6 +33,7 @@ from activegraph.policy import Policy
 from activegraph.runtime.budget import Budget
 from activegraph.runtime.diff import Diff, DivergentObject, DivergentRelation
 from activegraph.runtime.errors import ReplayDivergenceError
+from activegraph.runtime.exec_errors import ApprovalNotFoundError
 from activegraph.runtime.patterns import UnsupportedPatternError
 from activegraph.runtime.runtime import Runtime
 from activegraph.store import (
@@ -99,6 +100,7 @@ from activegraph.packs import (
 
 __all__ = [
     "ActiveGraphError",
+    "ApprovalNotFoundError",
     "Behavior",
     "Budget",
     "Clock",

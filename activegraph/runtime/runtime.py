@@ -965,11 +965,18 @@ class Runtime:
                     or (isinstance(t, str) and t == call.name)
                     for t in b.tools
                 ):
+                    declared = tuple(
+                        t if isinstance(t, str) else getattr(t, "name", repr(t))
+                        for t in (b.tools or [])
+                    )
                     self._emit_behavior_failed(
                         b.name, event.id,
                         UnknownToolError(
                             f"LLM called tool {call.name!r} which is not "
-                            f"declared on @llm_behavior(tools=[...])"
+                            f"declared on @llm_behavior(tools=[...])",
+                            tool_name=call.name,
+                            behavior_name=b.name,
+                            declared_tools=declared,
                         ),
                         reason="tool.unknown_tool",
                         extras={"tool": call.name},
@@ -1710,8 +1717,9 @@ class Runtime:
         Raises `LookupError` if `approval_id` is not pending. Emits an
         `approval.granted` event followed by the deferred `object.created`.
         """
+        from activegraph.runtime.exec_errors import ApprovalNotFoundError
         if self._pack_state is None:
-            raise LookupError(f"no pending approval named {approval_id!r}")
+            raise ApprovalNotFoundError(approval_id, pending_count=0)
         for i, pa in enumerate(self._pack_state.pending_approvals):
             if pa.id != approval_id:
                 continue
@@ -1733,7 +1741,9 @@ class Runtime:
             )
             obj = self.graph.add_object(pa.object_type, pa.data, actor=approved_by or "user")
             return obj.id
-        raise LookupError(f"no pending approval named {approval_id!r}")
+        raise ApprovalNotFoundError(
+            approval_id, pending_count=len(self._pack_state.pending_approvals)
+        )
 
     @property
     def trace(self):

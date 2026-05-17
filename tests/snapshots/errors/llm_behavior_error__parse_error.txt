@@ -1,0 +1,17 @@
+LLMBehaviorError: llm.parse_error: Expecting value: line 1 column 1 (char 0)
+
+What failed:
+  The LLM provider returned a response that the framework could not parse as JSON:
+    Expecting value: line 1 column 1 (char 0)
+
+Why:
+  LLM behaviors with a structured `output_schema` expect the model to return JSON that matches the schema; the framework parses the response and constructs typed objects from it. A response that isn't valid JSON breaks the contract that downstream behaviors depend on — they receive typed objects, not raw strings — so the framework fails the call rather than guess at structure.
+
+How to fix:
+  If the provider is real, the model's response is non-deterministic; try raising the prompt's emphasis on JSON-only output, or lowering temperature. If the provider is a fixture (RecordedLLMProvider), the recorded response is malformed — re-record from a clean run.
+
+  The full response is in the `behavior.failed` event's `payload_extras`; inspect it with:
+      activegraph inspect <store> --event <behavior.failed-id>
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/llm-behavior-error

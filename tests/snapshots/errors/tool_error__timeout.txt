@@ -1,0 +1,14 @@
+ToolError: tool.timeout: fetch_company_docs took 35.2s, exceeds 30s ceiling
+
+What failed:
+  A tool invocation exceeded its declared `timeout_seconds`:
+    fetch_company_docs took 35.2s, exceeds 30s ceiling
+
+Why:
+  Tools declare a per-call timeout at the decorator. The runtime enforces it so a slow or hung tool can't stall the whole behavior loop. A timed-out call returns a structured failure to the calling behavior; the behavior decides whether to retry, fall back, or fail.
+
+How to fix:
+  If the timeout is too aggressive for the expected work, raise the tool's `timeout_seconds`. If the timeout is hitting because the endpoint is slow under contention, the right answer is usually a narrower retry policy in the calling behavior rather than a higher ceiling.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/tool-error

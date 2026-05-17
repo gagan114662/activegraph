@@ -1,35 +1,189 @@
-"""LLM-side errors. Two surface types:
+"""LLM-side errors. v1.0 PR-D — migrated to ExecutionError.
 
-  MissingProviderError    — raised at LLM-behavior registration time
-                            when the runtime has no provider attached.
-                            Fails loud, never silent (CONTRACT v0.6 #21).
+Two surface types in the LLM layer:
 
-  LLMBehaviorError        — raised by the @llm_behavior wrapper to
-                            signal a structured failure with a
-                            `reason` code from CONTRACT v0.6 #11. The
-                            runtime's existing exception catch
-                            recognizes this type and merges `reason`
-                            + `payload_extras` into the
-                            `behavior.failed` event.
+- :class:`MissingProviderError` — raised at registration time when an
+  ``@llm_behavior`` is invoked but no provider is wired. Stays a
+  ``RuntimeError`` subclass through PR-D; PR-E (RegistrationError)
+  re-parents it.
+
+- :class:`LLMBehaviorError` — structured failure from inside an
+  ``@llm_behavior`` wrapper. Carries a ``reason`` code from CONTRACT
+  v0.6 #11 plus a free-form ``message``. The runtime's ``_invoke``
+  catch reads ``reason`` and ``payload_extras`` off this exception and
+  includes them in the emitted ``behavior.failed`` event.
+
+PR-D re-parents ``LLMBehaviorError`` under
+:class:`activegraph.errors.ExecutionError` so it joins the v1.0
+hierarchy and produces a structured-format message when rendered to a
+user. The ``(reason, message, payload_extras)`` constructor signature
+is preserved so the ~8 internal raise sites in providers do not
+change. The structured fields are auto-derived from ``reason`` via a
+per-reason prose table — same pattern as PR-B's
+``_KEYWORD_WORKAROUNDS``.
 """
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
+from activegraph.errors import ExecutionError
+
+
+# Per-reason prose for LLMBehaviorError. The voice principle from
+# CONTRACT v1.0 #3: explain the invariant being protected, not the
+# mechanism of the check. Each entry produces what_failed / why /
+# how_to_fix triples that the constructor uses to build the
+# structured-format body.
+#
+# `message` from the call site is interpolated into what_failed; `why`
+# and `how_to_fix` are reason-specific and stable across instances.
+
+
+def _llm_prose_parse_error(message: str) -> tuple[str, str, str]:
+    return (
+        f"The LLM provider returned a response that the framework could not "
+        f"parse as JSON:\n  {message}",
+        "LLM behaviors with a structured `output_schema` expect the model to "
+        "return JSON that matches the schema; the framework parses the "
+        "response and constructs typed objects from it. A response that "
+        "isn't valid JSON breaks the contract that downstream behaviors "
+        "depend on — they receive typed objects, not raw strings — so the "
+        "framework fails the call rather than guess at structure.",
+        "If the provider is real, the model's response is non-deterministic; "
+        "try raising the prompt's emphasis on JSON-only output, or lowering "
+        "temperature. If the provider is a fixture (RecordedLLMProvider), "
+        "the recorded response is malformed — re-record from a clean run.\n"
+        "\n"
+        "The full response is in the `behavior.failed` event's `payload_extras`; "
+        "inspect it with:\n"
+        "    activegraph inspect <store> --event <behavior.failed-id>",
+    )
+
+
+def _llm_prose_schema_violation(message: str) -> tuple[str, str, str]:
+    return (
+        f"The LLM provider returned valid JSON, but the JSON did not match "
+        f"the behavior's declared `output_schema`:\n  {message}",
+        "Pydantic validates every LLM response against the schema declared on "
+        "`@llm_behavior(output_schema=...)`. Schema-violating responses are "
+        "refused at the boundary so downstream behaviors receive only objects "
+        "that obey the schema — replay determinism depends on this.",
+        "Check whether the schema's required fields match what the model "
+        "actually produces. Common causes: a required field is missing in "
+        "the response, an enum value is out-of-range, or a list field "
+        "contains items of the wrong type. Add the missing fields to the "
+        "prompt's example output, or relax the schema (e.g. `Optional[X]`) "
+        "if the field genuinely can be absent.",
+    )
+
+
+def _llm_prose_fixture_missing(message: str) -> tuple[str, str, str]:
+    return (
+        f"The RecordedLLMProvider has no fixture for this prompt:\n  {message}",
+        "RecordedLLMProvider replays a directory of recorded LLM responses keyed "
+        "by prompt content hash. A missing fixture means the live prompt's hash "
+        "doesn't match any recorded response — either the prompt changed since "
+        "the fixtures were recorded (a behavior edit, a template change, a "
+        "tool input difference), or this is a new prompt that was never "
+        "recorded.",
+        "Re-record the fixture from a live run with the current prompt:\n"
+        "    1. Switch to AnthropicProvider (set ANTHROPIC_API_KEY)\n"
+        "    2. Run the goal once to produce live LLM responses\n"
+        "    3. The provider records each response to the fixture directory\n"
+        "    4. Subsequent runs against RecordedLLMProvider replay them\n"
+        "\n"
+        "Or diff the prompt against the recorded version to find the drift.",
+    )
+
+
+def _llm_prose_rate_limited(message: str) -> tuple[str, str, str]:
+    return (
+        f"The LLM provider rejected the request as rate-limited:\n  {message}",
+        "Providers cap requests per minute / tokens per minute. When the cap "
+        "is hit, retries within the rate-limit window will fail again — the "
+        "framework refuses to silently retry-loop without an explicit "
+        "operator decision, because a long retry loop can quietly exhaust "
+        "the behavior's budget.",
+        "Wait until the rate-limit window resets (provider-specific — usually "
+        "60 seconds), then re-run. For long-running goals, set a higher "
+        "`max_seconds` budget so the runtime tolerates intermittent "
+        "rate-limits. If this happens during fork/replay, the cache hit "
+        "should normally prevent the live call — check whether the prompt "
+        "hash matches the recorded one.",
+    )
+
+
+def _llm_prose_network_error(message: str) -> tuple[str, str, str]:
+    return (
+        f"The LLM provider call failed with a network error:\n  {message}",
+        "The framework treats network failures as transient but not "
+        "automatically retryable: a silent retry could mask a real outage "
+        "or burn budget on a flaky network. The error escapes to the caller "
+        "so the operator decides what to do.",
+        "If the network is unreliable, re-run the goal — fork-and-replay "
+        "from the last successful event:\n"
+        "    activegraph fork <run> --at-event <last-good> --record\n"
+        "For systematic outages, the provider's status page is the canonical "
+        "source. Switching to RecordedLLMProvider with previously-recorded "
+        "fixtures lets the run complete offline.",
+    )
+
+
+_LLM_REASON_PROSE: dict[str, Any] = {
+    "llm.parse_error": _llm_prose_parse_error,
+    "llm.schema_violation": _llm_prose_schema_violation,
+    "llm.fixture_missing": _llm_prose_fixture_missing,
+    "llm.rate_limited": _llm_prose_rate_limited,
+    "llm.network_error": _llm_prose_network_error,
+}
+
+
+def _llm_fallback_prose(reason: str, message: str) -> tuple[str, str, str]:
+    """Default prose for a reason code the table doesn't enumerate. The
+    voice still names the invariant ("the framework surfaces structured
+    failures from @llm_behavior wrappers"); recovery prose is generic
+    and points the operator at the trace.
+    """
+    return (
+        f"An @llm_behavior wrapper failed with reason {reason!r}:\n  {message}",
+        f"The runtime catches structured failures from @llm_behavior bodies "
+        f"and merges them into the emitted `behavior.failed` event, where "
+        f"downstream code can read `reason={reason!r}` and decide how to "
+        f"proceed. The exception you're seeing is the underlying carrier.",
+        f"Inspect the `behavior.failed` event in the trace:\n"
+        f"    activegraph inspect <store> --tail 50\n"
+        f"\n"
+        f"The full message is preserved verbatim above; check the LLM "
+        f"provider's documentation for reason {reason!r}.",
+    )
+
 
 class MissingProviderError(RuntimeError):
-    """Raised when an @llm_behavior is invoked but no provider is wired."""
+    """Raised when an @llm_behavior is invoked but no provider is wired.
 
-
-class LLMBehaviorError(Exception):
-    """Carries a structured failure from inside an @llm_behavior wrapper.
-
-    The runtime's `_invoke` catch reads `reason` and `payload_extras`
-    off this exception and includes them in the emitted
-    `behavior.failed` event. Other exception types fall through to
-    the existing CONTRACT #13 path unchanged.
+    Stays a plain RuntimeError subclass through PR-D. PR-E migrates this
+    to :class:`activegraph.errors.RegistrationError` along with the
+    other registration-time leaves (MissingToolError, the pack
+    registration errors).
     """
+
+
+class LLMBehaviorError(ExecutionError, Exception):
+    """Structured failure from inside an @llm_behavior wrapper.
+
+    The runtime's ``_invoke`` catch reads ``reason`` and ``payload_extras``
+    off this exception and includes them in the emitted
+    ``behavior.failed`` event. Other exception types fall through to
+    the existing CONTRACT v0.6 #13 path unchanged.
+
+    Constructor signature ``(reason, message, *, payload_extras=)`` is
+    preserved from v0.6 so the ~8 internal raise sites in providers do
+    not change. The structured-format fields are auto-derived from
+    ``reason`` via the per-reason prose table above.
+    """
+
+    _doc_slug = "llm-behavior-error"
 
     def __init__(
         self,
@@ -38,6 +192,22 @@ class LLMBehaviorError(Exception):
         *,
         payload_extras: Optional[dict[str, Any]] = None,
     ) -> None:
-        super().__init__(message)
         self.reason = reason
         self.payload_extras = dict(payload_extras or {})
+        prose_fn = _LLM_REASON_PROSE.get(reason)
+        if prose_fn is None:
+            what_failed, why, how_to_fix = _llm_fallback_prose(reason, message)
+        else:
+            what_failed, why, how_to_fix = prose_fn(message)
+        ExecutionError.__init__(
+            self,
+            f"{reason}: {message}",
+            what_failed=what_failed,
+            why=why,
+            how_to_fix=how_to_fix,
+            context={
+                "reason": reason,
+                "message": message,
+                "payload_extras": self.payload_extras,
+            },
+        )
