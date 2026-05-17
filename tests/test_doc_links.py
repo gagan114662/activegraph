@@ -52,14 +52,14 @@ _KNOWN_DOCS_BASES = (
 
 _DOCS_URL_RE = re.compile(
     r"https?://(?:docs\.activegraph\.dev|yoheinakajima\.github\.io/activegraph)"
-    r"(/[^\s)\"'>]*)?"
+    r"(/[^\s)\"'>`]*)?"
 )
 
 
 def _strip_trailing_punct(s: str) -> str:
     """URLs in prose often end at sentence boundaries; trim trailing
     punctuation that isn't part of the URL."""
-    return s.rstrip(".,:;!?")
+    return s.rstrip(".,:;!?`")
 
 
 def _url_to_source_path(url_path: str) -> Path | None:
