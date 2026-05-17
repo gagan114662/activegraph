@@ -155,6 +155,187 @@ class TestFork:
         )
         assert result.exit_code == EXIT_NOT_FOUND, result.output
 
+    def test_record_sets_label_suffix(self, temp_db, runner):
+        """v1.0 CLI follow-on: --record stamps the label so operators
+        see the fork is intended as a re-recording."""
+        run_id = _seed_run(temp_db)
+        rt = Runtime.load(f"sqlite:///{temp_db}", run_id=run_id)
+        fork_at = next(e.id for e in rt.graph.events if e.type == "object.created")
+        result = runner.invoke(
+            cli,
+            [
+                "fork", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--at-event", fork_at,
+                "--record",
+                "--json",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        obj = json.loads(result.output)
+        assert obj["label"] == "recording"
+        assert obj["recording"] is True
+
+    def test_record_composes_with_explicit_label(self, temp_db, runner):
+        """--label cautious --record produces label 'cautious-recording'."""
+        run_id = _seed_run(temp_db)
+        rt = Runtime.load(f"sqlite:///{temp_db}", run_id=run_id)
+        fork_at = next(e.id for e in rt.graph.events if e.type == "object.created")
+        result = runner.invoke(
+            cli,
+            [
+                "fork", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--at-event", fork_at,
+                "--label", "cautious",
+                "--record",
+                "--json",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        obj = json.loads(result.output)
+        assert obj["label"] == "cautious-recording"
+
+    def test_record_prints_followon_guidance_in_text(self, temp_db, runner):
+        run_id = _seed_run(temp_db)
+        rt = Runtime.load(f"sqlite:///{temp_db}", run_id=run_id)
+        fork_at = next(e.id for e in rt.graph.events if e.type == "object.created")
+        result = runner.invoke(
+            cli,
+            [
+                "fork", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--at-event", fork_at,
+                "--record",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        assert "recording fork" in result.output
+
+
+class TestInspectFlags:
+    """v1.0 CLI follow-ons: --event, --behaviors, --pack-version.
+
+    Each is a selector that narrows `activegraph inspect` output to one
+    focused section. The selectors are mutually exclusive. Implied by
+    the recovery prose of v1.0 PR-A's error messages (the
+    `activegraph inspect <run> --event evt_NNN` etc. suggestions); built
+    here so the error messages can point at flags that actually exist.
+    """
+
+    def test_event_selector_prints_payload(self, temp_db, runner):
+        run_id = _seed_run(temp_db)
+        rt = Runtime.load(f"sqlite:///{temp_db}", run_id=run_id)
+        target = next(e for e in rt.graph.events if e.type == "object.created")
+        result = runner.invoke(
+            cli,
+            [
+                "inspect", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--event", target.id,
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        assert target.id in result.output
+        assert "type:" in result.output
+        assert "payload:" in result.output
+
+    def test_event_selector_json(self, temp_db, runner):
+        run_id = _seed_run(temp_db)
+        rt = Runtime.load(f"sqlite:///{temp_db}", run_id=run_id)
+        target = next(e for e in rt.graph.events if e.type == "object.created")
+        result = runner.invoke(
+            cli,
+            [
+                "inspect", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--event", target.id,
+                "--json",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        obj = json.loads(result.output)
+        assert obj["id"] == target.id
+        assert obj["type"] == target.type
+        assert "payload" in obj
+
+    def test_event_selector_not_found(self, temp_db, runner):
+        run_id = _seed_run(temp_db)
+        result = runner.invoke(
+            cli,
+            [
+                "inspect", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--event", "evt_does_not_exist",
+            ],
+        )
+        assert result.exit_code == EXIT_NOT_FOUND, result.output
+        assert "evt_does_not_exist" in result.output
+
+    def test_behaviors_selector_text(self, temp_db, runner):
+        run_id = _seed_run(temp_db)
+        result = runner.invoke(
+            cli,
+            [
+                "inspect", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--behaviors",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        # Inspect loads without registering behaviors, so the focused
+        # output shows the empty-state message rather than the populated
+        # behaviors list. Both branches are valid responses; the test
+        # asserts the focused command produced output, not full status.
+        assert "state:" not in result.output  # focused, not full status
+        assert "behaviors" in result.output or "registered" in result.output
+
+    def test_pack_version_selector_empty(self, temp_db, runner):
+        """No packs were loaded in the seeded run; the selector reports
+        the empty case cleanly."""
+        run_id = _seed_run(temp_db)
+        result = runner.invoke(
+            cli,
+            [
+                "inspect", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--pack-version",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        assert "no packs loaded" in result.output
+
+    def test_pack_version_selector_json_empty(self, temp_db, runner):
+        run_id = _seed_run(temp_db)
+        result = runner.invoke(
+            cli,
+            [
+                "inspect", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--pack-version",
+                "--json",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        obj = json.loads(result.output)
+        assert obj == []
+
+    def test_selectors_are_mutually_exclusive(self, temp_db, runner):
+        """--event, --behaviors, --pack-version are selectors, not
+        filters — combining them is a usage error."""
+        run_id = _seed_run(temp_db)
+        result = runner.invoke(
+            cli,
+            [
+                "inspect", f"sqlite:///{temp_db}",
+                "--run-id", run_id,
+                "--behaviors",
+                "--pack-version",
+            ],
+        )
+        assert result.exit_code == EXIT_USAGE_ERROR, result.output
+        assert "mutually exclusive" in result.output
+
 
 class TestDiff:
     def test_happy_path(self, temp_db, runner):

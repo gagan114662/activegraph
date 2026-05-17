@@ -2665,6 +2665,45 @@ categories. The convention: 2-space indent for body lines, 4-extra-space
 indent for code blocks, blank line for paragraph breaks. Cosmetic, but
 locking it now means the 50+ error pages on the doc site look uniform.
 
+### v1.0 CLI follow-ons landed (between PR-A and PR-B)
+
+PR-A's reference error messages point at operator flags that did not
+yet exist (`activegraph fork --record`, `activegraph inspect --event`,
+`activegraph inspect --pack-version`, `activegraph inspect --behaviors`).
+Per the v1.0 plan review, the right tradeoff is to build the flags so
+the recovery prose stays useful, rather than dumb the error messages
+down to reference only what existed before PR-A.
+
+The four flags are CLI surface over existing APIs — no new runtime
+capability, in line with the v1.0 ban:
+
+- **`activegraph inspect <run> --event <id>`** prints one event's full
+  payload (text or JSON). The event lookup is `next(e for e in
+  rt.graph.events if e.id == event_id)` — no new runtime API.
+- **`activegraph inspect <run> --behaviors`** prints only the
+  registered-behaviors section. Reuses `rt.status(recent=0)` and
+  filters output.
+- **`activegraph inspect <run> --pack-version`** prints every
+  `pack.loaded` event in the run with the pack name, version, and
+  every prompt's version + truncated content hash (the same hash that
+  `ReplayDivergenceError` compares against). Filters events for
+  `e.type == "pack.loaded"`.
+- **`activegraph fork --record`** appends `-recording` to the fork's
+  label (or sets it to `recording` if none was given) and prints
+  follow-on guidance: "load this run without `replay_strict=True` to
+  accept new LLM/tool cache entries." The actual recording semantics
+  emerge from how the new run is later loaded — the flag is operator
+  UX over the existing fork primitive, not a new runtime mode.
+
+The three `inspect` selectors are mutually exclusive (selectors, not
+filters). Combining them is a usage error.
+
+Tests added: 10 in `tests/test_cli.py` (one happy path per flag,
+JSON variants, mutual-exclusion check, not-found for unknown event id).
+
+PR-B through PR-G can now write recovery prose pointing at flags that
+exist.
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```

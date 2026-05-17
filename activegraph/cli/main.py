@@ -195,10 +195,58 @@ def cmd_pack_list() -> None:
 @click.option("--run-id", default=None, help="Run to inspect (default: most recent).")
 @click.option("--tail", default=20, show_default=True, help="Recent events to include.")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
-def cmd_inspect(url: str, run_id: Optional[str], tail: int, as_json: bool) -> None:
-    """Print a status snapshot for a run."""
+@click.option(
+    "--event",
+    "event_id",
+    default=None,
+    help=(
+        "Print one event's full payload by id (e.g. evt_042). Used to "
+        "investigate a divergence: every ReplayDivergenceError names "
+        "the offending event id."
+    ),
+)
+@click.option(
+    "--behaviors",
+    is_flag=True,
+    help=(
+        "Print only the registered-behaviors section. Used when "
+        "diagnosing a replay length mismatch — compare which behaviors "
+        "fire now against which fired in the recorded run."
+    ),
+)
+@click.option(
+    "--pack-version",
+    is_flag=True,
+    help=(
+        "Print every pack.loaded event in the run — name, version, "
+        "prompt content-hash summary. Used to confirm the pack version "
+        "the recorded run was using vs. what's installed today."
+    ),
+)
+def cmd_inspect(
+    url: str,
+    run_id: Optional[str],
+    tail: int,
+    as_json: bool,
+    event_id: Optional[str],
+    behaviors: bool,
+    pack_version: bool,
+) -> None:
+    """Print a status snapshot for a run.
+
+    With ``--event``, ``--behaviors``, or ``--pack-version``, prints only
+    that focused section instead of the full status. The three are
+    mutually exclusive — they're selectors, not filters.
+    """
     from activegraph.observability.status import status_to_dict
     from activegraph.runtime.runtime import Runtime
+
+    if sum([bool(event_id), behaviors, pack_version]) > 1:
+        click.echo(
+            "--event, --behaviors, and --pack-version are mutually exclusive.",
+            err=True,
+        )
+        raise SystemExit(EXIT_USAGE_ERROR)
 
     rid = run_id or _most_recent_run_id_or_die(url)
     try:
@@ -209,6 +257,17 @@ def cmd_inspect(url: str, run_id: Optional[str], tail: int, as_json: bool) -> No
     except FileNotFoundError as e:
         click.echo(str(e), err=True)
         raise SystemExit(EXIT_NOT_FOUND)
+
+    if event_id:
+        _print_event(rt, event_id, as_json)
+        return
+    if behaviors:
+        _print_behaviors(rt, as_json)
+        return
+    if pack_version:
+        _print_pack_versions(rt, as_json)
+        return
+
     status = rt.status(recent=tail)
 
     if as_json:
@@ -236,6 +295,99 @@ def cmd_inspect(url: str, run_id: Optional[str], tail: int, as_json: bool) -> No
     click.echo(f"recent events (last {len(status.recent_events)}):")
     for e in status.recent_events:
         click.echo(f"  {e.id:18s} {e.type}")
+
+
+# ---- inspect selector helpers ------------------------------------------
+
+
+def _print_event(rt, event_id: str, as_json: bool) -> None:
+    """v1.0 CLI follow-on: print one event's full payload by id."""
+    target = next((e for e in rt.graph.events if e.id == event_id), None)
+    if target is None:
+        click.echo(f"event {event_id!r} not found in run {rt.run_id}", err=True)
+        raise SystemExit(EXIT_NOT_FOUND)
+    if as_json:
+        click.echo(_json.dumps({
+            "id": target.id,
+            "type": target.type,
+            "actor": target.actor,
+            "frame_id": target.frame_id,
+            "caused_by": target.caused_by,
+            "timestamp": target.timestamp,
+            "payload": target.payload,
+        }, default=str))
+        return
+    click.echo(f"event:       {target.id}")
+    click.echo(f"type:        {target.type}")
+    click.echo(f"actor:       {target.actor or '(none)'}")
+    click.echo(f"frame:       {target.frame_id or '(none)'}")
+    click.echo(f"caused_by:   {target.caused_by or '(none)'}")
+    click.echo(f"timestamp:   {target.timestamp}")
+    click.echo("payload:")
+    click.echo(_json.dumps(target.payload, indent=2, default=str))
+
+
+def _print_behaviors(rt, as_json: bool) -> None:
+    """v1.0 CLI follow-on: print only the registered-behaviors section."""
+    status = rt.status(recent=0)
+    if as_json:
+        click.echo(_json.dumps([
+            {"name": b.name, "kind": b.kind, "subscribed_to": list(b.subscribed_to)}
+            for b in status.registered_behaviors
+        ]))
+        return
+    if not status.registered_behaviors:
+        click.echo("(no behaviors registered in this run)")
+        return
+    click.echo("registered behaviors:")
+    for b in status.registered_behaviors:
+        sub = ",".join(b.subscribed_to) or "(pattern-only)"
+        click.echo(f"  {b.name:30s} {b.kind:10s} on={sub}")
+
+
+def _print_pack_versions(rt, as_json: bool) -> None:
+    """v1.0 CLI follow-on: print every pack.loaded event in the run.
+
+    A `pack.loaded` event carries the pack name, version, and the
+    declared+content-hash of every prompt the pack ships. v0.9 #13 locked
+    this event as the audit trail for which pack version produced which
+    artifacts; v0.9 #10 locked the prompt content-hash as the replay
+    contract, so the prompt hashes here are what `ReplayDivergenceError`
+    compares against during fork/replay.
+    """
+    loads = [e for e in rt.graph.events if e.type == "pack.loaded"]
+    if as_json:
+        click.echo(_json.dumps([
+            {
+                "event_id": e.id,
+                "pack": (e.payload or {}).get("name"),
+                "version": (e.payload or {}).get("version"),
+                "prompts": (e.payload or {}).get("prompts", {}),
+            }
+            for e in loads
+        ]))
+        return
+    if not loads:
+        click.echo("(no packs loaded in this run)")
+        return
+    click.echo(f"packs loaded ({len(loads)}):")
+    for e in loads:
+        p = e.payload or {}
+        name = p.get("name", "?")
+        version = p.get("version", "?")
+        prompts = p.get("prompts") or {}
+        click.echo(f"  {name:24s} {version:14s}  ({e.id})")
+        for prompt_name, meta in prompts.items():
+            if isinstance(meta, dict):
+                short = str(meta.get("hash", ""))
+                prompt_ver = meta.get("version", "")
+                short = short.removeprefix("sha256:")[:12] if short else "?"
+                click.echo(
+                    f"    prompt {prompt_name:24s} v{prompt_ver:<8s} hash={short}"
+                )
+            else:
+                short = str(meta)[:12]
+                click.echo(f"    prompt {prompt_name:24s} hash={short}")
 
 
 # ---- replay -------------------------------------------------------------
@@ -287,6 +439,18 @@ def cmd_replay(url: str, run_id: str, as_json: bool) -> None:
     default=None,
     help="Destination store URL. Defaults to the source store.",
 )
+@click.option(
+    "--record",
+    is_flag=True,
+    help=(
+        "Mark this fork as a re-recording. Appends `-recording` to the "
+        "label (or sets the label to `recording` if none was given) and "
+        "prints follow-on guidance. Use after a ReplayDivergenceError "
+        "when the divergence was intentional — fork at the offending "
+        "event id, then run the new run without `replay_strict=True` "
+        "so the LLM cache and tool cache write-through new entries."
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
 def cmd_fork(
     url: str,
@@ -294,6 +458,7 @@ def cmd_fork(
     at_event: str,
     label: Optional[str],
     to_url: Optional[str],
+    record: bool,
     as_json: bool,
 ) -> None:
     """Create a new run by copying events up to and including --at-event."""
@@ -303,6 +468,12 @@ def cmd_fork(
 
     if to_url is None:
         to_url = url
+    if record:
+        # Label suffix is informational; the actual "recording" semantics
+        # emerge when the new run is later loaded with replay_strict=False
+        # (the default). v1.0 #C3-adjacent — no new runtime capability;
+        # this is operator UX over the existing fork primitive.
+        label = f"{label}-recording" if label else "recording"
     if to_url != url:
         click.echo(
             "cross-store fork not supported in v0.8. Fork in the source "
@@ -353,9 +524,16 @@ def cmd_fork(
         "events_copied": n,
     }
     if as_json:
+        if record:
+            out["recording"] = True
         click.echo(_json.dumps(out))
         return
     click.echo(f"forked {run_id} at {at_event} -> {new_run_id} ({n} events)")
+    if record:
+        click.echo(
+            "  recording fork: load this run without replay_strict=True to "
+            "accept new LLM/tool cache entries."
+        )
 
 
 # ---- diff ---------------------------------------------------------------
