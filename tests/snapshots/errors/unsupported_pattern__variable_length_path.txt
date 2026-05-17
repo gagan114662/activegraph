@@ -1,0 +1,16 @@
+UnsupportedPatternError: variable-length path syntax (-[*]-) is not supported in the v0.7 Cypher subset
+
+What failed:
+  The pattern uses variable-length path syntax (-[*]-). The v0.7 subset refuses this feature at registration time — long before any match runs.
+
+Why:
+  The pattern subset is deliberately small and exhaustively testable. A fuzzy superset of Cypher would let patterns appear to match input they did not actually match, which would break the audit trail that pattern-driven behaviors preserve. See CONTRACT v0.7 #8 for the locked subset.
+
+How to fix:
+  Express the path as N separate one-hop patterns and register
+  one behavior per length you care about. If the path length is
+  unbounded, the matcher would have unbounded cost — that's
+  the reason for the refusal, not just policy.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error

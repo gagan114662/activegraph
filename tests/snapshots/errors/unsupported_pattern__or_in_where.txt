@@ -1,0 +1,21 @@
+UnsupportedPatternError: OR is not supported in the v0.7 Cypher subset
+
+What failed:
+  The pattern uses OR. The v0.7 subset refuses this feature at registration time — long before any match runs.
+
+Why:
+  OR in WHERE clauses can produce match-set ambiguity at the trace level: it's hard to tell, after the fact, which branch of the OR actually triggered. Registering two behaviors keeps every fire attributable to a specific pattern in the audit trail. See CONTRACT v0.7 #8.
+
+How to fix:
+  Register two behaviors, one per branch of the disjunction.
+  Both fire independently; if both branches are true for the
+  same event, both behaviors fire (which is usually what you
+  want — OR-then-dedup is not).
+
+  Example:
+    Instead of: WHERE c.confidence > 0.7 OR c.severity = 'high'
+    Register:   one behavior with WHERE c.confidence > 0.7
+                one behavior with WHERE c.severity = 'high'
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error

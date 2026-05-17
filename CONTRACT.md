@@ -2704,6 +2704,65 @@ JSON variants, mutual-exclusion check, not-found for unknown event id).
 PR-B through PR-G can now write recovery prose pointing at flags that
 exist.
 
+### v1.0 PR-B landed (PatternError, second-smallest category)
+
+`UnsupportedPatternError` (the sole leaf under `PatternError`) migrated
+to the v1.0 structured format. Re-parented from `SyntaxError` to
+`PatternError(ActiveGraphError)` with `SyntaxError` kept via multi-
+inheritance so user code that catches `SyntaxError` around pattern
+compilation continues to work.
+
+16 raise sites in `activegraph/runtime/patterns.py` converted, grouped
+into two factory class methods that produce the canonical voice for the
+two failure modes:
+
+- **`UnsupportedPatternError.refused_feature(feature=, workaround=, at=)`**
+  for the case where a recognized Cypher feature is deliberately refused
+  by the v0.7 subset. The factory provides a uniform "Why:" explaining
+  the testability and audit-trail rationale; the caller passes the
+  per-feature workaround.
+
+- **`UnsupportedPatternError.syntax_error(what=, expected=, got=, at=)`**
+  for parser-level failures (unexpected character, expected X got Y,
+  missing relationship type, unexpected trailing tokens). Uniform
+  "Why:" and "How to fix:" pointing the developer at the offending
+  position and the docs reference.
+
+Per-keyword workaround prose lives in `_KEYWORD_WORKAROUNDS` (17 keys —
+every keyword in `_FORBIDDEN_KEYWORDS` has a specific "do this in the
+behavior body instead" answer). Avoids the generic "use the supported
+subset" failure that v0.9's messages produced.
+
+Internal evaluator errors (`unknown operator`, `unrecognized WHERE AST
+node`) use direct structured construction with prose framing them as
+internal inconsistencies — the recovery is "file an issue with the
+offending pattern."
+
+Snapshot files under `tests/snapshots/errors/`:
+
+- `unsupported_pattern__or_in_where.txt`
+- `unsupported_pattern__variable_length_path.txt`
+- `unsupported_pattern__undirected_relationship.txt`
+- `unsupported_pattern__optional_keyword.txt`
+- `unsupported_pattern__unexpected_character.txt`
+- `unsupported_pattern__relationship_type_required.txt`
+
+Tests added: 10 in `tests/test_errors_format.py`. Snapshot review
+doubles as voice review per CONTRACT v1.0 #3 voice-principle clause.
+
+Backward-compat preserved: all 38 pre-existing pattern tests pass
+unchanged. Their `pytest.raises(..., match="...")` substring patterns
+still match because every existing test substring (`"OR is not
+supported"`, `"variable-length"`, `"undirected"`, `"unexpected
+character"`, `"type required"`, the dynamic-keyword substrings) appears
+in the new summary or body verbatim. Feature labels in
+`refused_feature` calls were chosen to preserve these substrings.
+
+The `at` attribute on every raise is preserved on the new class for
+back-compat with user code that reads it.
+
+422 tests pass (412 + 10 new). All v0–v0.9 tests pass unchanged.
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```

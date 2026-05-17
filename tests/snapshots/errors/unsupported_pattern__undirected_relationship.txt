@@ -1,0 +1,16 @@
+UnsupportedPatternError: undirected-relationship syntax is not supported in the v0.7 Cypher subset
+
+What failed:
+  The pattern uses undirected-relationship syntax. The v0.7 subset refuses this feature at registration time — long before any match runs.
+
+Why:
+  The pattern subset is deliberately small and exhaustively testable. A fuzzy superset of Cypher would let patterns appear to match input they did not actually match, which would break the audit trail that pattern-driven behaviors preserve. See CONTRACT v0.7 #8 for the locked subset.
+
+How to fix:
+  Pick a direction. Use `(a)-[:rel]->(b)` for source→target
+  or `(a)<-[:rel]-(b)` for target→source. The pattern
+  matcher needs the direction so the audit trail knows which
+  endpoint produced the binding.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error

@@ -28,6 +28,7 @@ from activegraph import (
     ReplayDivergenceError,
     ReplayError,
     StorageError,
+    UnsupportedPatternError,
 )
 
 
@@ -286,3 +287,131 @@ def test_replay_divergence_names_the_event_id() -> None:
     assert "evt_042" in msg.split("What failed:")[1].split("Why:")[0]
     # "How to fix" includes the event id in the suggested command.
     assert "evt_042" in msg.split("How to fix:")[1].split("More:")[0]
+
+
+# ---------- PR-B: PatternError reference (UnsupportedPatternError) ------
+
+
+def _parse(pattern: str):
+    """Compile a pattern to force raise; returns the exception."""
+    from activegraph.runtime.patterns import parse
+    return parse(pattern)
+
+
+def test_unsupported_pattern_inherits_from_pattern_error() -> None:
+    """PR-B reference leaf is wired into the v1.0 hierarchy. Multi-
+    inherits SyntaxError so user code that catches SyntaxError around
+    pattern compilation continues to work."""
+    assert issubclass(UnsupportedPatternError, PatternError)
+    assert issubclass(UnsupportedPatternError, ActiveGraphError)
+    assert issubclass(UnsupportedPatternError, SyntaxError)
+
+
+def test_unsupported_pattern_preserves_at_attribute() -> None:
+    """CONTRACT v0.7 — every raise carries the offending token in `.at`
+    so the IDE / linter / log scrubber can highlight it. PR-B preserves
+    the attribute through the v1.0 structured constructor."""
+    err = UnsupportedPatternError.refused_feature(
+        feature="OR",
+        workaround="Register two behaviors.",
+        at="OR",
+    )
+    assert err.at == "OR"
+    assert err.context["at"] == "OR"
+
+
+def test_unsupported_pattern_or_in_where_snapshot() -> None:
+    """The canonical refused-feature error. Highest-traffic of the v0.7
+    refusals (OR is the first thing Cypher users reach for). Recovery
+    points at the 'register two behaviors' workaround."""
+    err = UnsupportedPatternError.refused_feature(
+        feature="OR",
+        workaround=(
+            "Register two behaviors, one per branch of the disjunction.\n"
+            "Both fire independently; if both branches are true for the\n"
+            "same event, both behaviors fire (which is usually what you\n"
+            "want — OR-then-dedup is not).\n"
+            "\n"
+            "Example:\n"
+            "  Instead of: WHERE c.confidence > 0.7 OR c.severity = 'high'\n"
+            "  Register:   one behavior with WHERE c.confidence > 0.7\n"
+            "              one behavior with WHERE c.severity = 'high'"
+        ),
+        why=(
+            "OR in WHERE clauses can produce match-set ambiguity at the "
+            "trace level: it's hard to tell, after the fact, which branch "
+            "of the OR actually triggered. Registering two behaviors keeps "
+            "every fire attributable to a specific pattern in the audit "
+            "trail. See CONTRACT v0.7 #8."
+        ),
+        at="OR",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("unsupported_pattern__or_in_where", err)
+
+
+def test_unsupported_pattern_variable_length_path_snapshot() -> None:
+    """Refused-feature: -[*]- syntax. Common Cypher idiom; the recovery
+    explains the unbounded-cost rationale alongside the workaround."""
+    with pytest.raises(UnsupportedPatternError) as excinfo:
+        _parse("(a:claim)-[*]->(b:evidence)")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("unsupported_pattern__variable_length_path", excinfo.value)
+
+
+def test_unsupported_pattern_undirected_relationship_snapshot() -> None:
+    """Refused-feature: (a)-[:rel]-(b). The recovery explains that
+    direction is needed for the audit trail, not just a style choice."""
+    with pytest.raises(UnsupportedPatternError) as excinfo:
+        _parse("(a:claim)-[:supports]-(b:evidence)")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("unsupported_pattern__undirected_relationship", excinfo.value)
+
+
+def test_unsupported_pattern_optional_keyword_snapshot() -> None:
+    """Refused-feature: OPTIONAL keyword. Tests the per-keyword
+    workaround table."""
+    with pytest.raises(UnsupportedPatternError) as excinfo:
+        _parse("(a:claim) OPTIONAL")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("unsupported_pattern__optional_keyword", excinfo.value)
+
+
+def test_unsupported_pattern_unexpected_character_snapshot() -> None:
+    """Syntax-error: parser cannot tokenize. Tests the syntax_error
+    factory and its 'fix the syntax / see docs' recovery prose."""
+    with pytest.raises(UnsupportedPatternError) as excinfo:
+        _parse("(a:claim) @")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("unsupported_pattern__unexpected_character", excinfo.value)
+
+
+def test_unsupported_pattern_relationship_type_required_snapshot() -> None:
+    """Syntax-error: a relationship without a type. Common typo —
+    `(a)-[]->(b)` instead of `(a)-[:type]->(b)`. The recovery shows
+    the expected syntax explicitly."""
+    with pytest.raises(UnsupportedPatternError) as excinfo:
+        _parse("(a:claim)-[]->(b:evidence)")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("unsupported_pattern__relationship_type_required", excinfo.value)
+
+
+def test_unsupported_pattern_doc_url_uses_slug() -> None:
+    err = UnsupportedPatternError.refused_feature(
+        feature="OR", workaround="...", at="OR"
+    )
+    assert err.doc_url.endswith("/errors/unsupported-pattern-error")
+    assert err.doc_url in str(err)
+
+
+def test_unsupported_pattern_names_the_offending_token() -> None:
+    """CONTRACT v1.0 #7 — errors name names. The `at` token appears
+    in the rendered message (the format includes context dict access
+    indirectly via what_failed prose)."""
+    err = UnsupportedPatternError.syntax_error(
+        what="unexpected character at position 17",
+        at="@!",
+    )
+    msg = str(err)
+    assert "@!" in msg
+    assert "position 17" in msg
