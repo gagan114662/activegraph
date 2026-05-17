@@ -2509,6 +2509,48 @@ page; broken links fail CI. Until DNS for `docs.activegraph.dev` is
 live, the URL renders as the github.io fallback (#C6) and the swap
 is the documented cutover.
 
+### Voice principle: invariant-protection, not validation
+
+`Why:` is the section that decides how the framework feels to a
+developer in the moment of failure. Locked principle from PR-A's
+reference category, applies to every error in the v1.0 series:
+
+**Explain the framework's intent — the invariant being protected — not
+the mechanism of the check.** Developers reading an error want to know
+"why is this framework being strict with me right now," and the answer
+should almost always be "because it's protecting an invariant you
+care about."
+
+The reference instance, from `ReplayDivergenceError` (PR-A):
+
+> The replay cache keys on the full prompt hash, so any change to an
+> LLM behavior's code, a prompt template, a system message, or a tool's
+> input arguments produces a mismatch. The framework refuses to silently
+> substitute a stale cached response under a new prompt — that would
+> break the audit trail the cache is designed to preserve.
+
+Voice notes for PR-B through PR-G:
+
+- **Active, declarative.** "The framework refuses…" not "It is not
+  permitted to…" Passive voice erases who decided.
+- **No apology.** No "unfortunately," no "sorry," no "this is a
+  limitation." The framework made a decision; explain the decision.
+- **No clinical noun stacks.** "validation of the input prompt against
+  the cached hash failed" is clinical. "the prompt hash didn't match
+  what was recorded" is direct.
+- **Name the invariant.** "The audit trail," "the determinism
+  guarantee," "the budget cap," "the pack's schema contract." Errors
+  exist because invariants exist; name the one being protected so
+  developers can decide if they care about it.
+- **No internal jargon without expansion.** Terms like "behavior graph,"
+  "patch lifecycle," "frame stack" are valid in `Why:` if they appear
+  in the public concepts docs (CONTRACT v1.0 #5). Terms from the
+  implementation (e.g., `_pack_state`, `BehaviorScheduler`) are not.
+
+Snapshot review for PR-B through PR-G is partly a tone review against
+these notes. If a `Why:` paragraph drifts toward apologetic, passive,
+or implementation-detail voice, send the PR back.
+
 ## v1.0 #4. The `ActiveGraphError` hierarchy is the root
 
 ```
