@@ -3495,6 +3495,105 @@ the slug URLs from every snapshot resolve to a real page), then the
 auto-generated API reference. After that: quickstart command, 10-min
 tutorial, mypy gate, docstring gate, changelog, rc1.
 
+### Series-completion note: the principle as audit instrument
+
+CONTRACT v1.0 #4b (events-not-exceptions) was locked before PR-E to
+give the audit a rule to apply. It turned out to be more than
+documentation — it was the **audit instrument** that produced PR-F's
+22% reclassification rate and PR-D's "considered-then-rejected
+BehaviorFailedError / BudgetExhaustedError" finding. Both were
+caught because the principle gave the audit a sharper question than
+"is this the right category?": it asks "does this fire when the
+caller can reasonably catch and act on it at construction time, or
+is the caller already executing when it fires?"
+
+Without the principle, those classifications would have been made
+case-by-case across PRs, drifting silently. With it, the audit had
+a single rule to point at — and the rule did work.
+
+**Preserve the principle as audit instrument for v1.1.** The 22
+partial Pack* migrations from PR-E will be re-audited under the
+same principle when v1.1's error-completeness milestone runs. Some
+of them may turn out to be event-shaped (a `PackPromptLoadError`
+that fires during pack reload after the runtime is up may be a
+candidate for emit-event-instead, for instance). Re-apply the
+principle as the framing question, not just as the category map.
+
+### v1.0 #4c. Voice consistency across error messages and doc pages
+
+The per-error doc pages (one per leaf at `docs/reference/errors/<slug>.md`)
+are the long form of the error message. A reader hitting the page
+from an error message's `More:` link should feel like they're
+reading the same author — same active, declarative, invariant-naming
+voice locked in CONTRACT v1.0 #3.
+
+**Voice ceiling extends from error messages to doc pages.** If a
+per-error page drifts toward clinical reference-manual voice ("This
+error is raised when..."), the error message starts to feel like
+marketing for documentation that doesn't deliver. The doc page
+should answer:
+
+- **When does this fire?** Names the runtime condition concretely.
+- **What causes it?** The invariant being protected, not the
+  mechanism of the check (same as the error's `Why:`).
+- **How do I diagnose?** Pointer to `activegraph inspect`-style
+  commands, log fields to look at, surrounding events to check.
+- **How do I fix it?** The same recovery as the error's
+  `How to fix:`, expanded with examples and edge cases.
+- **What's related?** Cross-references to sibling errors in the
+  same category and to `/concepts/failure-model`.
+
+Per-error pages snapshot-review the same way error snapshots do:
+read the page, ask whether the voice is the same as the error
+message it's the long form of. If not, send it back.
+
+### v1.0 #4d. Broken-link CI gate (doc-site phase burndown)
+
+`tests/test_doc_links.py` is the broken-link CI precursor. It
+extracts every URL appearing in error message snapshots, CONTRACT
+cross-references, README links, and inter-page doc references, then
+maps each to its expected `docs/<section>/<page>.md` source path.
+Missing pages fail the test loud with a per-URL report.
+
+Initial state when the precursor landed: **33 missing pages**.
+That's the doc-site phase's burndown target. Each PR that adds doc
+pages turns red checks green. When the test passes, the doc site is
+complete enough to deploy.
+
+Plus a centralization check (`test_docs_base_url_is_centralized`)
+that catches hardcoded `https://...` URLs in the package — every
+doc-site URL must be constructed from `activegraph.errors.DOCS_BASE_URL`
+so the github.io→docs.activegraph.dev cutover is a one-line edit.
+
+Plus an orphan-page warning (`test_docs_orphans_are_reported_as_warnings`)
+that lists doc pages no error message, CONTRACT section, README, or
+other doc page references. Orphans are warnings, not failures —
+some are landing pages — but the maintainer sees the report and
+decides whether each orphan is intentional or doc-rot.
+
+**Doc-site phase build order.** With the broken-link gate failing
+loud, the order becomes a measurable burndown:
+
+1. `tests/test_doc_links.py` lands first (the gate). **Done.**
+2. mkdocs-material setup + GitHub Pages workflow + `CNAME` for
+   docs.activegraph.dev (with github.io fallback).
+3. `docs/concepts/failure-model.md` — the most-referenced page;
+   resolves multiple cross-references in one PR.
+4. Per-error reference pages in PR order:
+   - `docs/reference/errors/replay-divergence-error.md` (PR-A
+     reference, written first to lock the per-error voice)
+   - PR-B's pages (UnsupportedPatternError)
+   - PR-C's pages (5 leaves)
+   - PR-D's pages (4 leaves)
+   - PR-E's pages (12 leaves)
+   - PR-F's pages (5 leaves)
+   - PR-G's pages (PackSchemaViolation + InternalEvaluatorError)
+5. The remaining concepts/ + guides/ + cookbook/ + about/ pages.
+6. `mkdocstrings`-driven API reference under `docs/reference/api/`.
+
+After the burndown reaches zero (and the orphan warnings are
+resolved or accepted), the doc site is ready for v1.0-rc1.
+
 ## v1.0 #4b. Events-not-exceptions principle (framework-wide)
 
 Surfaced by PR-D's audit and worth locking explicitly before PR-E

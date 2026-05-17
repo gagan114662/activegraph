@@ -37,7 +37,7 @@ from typing import Any, ClassVar
 # CONTRACT v1.0 #C6: until docs.activegraph.dev DNS is live, error URLs
 # point at the github.io fallback. The cutover is a one-line edit here
 # plus a README update; the URLs in every error message follow.
-_DOCS_BASE_URL = "https://yoheinakajima.github.io/activegraph"
+DOCS_BASE_URL = "https://yoheinakajima.github.io/activegraph"
 
 
 def _indent_continuation(text: str, indent: str = "  ") -> str:
@@ -109,7 +109,7 @@ class ActiveGraphError(Exception):
 
     @property
     def doc_url(self) -> str:
-        return f"{_DOCS_BASE_URL}/errors/{self._doc_slug}"
+        return f"{DOCS_BASE_URL}/errors/{self._doc_slug}"
 
     def _format(self) -> str:
         return (
@@ -263,6 +263,7 @@ __all__ = [
     "MissingOptionalDependency",
     "internal_bug_fields",
     "GITHUB_NEW_ISSUE_URL",
+    "DOCS_BASE_URL",
 ]
 
 

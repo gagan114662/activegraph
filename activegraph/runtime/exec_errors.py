@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from activegraph.errors import ExecutionError
+from activegraph.errors import DOCS_BASE_URL, ExecutionError
 
 
 class ApprovalNotFoundError(ExecutionError, LookupError):
@@ -127,8 +127,8 @@ class RuntimeContextRequiredError(ExecutionError, RuntimeError):
                 "the audit trail would show no proposal and the operator "
                 "would have no record to approve.\n"
                 "\n"
-                "See https://yoheinakajima.github.io/activegraph/concepts/failure-model "
-                "for when the framework prefers exceptions over silent no-ops."
+                f"See {DOCS_BASE_URL}/concepts/failure-model "
+                f"for when the framework prefers exceptions over silent no-ops."
             ),
             how_to_fix=(
                 "Construct the BehaviorGraph through a Runtime:\n"
@@ -178,8 +178,8 @@ class InvalidPatchLifecycleState(ExecutionError, ValueError):
                 "than the original run. The framework refuses re-application "
                 "rather than emit the duplicate.\n"
                 "\n"
-                "See https://yoheinakajima.github.io/activegraph/concepts/failure-model "
-                "for the patch-lifecycle invariants."
+                f"See {DOCS_BASE_URL}/concepts/failure-model "
+                f"for the patch-lifecycle invariants."
             ),
             how_to_fix=(
                 f"Check the patch's current status before applying:\n"

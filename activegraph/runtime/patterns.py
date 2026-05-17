@@ -39,7 +39,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
-from activegraph.errors import PatternError
+from activegraph.errors import DOCS_BASE_URL, PatternError
 
 
 # CONTRACT v0.7 #8 voice notes for v1.0 PR-B:
@@ -165,11 +165,11 @@ class UnsupportedPatternError(PatternError, SyntaxError):
                 "next concern."
             ),
             how_to_fix=(
-                "Fix the syntax. The supported subset is documented in CONTRACT "
-                "v0.7 #8 and at\n"
-                "    https://yoheinakajima.github.io/activegraph/concepts/patterns\n"
-                "If the syntax looks right, check for unbalanced brackets, a "
-                "missing relationship type, or a missing arrow direction."
+                f"Fix the syntax. The supported subset is documented in CONTRACT "
+                f"v0.7 #8 and at\n"
+                f"    {DOCS_BASE_URL}/concepts/patterns\n"
+                f"If the syntax looks right, check for unbalanced brackets, a "
+                f"missing relationship type, or a missing arrow direction."
             ),
             at=at,
         )
