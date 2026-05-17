@@ -3231,6 +3231,31 @@ The doc site's `docs/concepts/events.md` (per #5 structure) gets a
 paragraph derived from this principle when the doc phase runs. The
 text writes itself from the rule.
 
+### v1.0 #4b addendum: canonical doc page is `failure-model.md`
+
+PR-F review confirmed: the principle is cross-cutting (applies to
+behaviors, tools, budgets, approvals, replay) so it gets its own page
+at `docs/concepts/failure-model.md` rather than being buried under
+`events.md` or `behaviors.md`. A reader who hits it on
+`behaviors.md` would assume it's a behavior thing; on `events.md`
+they'd assume it's an event-log thing. It is neither — it's the
+framework's stance on what counts as a recoverable failure.
+
+Snapshot recovery prose in PR-F and PR-G references the URL
+`/concepts/failure-model` as the canonical cross-reference target.
+The URL is stable from PR-F onward; the page is written during the
+doc-site phase. The cross-references work the moment the doc site
+builds.
+
+The page covers (~400-600 words):
+
+- The events-not-exceptions principle from #4b
+- The exception hierarchy and when to catch what
+- The `behavior.failed` / `tool.failed` event types and their
+  `reason` fields
+- The `runtime.budget_exhausted` event flow
+- The `approval.granted` / `approval.denied` event flow
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```
@@ -3248,6 +3273,9 @@ docs/
     policies.md
     replay.md
     forking.md
+    failure-model.md            # v1.0 PR-F: events-not-exceptions principle,
+                                # exception hierarchy, behavior.failed /
+                                # tool.failed flows, budget / approval events
   guides/
     writing-behaviors.md
     writing-llm-behaviors.md
