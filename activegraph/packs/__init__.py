@@ -182,15 +182,166 @@ class PackSchemaViolation(PackError, ValueError):
     """`graph.add_object` or `graph.add_relation` data failed schema
     validation against a loaded pack's declared type.
 
-    Runtime-shape error (fires at add_object, not at pack load), so
-    stays under PackError only. PR-G migrates this to the structured
-    format alongside the rest of the runtime-shape PackError leaves.
+    Runtime-shape error (fires at add_object / add_relation, not at
+    pack load), so stays under PackError only — this is the lone
+    runtime-shape leaf in the PackError category. Subclass of
+    :class:`ValueError` so user code catching the builtin around graph
+    mutations continues to work.
 
-    Subclass of `ValueError` so user code that catches `ValueError`
-    around graph mutations continues to work.
+    v1.0 PR-G migrated to structured format. Three call sites are
+    served by three factory class methods (object validation,
+    relation source-type, relation target-type) so the recovery prose
+    can be specific to each shape. Direct construction with the
+    structured fields is also supported.
     """
 
     _doc_slug = "pack-schema-violation"
+
+    @classmethod
+    def for_object(
+        cls,
+        *,
+        object_type: str,
+        validation_error: Any,
+        pack_name: Optional[str] = None,
+    ) -> "PackSchemaViolation":
+        """Object data failed the pack's declared schema validation."""
+        pack_clause = (
+            f" (declared by pack {pack_name!r})" if pack_name else ""
+        )
+        return cls(
+            f"object_type {object_type!r}: schema validation failed",
+            what_failed=(
+                f"`graph.add_object({object_type!r}, data=...)` was rejected "
+                f"because the data did not match the pack's declared schema "
+                f"for {object_type!r}{pack_clause}.\n\n"
+                f"Validation error:\n  {validation_error}"
+            ),
+            why=(
+                "Packs declare object schemas to constrain what shape of data "
+                "can flow into objects of that type. The runtime validates "
+                "every add_object against the schema so downstream behaviors "
+                "can rely on the shape — a malformed add would silently "
+                "corrupt views and pattern matches that depend on the "
+                "declared fields. CONTRACT v0.9 #4 / #5 (object types are "
+                "declared; validation is post-load, not retroactive)."
+            ),
+            how_to_fix=(
+                f"Adjust the data to match the schema. Common fixes:\n"
+                f"  - missing required field: add it to the data dict\n"
+                f"  - wrong type for a field: convert before passing\n"
+                f"  - extra field rejected by a strict schema: remove it\n"
+                f"\n"
+                f"To see the declared schema for {object_type!r}:\n"
+                f"    from activegraph.packs.diligence import pack as p\n"
+                f"    next(ot for ot in p.object_types\n"
+                f"         if ot.name == {object_type!r}).schema.model_json_schema()"
+            ),
+            context={
+                "object_type": object_type,
+                "pack": pack_name,
+                "validation_error": str(validation_error),
+            },
+        )
+
+    @classmethod
+    def for_relation_source(
+        cls,
+        *,
+        relation_type: str,
+        source_type: str,
+        allowed: list[str],
+        pack_name: Optional[str] = None,
+    ) -> "PackSchemaViolation":
+        """Relation source object type isn't in the allowed list."""
+        pack_clause = (
+            f" (declared by pack {pack_name!r})" if pack_name else ""
+        )
+        return cls(
+            f"relation_type {relation_type!r}: source type {source_type!r} not allowed",
+            what_failed=(
+                f"`graph.add_relation(source, target, {relation_type!r})` was "
+                f"rejected because the source object has type {source_type!r}, "
+                f"but the pack's declared relation type for {relation_type!r}"
+                f"{pack_clause} only allows source types: "
+                f"{', '.join(repr(t) for t in allowed)}."
+            ),
+            why=(
+                "Relation types declare which object-type pairs they can "
+                "connect. The constraint serves the same purpose as object "
+                "schemas: behaviors and pattern subscriptions that follow "
+                "this relation rely on the source/target types being what "
+                "the pack documented. An out-of-spec relation would cause "
+                "pattern matches to silently miss or misfire."
+            ),
+            how_to_fix=(
+                f"Either:\n"
+                f"  - Pass a source of an allowed type "
+                f"({', '.join(repr(t) for t in allowed)}); or\n"
+                f"  - Add {source_type!r} to the relation type's "
+                f"`source_types=` list when declaring the pack:\n"
+                f"      RelationType(\n"
+                f"          name={relation_type!r},\n"
+                f"          source_types=[{', '.join(repr(t) for t in [*allowed, source_type])}],\n"
+                f"          target_types=[...],\n"
+                f"      )\n"
+                f"  - Or, if the constraint is wrong, remove `source_types=` "
+                f"to accept any source type."
+            ),
+            context={
+                "relation_type": relation_type,
+                "source_type": source_type,
+                "allowed_source_types": list(allowed),
+                "pack": pack_name,
+                "side": "source",
+            },
+        )
+
+    @classmethod
+    def for_relation_target(
+        cls,
+        *,
+        relation_type: str,
+        target_type: str,
+        allowed: list[str],
+        pack_name: Optional[str] = None,
+    ) -> "PackSchemaViolation":
+        """Relation target object type isn't in the allowed list."""
+        pack_clause = (
+            f" (declared by pack {pack_name!r})" if pack_name else ""
+        )
+        return cls(
+            f"relation_type {relation_type!r}: target type {target_type!r} not allowed",
+            what_failed=(
+                f"`graph.add_relation(source, target, {relation_type!r})` was "
+                f"rejected because the target object has type {target_type!r}, "
+                f"but the pack's declared relation type for {relation_type!r}"
+                f"{pack_clause} only allows target types: "
+                f"{', '.join(repr(t) for t in allowed)}."
+            ),
+            why=(
+                "Same rule as source-type validation: relation types "
+                "constrain both endpoints so behaviors and pattern "
+                "subscriptions that traverse the relation can rely on the "
+                "endpoint shapes. An out-of-spec relation would corrupt "
+                "pattern matches downstream."
+            ),
+            how_to_fix=(
+                f"Either:\n"
+                f"  - Pass a target of an allowed type "
+                f"({', '.join(repr(t) for t in allowed)}); or\n"
+                f"  - Add {target_type!r} to the relation type's "
+                f"`target_types=` list in the pack declaration; or\n"
+                f"  - Remove `target_types=` to accept any target type."
+            ),
+            context={
+                "relation_type": relation_type,
+                "target_type": target_type,
+                "allowed_target_types": list(allowed),
+                "pack": pack_name,
+                "side": "target",
+            },
+        )
 
 
 class PackSettingsMissingError(RegistrationError, PackError):

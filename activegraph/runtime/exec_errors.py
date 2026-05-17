@@ -21,6 +21,14 @@ ExecutionError on closer reading):
 - :class:`InvalidPatchLifecycleState` — ``graph.apply_patch`` was
   called on a patch that isn't in ``"proposed"`` state. Fires during
   the patch lifecycle, mid-execution.
+
+PR-G adds:
+
+- :class:`InternalEvaluatorError` — for the view-filter evaluator in
+  ``graph.py``. Sibling to the two pattern-evaluator internal-bug
+  raises in ``activegraph/runtime/patterns.py``; uses the shared
+  :func:`activegraph.errors.internal_bug_fields` helper so the
+  framework-bug prose is uniform across all three sites.
 """
 
 from __future__ import annotations
@@ -184,4 +192,41 @@ class InvalidPatchLifecycleState(ExecutionError, ValueError):
                 f"re-used."
             ),
             context={"patch_id": patch_id, "current_status": current_status},
+        )
+
+
+class InternalEvaluatorError(ExecutionError, ValueError):
+    """A framework-internal evaluator received input it does not
+    recognize. Should not fire in normal use — the framework's parsers
+    produce a closed set of operators / AST nodes, and an unrecognized
+    one means either drift between parser and evaluator or external
+    AST construction that bypassed the parser.
+
+    Multi-inherits :class:`ValueError` so user code that catches the
+    builtin around view operations continues to work. Used by
+    ``activegraph/core/graph.py`` for the view-filter evaluator; the
+    pattern-subscription evaluator's two internal-bug raises stay as
+    :class:`UnsupportedPatternError` (the natural category) but use
+    the same :func:`activegraph.errors.internal_bug_fields` helper so
+    the prose is uniform across all three sites.
+    """
+
+    _doc_slug = "internal-evaluator-error"
+
+    def __init__(
+        self,
+        summary: str,
+        *,
+        what_failed: str,
+        why: str,
+        how_to_fix: str,
+        context: Optional[dict[str, Any]] = None,
+    ) -> None:
+        ExecutionError.__init__(
+            self,
+            summary,
+            what_failed=what_failed,
+            why=why,
+            how_to_fix=how_to_fix,
+            context=context,
         )

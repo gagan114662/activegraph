@@ -30,6 +30,7 @@ from activegraph import (
     EventNotFoundError,
     ExecutionError,
     IncompatibleRuntimeState,
+    InternalEvaluatorError,
     InvalidActivateAfter,
     InvalidArgumentType,
     InvalidPatchLifecycleState,
@@ -44,6 +45,7 @@ from activegraph import (
     PackConflictError,
     PackError,
     PackNotFoundError,
+    PackSchemaViolation,
     PackVersionConflictError,
     PatternError,
     RegistrationError,
@@ -57,6 +59,7 @@ from activegraph import (
     UnknownToolError,
     UnsupportedPatternError,
 )
+from activegraph.errors import GITHUB_NEW_ISSUE_URL, internal_bug_fields
 
 
 SNAPSHOTS_DIR = Path(__file__).parent / "snapshots" / "errors"
@@ -1302,3 +1305,194 @@ def test_config_recovery_prose_references_failure_model() -> None:
     patch_err = InvalidPatchLifecycleState(patch_id="p", current_status="applied")
     assert "/concepts/failure-model" in str(ctx_err)
     assert "/concepts/failure-model" in str(patch_err)
+
+
+# ---------- PR-G subsection 1: PackError category (PackSchemaViolation)
+
+
+def test_pack_schema_violation_for_object_snapshot() -> None:
+    """Object data fails the pack's declared schema. The most common
+    PackSchemaViolation case — operator passed wrong-shape data to
+    graph.add_object after the pack is loaded."""
+    from pydantic import BaseModel, ValidationError
+
+    class Claim(BaseModel):
+        text: str
+        confidence: float
+
+    try:
+        Claim(text="x")  # missing required 'confidence'
+    except ValidationError as ve:
+        err = PackSchemaViolation.for_object(
+            object_type="claim",
+            validation_error=ve,
+            pack_name="diligence",
+        )
+    _assert_format_compliant(err)
+    _check_snapshot("pack_schema_violation__object", err)
+
+
+def test_pack_schema_violation_for_relation_source_snapshot() -> None:
+    """add_relation source type not in declared allowed list. Recovery
+    shows both possible fixes — pass an allowed source, or relax the
+    declaration."""
+    err = PackSchemaViolation.for_relation_source(
+        relation_type="supports",
+        source_type="memo",
+        allowed=["claim", "evidence"],
+        pack_name="diligence",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("pack_schema_violation__relation_source", err)
+
+
+def test_pack_schema_violation_for_relation_target_snapshot() -> None:
+    """add_relation target type not in declared allowed list. Symmetric
+    with the source-type case."""
+    err = PackSchemaViolation.for_relation_target(
+        relation_type="supports",
+        target_type="risk",
+        allowed=["evidence"],
+        pack_name="diligence",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("pack_schema_violation__relation_target", err)
+
+
+def test_pack_schema_violation_is_a_value_error() -> None:
+    """User code catching ValueError around graph.add_object / add_relation
+    keeps working. CONTRACT v0.9 #5 back-compat clause."""
+    err = PackSchemaViolation.for_object(
+        object_type="x",
+        validation_error="missing field",
+    )
+    assert isinstance(err, ValueError)
+    assert isinstance(err, PackError)
+
+
+# ---------- PR-G subsection 2: internal-bug consistency pass -----------
+
+
+def test_internal_bug_fields_helper_shape() -> None:
+    """The shared helper produces a uniform field dict that every
+    internal-bug raise consumes. Verifies the context-dict keys and
+    the recovery-prose pattern that GitHub Issues filed from these
+    errors arrive with."""
+    fields = internal_bug_fields(
+        summary="test summary",
+        what_happened="something internal happened",
+        why_invariant="the invariant",
+        location="tests/test_errors_format.py:test_helper_shape",
+        extra_context={"foo": "bar"},
+    )
+    assert fields["summary"] == "test summary"
+    assert fields["what_failed"] == "something internal happened"
+    assert fields["why"] == "the invariant"
+    ctx = fields["context"]
+    # Uniform context-dict shape: every internal-bug carries these keys.
+    assert ctx["internal"] is True
+    assert "framework_version" in ctx
+    assert ctx["internal_error_location"] == "tests/test_errors_format.py:test_helper_shape"
+    assert ctx["report_url"] == GITHUB_NEW_ISSUE_URL
+    assert ctx["foo"] == "bar"  # extra_context merged
+    # Uniform recovery-prose pattern.
+    how = fields["how_to_fix"]
+    assert "framework bug" in how
+    assert "not a problem with your code" in how
+    assert GITHUB_NEW_ISSUE_URL in how
+    assert "framework version" in how
+    assert "internal location" in how
+
+
+def test_all_three_internal_bug_sites_use_uniform_prose() -> None:
+    """The three pre-existing internal-bug sites (PR-B's two in
+    patterns.py, PR-F's deferred one in graph.py:797) are unified by
+    PR-G to use the same helper. They produce different exception
+    classes (UnsupportedPatternError for the pattern cases, the new
+    InternalEvaluatorError for the graph case) but identical
+    structural prose so issues filed from them are uniform."""
+    # Pattern evaluator: unknown comparison operator
+    pattern_ev_err = _trigger_internal_pattern_unknown_op()
+    # Pattern evaluator: unrecognized AST node
+    pattern_ast_err = _trigger_internal_pattern_unknown_ast()
+    # Graph view-filter evaluator: unknown where operator
+    graph_view_err = _trigger_internal_graph_view_unknown_op()
+
+    for err in (pattern_ev_err, pattern_ast_err, graph_view_err):
+        msg = str(err)
+        assert "framework bug" in msg
+        assert "not a problem with your code" in msg
+        assert GITHUB_NEW_ISSUE_URL in msg
+        assert "framework version" in msg
+        assert "internal location" in msg
+        # Context dict has uniform keys.
+        assert err.context["internal"] is True
+        assert "framework_version" in err.context
+        assert "internal_error_location" in err.context
+        assert err.context["report_url"] == GITHUB_NEW_ISSUE_URL
+
+
+def _trigger_internal_pattern_unknown_op() -> UnsupportedPatternError:
+    """Synthesize the pattern-evaluator unknown-operator case by
+    constructing a Comparison AST with an operator that _OPS doesn't
+    know about, then feeding it to _eval_where directly."""
+    from activegraph.runtime.patterns import Comparison, _eval_where
+    expr = Comparison(left_path=["a", "x"], op="<>>", right_value=0)
+    try:
+        _eval_where(expr, bindings={"a": "obj#1"}, graph=_NullGraph())
+    except UnsupportedPatternError as e:
+        return e
+    raise AssertionError("expected UnsupportedPatternError")
+
+
+def _trigger_internal_pattern_unknown_ast() -> UnsupportedPatternError:
+    """Synthesize the pattern-evaluator unrecognized-AST-node case by
+    passing a bogus object into _eval_where."""
+    from activegraph.runtime.patterns import _eval_where
+    class _BogusAst:
+        pass
+    try:
+        _eval_where(_BogusAst(), bindings={}, graph=_NullGraph())
+    except UnsupportedPatternError as e:
+        return e
+    raise AssertionError("expected UnsupportedPatternError")
+
+
+def _trigger_internal_graph_view_unknown_op() -> InternalEvaluatorError:
+    """Synthesize the graph view-filter unknown-operator case by
+    calling evaluate_where with a bogus operator."""
+    from activegraph.core.graph import evaluate_where
+    try:
+        evaluate_where(
+            where={"text": {"NOT_A_REAL_OP": "anything"}},
+            root={"text": "anything"},
+        )
+    except InternalEvaluatorError as e:
+        return e
+    raise AssertionError("expected InternalEvaluatorError")
+
+
+class _NullGraph:
+    """Minimal stub for _eval_where — these internal-bug raises fire
+    before the graph is read, so a no-op stub is enough."""
+    def get_object(self, _id):
+        return None
+
+
+def test_internal_pattern_unknown_op_snapshot() -> None:
+    err = _trigger_internal_pattern_unknown_op()
+    _assert_format_compliant(err)
+    _check_snapshot("internal_bug__pattern_unknown_op", err)
+
+
+def test_internal_graph_view_unknown_op_snapshot() -> None:
+    err = _trigger_internal_graph_view_unknown_op()
+    _assert_format_compliant(err)
+    _check_snapshot("internal_bug__graph_view_unknown_op", err)
+
+
+def test_internal_evaluator_error_inherits_correctly() -> None:
+    """InternalEvaluatorError is an ExecutionError and a ValueError."""
+    assert issubclass(InternalEvaluatorError, ExecutionError)
+    assert issubclass(InternalEvaluatorError, ActiveGraphError)
+    assert issubclass(InternalEvaluatorError, ValueError)

@@ -49,6 +49,7 @@ from activegraph.runtime.config_errors import (
 from activegraph.runtime.errors import ReplayDivergenceError
 from activegraph.runtime.exec_errors import (
     ApprovalNotFoundError,
+    InternalEvaluatorError,
     InvalidPatchLifecycleState,
     RuntimeContextRequiredError,
 )
@@ -144,6 +145,7 @@ __all__ = [
     "IDGen",
     "InMemoryEventStore",
     "IncompatibleRuntimeState",
+    "InternalEvaluatorError",
     "InvalidActivateAfter",
     "InvalidArgumentType",
     "InvalidPatchLifecycleState",

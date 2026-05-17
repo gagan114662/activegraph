@@ -1,0 +1,19 @@
+UnsupportedPatternError: unknown comparison operator '<>>'
+
+What failed:
+  The WHERE evaluator received a comparison with operator '<>>', but the operator table has no handler for it.
+
+Why:
+  The operator table (_OPS in this module) is the source of truth for which comparison operators the runtime accepts. If the parser produces an operator the evaluator does not know about, the audit trail would silently mis-evaluate the pattern — refuse instead.
+
+How to fix:
+  This is a framework bug, not a problem with your code.
+  Please file an issue and include the framework version, the
+  internal error location, and the full message above:
+      https://github.com/yoheinakajima/activegraph/issues/new
+
+    framework version:   activegraph 0.9.1
+    internal location:   activegraph/runtime/patterns.py:_eval_where (unknown comparison operator)
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error

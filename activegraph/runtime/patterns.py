@@ -830,34 +830,31 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
         if fn is None:
             # Internal: the parser accepted an operator the evaluator does
             # not recognize. Either the parser drifted from _OPS or the
-            # AST was constructed externally.
-            from activegraph import __version__ as _aw_version
-            raise UnsupportedPatternError(
-                f"unknown comparison operator {expr.op!r}",
-                what_failed=(
+            # AST was constructed externally. PR-G normalization: uses the
+            # shared internal_bug_fields helper for uniform prose.
+            from activegraph.errors import internal_bug_fields
+            fields = internal_bug_fields(
+                summary=f"unknown comparison operator {expr.op!r}",
+                what_happened=(
                     f"The WHERE evaluator received a comparison with operator "
                     f"{expr.op!r}, but the operator table has no handler for it."
                 ),
-                why=(
+                why_invariant=(
                     "The operator table (_OPS in this module) is the source of "
                     "truth for which comparison operators the runtime accepts. "
                     "If the parser produces an operator the evaluator does not "
                     "know about, the audit trail would silently mis-evaluate "
                     "the pattern — refuse instead."
                 ),
-                how_to_fix=(
-                    "This is an internal inconsistency between the parser and the "
-                    "evaluator. File an issue with the offending pattern at\n"
-                    "    https://github.com/yoheinakajima/activegraph/issues\n"
-                    f"\n"
-                    f"Please include: activegraph {_aw_version}, the operator "
-                    f"{expr.op!r}, and the pattern source if possible."
-                ),
-                context={
-                    "activegraph_version": _aw_version,
-                    "operator": expr.op,
-                    "internal": True,
-                },
+                location="activegraph/runtime/patterns.py:_eval_where (unknown comparison operator)",
+                extra_context={"operator": expr.op},
+            )
+            raise UnsupportedPatternError(
+                fields["summary"],
+                what_failed=fields["what_failed"],
+                why=fields["why"],
+                how_to_fix=fields["how_to_fix"],
+                context=fields["context"],
             )
         return fn(left, right)
     if isinstance(expr, NotExpr):
@@ -883,34 +880,31 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
                 return False
         return True
     # Internal: an AST node the evaluator does not recognize. Should not
-    # happen given the parser produces a closed set of node types.
-    from activegraph import __version__ as _aw_version
-    raise UnsupportedPatternError(
-        f"unrecognized WHERE AST node {type(expr).__name__}",
-        what_failed=(
+    # happen given the parser produces a closed set of node types. PR-G
+    # normalization: uses the shared internal_bug_fields helper.
+    from activegraph.errors import internal_bug_fields
+    _fields = internal_bug_fields(
+        summary=f"unrecognized WHERE AST node {type(expr).__name__}",
+        what_happened=(
             f"The WHERE evaluator received an AST node of type "
             f"{type(expr).__name__}, but the evaluator only handles "
             f"Comparison, NotExpr, AndExpr, and NotExists."
         ),
-        why=(
+        why_invariant=(
             "The AST node set is closed and produced by this module's parser. "
             "An unrecognized node means either the parser drifted from the "
             "evaluator or the AST was constructed externally — both would "
             "produce silent mis-evaluation, so the runtime refuses."
         ),
-        how_to_fix=(
-            "This is an internal inconsistency. File an issue with the "
-            "offending pattern at\n"
-            "    https://github.com/yoheinakajima/activegraph/issues\n"
-            f"\n"
-            f"Please include: activegraph {_aw_version}, the AST node type "
-            f"{type(expr).__name__!r}, and the pattern source if possible."
-        ),
-        context={
-            "activegraph_version": _aw_version,
-            "ast_node_type": type(expr).__name__,
-            "internal": True,
-        },
+        location="activegraph/runtime/patterns.py:_eval_where (unrecognized AST node)",
+        extra_context={"ast_node_type": type(expr).__name__},
+    )
+    raise UnsupportedPatternError(
+        _fields["summary"],
+        what_failed=_fields["what_failed"],
+        why=_fields["why"],
+        how_to_fix=_fields["how_to_fix"],
+        context=_fields["context"],
     )
 
 

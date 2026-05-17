@@ -1,0 +1,27 @@
+PackSchemaViolation: object_type 'claim': schema validation failed
+
+What failed:
+  `graph.add_object('claim', data=...)` was rejected because the data did not match the pack's declared schema for 'claim' (declared by pack 'diligence').
+
+  Validation error:
+    1 validation error for Claim
+  confidence
+    Field required [type=missing, input_value={'text': 'x'}, input_type=dict]
+      For further information visit https://errors.pydantic.dev/2.13/v/missing
+
+Why:
+  Packs declare object schemas to constrain what shape of data can flow into objects of that type. The runtime validates every add_object against the schema so downstream behaviors can rely on the shape — a malformed add would silently corrupt views and pattern matches that depend on the declared fields. CONTRACT v0.9 #4 / #5 (object types are declared; validation is post-load, not retroactive).
+
+How to fix:
+  Adjust the data to match the schema. Common fixes:
+    - missing required field: add it to the data dict
+    - wrong type for a field: convert before passing
+    - extra field rejected by a strict schema: remove it
+
+  To see the declared schema for 'claim':
+      from activegraph.packs.diligence import pack as p
+      next(ot for ot in p.object_types
+           if ot.name == 'claim').schema.model_json_schema()
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/pack-schema-violation

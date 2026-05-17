@@ -794,7 +794,36 @@ def evaluate_where(where: dict[str, Any], root: Any) -> bool:
             for op, value in expected.items():
                 fn = _OPS.get(op)
                 if fn is None:
-                    raise ValueError(f"unknown where operator: {op}")
+                    from activegraph.errors import internal_bug_fields
+                    from activegraph.runtime.exec_errors import (
+                        InternalEvaluatorError,
+                    )
+                    _fields = internal_bug_fields(
+                        summary=f"unknown where operator: {op!r}",
+                        what_happened=(
+                            f"The view-filter evaluator in graph.py received "
+                            f"comparison operator {op!r}, but the operator "
+                            f"table (_OPS in this module) has no handler for it."
+                        ),
+                        why_invariant=(
+                            "The operator table is the source of truth for "
+                            "which comparison operators view filters accept. "
+                            "An unknown operator means either the filter was "
+                            "constructed by code that bypassed the parser, or "
+                            "the operator table drifted from the parser. "
+                            "Either way, evaluating the filter would silently "
+                            "produce wrong results — refuse instead."
+                        ),
+                        location="activegraph/core/graph.py:evaluate_where",
+                        extra_context={"operator": op},
+                    )
+                    raise InternalEvaluatorError(
+                        _fields["summary"],
+                        what_failed=_fields["what_failed"],
+                        why=_fields["why"],
+                        how_to_fix=_fields["how_to_fix"],
+                        context=_fields["context"],
+                    )
                 if not fn(actual, value):
                     return False
         else:

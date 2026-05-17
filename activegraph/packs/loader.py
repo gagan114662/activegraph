@@ -650,8 +650,11 @@ def _make_object_validator(state: PackRuntimeState):
         try:
             validated = schema(**data)
         except ValidationError as e:
-            raise PackSchemaViolation(
-                f"object_type {object_type!r}: {e}"
+            pack_name = state.object_type_owners.get(object_type)
+            raise PackSchemaViolation.for_object(
+                object_type=object_type,
+                validation_error=e,
+                pack_name=pack_name,
             ) from e
         return validated.model_dump()
     return _validate
@@ -662,15 +665,20 @@ def _make_relation_validator(state: PackRuntimeState):
         spec = state.relation_type_specs.get(relation_type)
         if spec is None:
             return
+        pack_name = state.relation_type_owners.get(relation_type)
         if spec.source_types and source_type is not None and source_type not in spec.source_types:
-            raise PackSchemaViolation(
-                f"relation_type {relation_type!r}: source object type {source_type!r} "
-                f"is not in allowed source types {list(spec.source_types)}"
+            raise PackSchemaViolation.for_relation_source(
+                relation_type=relation_type,
+                source_type=source_type,
+                allowed=list(spec.source_types),
+                pack_name=pack_name,
             )
         if spec.target_types and target_type is not None and target_type not in spec.target_types:
-            raise PackSchemaViolation(
-                f"relation_type {relation_type!r}: target object type {target_type!r} "
-                f"is not in allowed target types {list(spec.target_types)}"
+            raise PackSchemaViolation.for_relation_target(
+                relation_type=relation_type,
+                target_type=target_type,
+                allowed=list(spec.target_types),
+                pack_name=pack_name,
             )
     return _validate
 

@@ -261,4 +261,81 @@ __all__ = [
     "PatternError",
     "PackError",
     "MissingOptionalDependency",
+    "internal_bug_fields",
+    "GITHUB_NEW_ISSUE_URL",
 ]
+
+
+# ---------- v1.0 PR-G: shared internal-bug helper -----------------------
+#
+# Three sites in the framework raise exceptions for framework-bug
+# conditions (the parser/evaluator sees something the framework itself
+# produced incorrectly, not user input). Per PR-G consistency pass, all
+# three use the same context-dict shape and the same recovery prose so
+# GitHub Issues filed from these errors arrive with uniform metadata.
+
+
+GITHUB_NEW_ISSUE_URL = "https://github.com/yoheinakajima/activegraph/issues/new"
+
+
+def internal_bug_fields(
+    *,
+    summary: str,
+    what_happened: str,
+    why_invariant: str,
+    location: str,
+    extra_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Produce uniform structured fields for an internal-bug exception.
+
+    Used by the three framework-bug raise sites (two in
+    ``activegraph/runtime/patterns.py`` for the WHERE evaluator's
+    unknown-operator and unrecognized-AST-node cases; one in
+    ``activegraph/core/graph.py`` for the view-filter evaluator's
+    unknown-operator case). Returns the kwargs dict that an
+    :class:`ActiveGraphError` subclass's structured ``__init__``
+    consumes.
+
+    Uniform context dict shape:
+
+    - ``internal``: ``True``
+    - ``framework_version``: ``activegraph.__version__``
+    - ``internal_error_location``: module:function pointer for triage
+    - ``report_url``: the GitHub new-issue URL
+    - any per-site keys from ``extra_context``
+
+    Uniform recovery prose:
+
+      "This is a framework bug, not a problem with your code. Please
+      file an issue at <URL> with the framework version and the message
+      above."
+
+    PR-G normalization pass: the three pre-existing internal-bug
+    messages had drifted into three slightly different shapes; they
+    are unified here. Future internal-bug raises should call this
+    helper so the pattern stays uniform.
+    """
+    from activegraph import __version__ as _aw_version
+    ctx: dict[str, Any] = {
+        "internal": True,
+        "framework_version": _aw_version,
+        "internal_error_location": location,
+        "report_url": GITHUB_NEW_ISSUE_URL,
+    }
+    if extra_context:
+        ctx.update(extra_context)
+    return {
+        "summary": summary,
+        "what_failed": what_happened,
+        "why": why_invariant,
+        "how_to_fix": (
+            "This is a framework bug, not a problem with your code.\n"
+            "Please file an issue and include the framework version, the\n"
+            "internal error location, and the full message above:\n"
+            f"    {GITHUB_NEW_ISSUE_URL}\n"
+            "\n"
+            f"  framework version:   activegraph {_aw_version}\n"
+            f"  internal location:   {location}"
+        ),
+        "context": ctx,
+    }

@@ -3323,6 +3323,178 @@ caller-actionable at static configuration time, or is the caller
 already executing when it fires?" The Configuration vs. Execution
 distinction collapses to that single question.
 
+### v1.0 PR-G landed (PackError + internal-bug consistency pass)
+
+The last error-rewrite PR. Two subsections per the PR-G discipline
+note — the bundled scope covers two different question types ("what
+should this raise become?" vs. "are these three already-migrated
+messages consistent?") and the description keeps them separate so
+reviewers know which finding belongs to which.
+
+#### Subsection 1: PackError category — PackSchemaViolation migration
+
+`PackSchemaViolation` is the lone runtime-shape leaf in the
+PackError category (every other Pack* class is registration-time and
+migrated in PR-E). It fires from `graph.add_object` and
+`graph.add_relation` when data doesn't match the pack's declared
+schema, after the pack has loaded.
+
+Migrated to structured format with three factory class methods —
+same shape as PR-B's `UnsupportedPatternError.refused_feature` /
+`syntax_error`:
+
+- `PackSchemaViolation.for_object(object_type, validation_error, pack_name)`
+  — Pydantic ValidationError from a declared object schema
+- `PackSchemaViolation.for_relation_source(relation_type, source_type, allowed, pack_name)`
+  — relation source type not in declared allowed list
+- `PackSchemaViolation.for_relation_target(...)` — symmetric
+
+All three call sites in `activegraph/packs/loader.py` migrated. The
+factory methods carry `pack_name` so the message names which pack
+declared the schema — useful in multi-pack runtimes for triage.
+
+Recovery prose includes a concrete code example showing how to
+inspect the declared schema (`p.object_types`-style introspection),
+which is the operator's fastest path from "my add_object failed" to
+"oh, the field type is wrong."
+
+#### Subsection 2: Internal-bug consistency pass
+
+Three pre-existing internal-bug raise sites had drifted into three
+slightly different prose shapes — written across PR-B (two in
+`patterns.py`) and PR-F (one in `graph.py`, deferred at the time).
+PR-G normalizes them.
+
+**Shared helper:** `activegraph.errors.internal_bug_fields(...)`
+produces uniform structured fields for any internal-bug raise.
+Context dict shape locked at:
+
+- `internal: True`
+- `framework_version: activegraph.__version__`
+- `internal_error_location: <module>:<function> (<discriminator>)`
+- `report_url: <GitHub new-issue URL constant>`
+- plus per-site keys from `extra_context`
+
+Recovery prose locked at:
+
+> This is a framework bug, not a problem with your code.
+> Please file an issue and include the framework version, the
+> internal error location, and the full message above:
+>     https://github.com/yoheinakajima/activegraph/issues/new
+>
+>   framework version:   activegraph X.Y.Z
+>   internal location:   <module>:<function> (<discriminator>)
+
+**Three sites normalized:**
+
+- `activegraph/runtime/patterns.py:_eval_where` (unknown comparison
+  operator) — was an UnsupportedPatternError raise; now uses the
+  helper, prose is uniform with the other two.
+- `activegraph/runtime/patterns.py:_eval_where` (unrecognized AST
+  node) — same.
+- `activegraph/core/graph.py:evaluate_where` (unknown where
+  operator) — was a bare ValueError; now an
+  `InternalEvaluatorError(ExecutionError, ValueError)` (new class)
+  using the helper.
+
+**`GITHUB_NEW_ISSUE_URL` constant** in `activegraph/errors.py` is
+the single source of truth for the issue-filing URL across all
+internal-bug raises. Changes (if we ever migrate hosts) update one
+place.
+
+**New leaf:** `InternalEvaluatorError(ExecutionError, ValueError)`.
+The pattern-evaluator's two internal-bug raises keep using
+`UnsupportedPatternError` (natural PatternError category) since
+that's where the user would look. The graph view-filter case gets
+its own class since the natural category is ExecutionError.
+Different classes, identical prose via the shared helper.
+
+**Snapshot tests:** three for PackSchemaViolation (object, relation
+source, relation target), two for the internal-bug pattern + graph
+sites, plus uniformity assertions verifying all three internal-bug
+sites use the same context-dict shape, same recovery prose
+substrings, and the same GitHub URL constant. The uniformity
+assertion is the load-bearing test for this subsection — it catches
+prose drift before it ships.
+
+#### Snapshot files (5)
+
+PackError subsection:
+
+- `pack_schema_violation__object.txt`
+- `pack_schema_violation__relation_source.txt`
+- `pack_schema_violation__relation_target.txt`
+
+Internal-bug subsection:
+
+- `internal_bug__pattern_unknown_op.txt`
+- `internal_bug__graph_view_unknown_op.txt`
+
+(The second pattern internal-bug case — unrecognized AST node — is
+covered by the uniformity assertion rather than its own snapshot;
+the prose is structurally identical to the unknown-op case, so a
+third snapshot adds noise without adding signal.)
+
+#### Tests, suite total, smoke
+
+Tests added: 9 in `tests/test_errors_format.py` (5 snapshots + 1
+uniformity assertion across the three internal-bug sites + 1
+helper-shape assertion + 1 PackSchemaViolation lineage assertion +
+1 InternalEvaluatorError hierarchy assertion).
+
+489 tests pass (480 + 9). All v0–v0.9 tests pass unchanged. The
+diligence demo runs end-to-end with byte-identical trace.
+
+#### Hidden-surface count — series final tally
+
+- PR-A (ReplayError): 0 new
+- PR-B (PatternError): 0 new + 17 prose branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): 1 new + 6 flagged
+- PR-E (RegistrationError): 8 new + 22 partial + 7 flagged
+- PR-F (Config + cross-category Exec): 5 new + 1 flagged
+- **PR-G (PackError + internal-bug): 1 new + 3 normalized**
+
+**Series final: 19 new leaves migrated to structured v1.0 format.**
+
+The internal-bug consistency pass closed v1.1 follow-on item #3
+(the 3 internal-bug sites needing framework-version context) before
+v1.0-rc1 ships — every internal-bug site now uses the shared
+helper and produces uniform GitHub-Issue-ready output.
+
+#### v1.1 error-completeness milestone scope (after PR-G)
+
+1. The 22 partial Pack* migrations (still partial; v1.1 picks up
+   with fresh attention)
+2. The 4 deferred DB-error wrappers (PR-C)
+3. ~~The internal-evaluator framework-version follow-on~~ —
+   **closed by PR-G**
+4. Real-user-test gate output (from the rc1 → v1.0 transition)
+
+Net v1.1 scope: ~30 items remaining (down from the projected 41+
+after PR-F).
+
+#### What the PR series produced overall
+
+Seven PRs (PR-A through PR-G), three CLI follow-ons (the inspect
+flags + fork --record + migrate --skip-corrupted + version-sync gate),
+two CONTRACT amendments (#4b events-not-exceptions, #5 failure-model.md):
+
+- 19 new exception classes under the v1.0 hierarchy
+- 17 keyword/reason workaround tables (PR-B + PR-D)
+- 7 category bases + 1 cross-cutting MissingOptionalDependency
+- 1 shared internal-bug helper closing 3 sites uniformly
+- All 384 v0–v0.9 tests pass unchanged
+- 105 new tests in tests/test_errors_format.py
+- 33 snapshot files
+
+Next: doc-site phase. Build mkdocs-material setup, then write
+`failure-model.md` as the canonical reference for the principle that
+shaped the audit, then the per-error reference pages (one per leaf;
+the slug URLs from every snapshot resolve to a real page), then the
+auto-generated API reference. After that: quickstart command, 10-min
+tutorial, mypy gate, docstring gate, changelog, rc1.
+
 ## v1.0 #4b. Events-not-exceptions principle (framework-wide)
 
 Surfaced by PR-D's audit and worth locking explicitly before PR-E
