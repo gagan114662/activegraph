@@ -102,3 +102,15 @@ nav:
           - ToolError: reference/errors/tool-error.md
           - UnknownToolError: reference/errors/unknown-tool-error.md
           - ApprovalNotFoundError: reference/errors/approval-not-found-error.md
+          - MissingProviderError: reference/errors/missing-provider-error.md
+          - MissingToolError: reference/errors/missing-tool-error.md
+          - MissingOptionalDependency: reference/errors/missing-optional-dependency.md
+          - BehaviorNotFoundError: reference/errors/behavior-not-found-error.md
+          - AmbiguousBehaviorError: reference/errors/ambiguous-behavior-error.md
+          - ToolNotFoundError: reference/errors/tool-not-found-error.md
+          - AmbiguousToolError: reference/errors/ambiguous-tool-error.md
+          - PackNotFoundError: reference/errors/pack-not-found-error.md
+          - PackConflictError: reference/errors/pack-conflict-error.md
+          - PackVersionConflictError: reference/errors/pack-version-conflict-error.md
+          - InvalidActivateAfter: reference/errors/invalid-activate-after.md
+          - InvalidToolRegistration: reference/errors/invalid-tool-registration.md
