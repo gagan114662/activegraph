@@ -3019,6 +3019,53 @@ toward "the existing scope already covers most of the framework";
 PR-E and PR-F should see the bulk of remaining migration since
 they're where the bare-builtin clusters live.
 
+## v1.0 #4b. Events-not-exceptions principle (framework-wide)
+
+Surfaced by PR-D's audit and worth locking explicitly before PR-E
+runs. This is a framework-wide design rule, not just a v1.0 cleanup:
+
+> **Exceptions are for caller-facing failures the caller can
+> reasonably catch and act on. Non-fatal stops — budget exhaustion,
+> behavior failures, tool failures, approval denials — are events in
+> the log. The distinction: exceptions interrupt control flow; events
+> extend the audit trail. When in doubt, an event.**
+
+PR-D nearly added two exception classes (`BehaviorFailedError`,
+`BudgetExhaustedError`) that would have undermined this principle.
+The framework has used the events-not-exceptions pattern since v0.5
+but never wrote it down — load-bearing across nine milestones,
+discovered via audit. Locking it now means PR-E onward applies the
+rule explicitly:
+
+- **A raise site that should migrate but the right answer is
+  "delete this raise, emit an event instead":** delete and emit.
+  This is its own kind of audit finding, distinct from "migrate to
+  a new exception class." Count it in the hidden-surface tally as a
+  "removed-raise" instead of a "new-leaf."
+
+- **A new failure mode discovered during audit:** apply the
+  when-in-doubt-an-event rule. If the caller can't reasonably catch
+  and act on the failure (it's a side effect of the runtime loop,
+  a budget tick, a policy decision), it's an event. If the caller
+  is making a direct API call that fails (a lookup miss, a
+  schema-validation rejection, a typo in a CLI flag), it's an
+  exception.
+
+- **Existing exception classes that turn out to be event-shaped:**
+  PR-D considered then rejected creating `BehaviorFailedError` /
+  `BudgetExhaustedError`. The negative finding stands. If a future
+  PR thinks a similar class is missing, the burden is to demonstrate
+  it's caller-actionable, not just to point at the absence.
+
+This principle is downstream from CONTRACT v0.5 (the event log is the
+source of truth, replay reconstructs state) and CONTRACT v0.6 #13
+(behavior.failed is the canonical structured failure surface). It
+unifies their implications into one rule that's easier to apply.
+
+The doc site's `docs/concepts/events.md` (per #5 structure) gets a
+paragraph derived from this principle when the doc phase runs. The
+text writes itself from the rule.
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```
