@@ -1,0 +1,68 @@
+# Build and deploy the documentation site to GitHub Pages.
+# CONTRACT v1.0 #5, #C6, #4d.
+#
+# Triggers:
+#   - push to main (deploys)
+#   - pull_request (builds only — verifies the site builds cleanly
+#     for a PR before merge)
+#   - manual dispatch
+#
+# The custom domain docs.activegraph.dev is locked via docs/CNAME.
+# Until DNS resolves, the site serves on the github.io fallback URL.
+
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Cancel in-progress runs on new pushes to the same ref.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install mkdocs
+        run: pip install mkdocs mkdocs-material
+      - name: Build site
+        run: mkdocs build
+      - name: Upload pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

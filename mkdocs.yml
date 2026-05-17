@@ -1,0 +1,89 @@
+# Active Graph documentation site. CONTRACT v1.0 #5 / #4d.
+#
+# The nav block declares only pages that exist; PRs that add doc
+# pages add their nav entries in the same commit. The broken-link
+# checker (tests/test_doc_links.py) is the burndown meter for the
+# doc-site phase.
+#
+# Custom domain: docs.activegraph.dev (CONTRACT v1.0 #C6). Until
+# DNS is live, the site serves on the github.io fallback. The
+# `docs/CNAME` file is the trigger for the custom-domain swap.
+
+site_name: Active Graph
+site_url: https://docs.activegraph.dev/
+site_description: An event-sourced reactive graph runtime for long-running, auditable, agentic systems.
+site_author: Active Graph contributors
+
+repo_name: yoheinakajima/activegraph
+repo_url: https://github.com/yoheinakajima/activegraph
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+  - pymdownx.tabbed:
+      alternate_style: true
+
+# Strict mode is OFF during the doc-site phase. The broken-link CI
+# gate (tests/test_doc_links.py) is the canonical burndown meter —
+# enabling strict here would duplicate the signal at build time and
+# block deploys until every page exists. Flip to `strict: true` in
+# the final doc-site phase commit (after the burndown reaches zero)
+# so subsequent typos in cross-references fail the build.
+strict: false
+
+# Nav: only pages that exist today. Grows with the doc-site phase.
+nav:
+  - Home: index.md
+  - Concepts:
+      - Failure model: concepts/failure-model.md
+  - Guides:
+      - Operating in production: guides/operating-in-production.md
+      - Authoring packs: guides/authoring-packs.md
