@@ -92,3 +92,9 @@ nav:
       - Errors:
           - ReplayDivergenceError: reference/errors/replay-divergence-error.md
           - UnsupportedPatternError: reference/errors/unsupported-pattern-error.md
+          - CorruptedEventPayloadError: reference/errors/corrupted-event-payload-error.md
+          - DuplicateEventError: reference/errors/duplicate-event-error.md
+          - EventNotFoundError: reference/errors/event-not-found-error.md
+          - InvalidStoreURL: reference/errors/invalid-store-url-error.md
+          - NonSerializableEventError: reference/errors/non-serializable-event-error.md
+          - SchemaVersionMismatch: reference/errors/schema-version-mismatch.md
