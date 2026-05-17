@@ -2763,6 +2763,103 @@ back-compat with user code that reads it.
 
 422 tests pass (412 + 10 new). All v0–v0.9 tests pass unchanged.
 
+### v1.0 PR-C landed (StorageError, audit-driven)
+
+Audit of `activegraph/store/` surfaced **4 new concrete leaves** beyond
+the 2 pre-existing storage errors. The audit-as-side-effect rationale
+for the PR series (CONTRACT v1.0 #C1) paid off here: a mechanical
+find-replace would have migrated only the named classes and left the
+bare-`RuntimeError`/`KeyError`/`ValueError` raises as hidden surface.
+
+**Migrated (re-parented to StorageError):**
+
+- `NonSerializableEventError(StorageError, TypeError)` — emit-time
+  failure to JSON-encode. Multi-inherits TypeError for back-compat.
+  Now walks the payload to identify the offending field path and
+  reports it in the structured "What failed:".
+- `InvalidStoreURL(StorageError, ValueError)` — 7 raise sites with
+  per-shape recovery prose (bare-path → exact corrected URL, missing
+  path, missing host, unsupported scheme).
+
+**New leaves under `activegraph/store/errors.py`:**
+
+- `SchemaVersionMismatch` — was bare `RuntimeError` in `sqlite.py:112`
+  and `postgres.py:211`. Recovery enumerates the three concrete
+  actions (upgrade activegraph, migrate runs, drop expendable store).
+  Includes framework version + recorded version in context for
+  triage.
+- `EventNotFoundError(StorageError, KeyError)` — was bare `KeyError`
+  at 7 sites across `memory.py` / `sqlite.py` / `postgres.py`. Two
+  shapes of recovery: lookup misses point at `inspect --tail`, fork
+  misses point at `inspect --tail` against the parent run.
+  Multi-inherits `KeyError` for back-compat with user code catching
+  the builtin.
+- `DuplicateEventError(StorageError, ValueError)` — was bare
+  `ValueError` at `memory.py:22`. Frames the failure as a programmer
+  error (the runtime's id generator is monotonic; duplicates in
+  production usage are bugs in fixtures/tests).
+- `CorruptedEventPayloadError` — new ground. `decode_payload` was
+  previously bubbling `json.JSONDecodeError` from corrupted stored
+  rows; now wraps it with structured prose pointing at how to inspect
+  surrounding events, how to manually repair via sqlite3/psql, and
+  the unrecoverable-fallback. The recovery prose deliberately does
+  NOT reference unimplemented CLI surface (the discipline note from
+  the PR-C review).
+
+**Flagged-not-migrated (insufficient context — discipline note):**
+
+- **SQLite `sqlite3.OperationalError`** under WAL contention. Multiple
+  distinct failure modes (lock timeout, journal corruption, disk full,
+  file-system permissions); each needs its own recovery prose. Bubbles
+  unwrapped today.
+- **Postgres `psycopg.OperationalError`** variants (auth, host
+  unreachable, db missing, conn dropped). Same shape as above —
+  per-mode recovery diverges enough that a single wrapper would lie.
+  Bubbles unwrapped today.
+- **`postgres.py:107` `TypeError`** (bad target type). This is
+  configuration shape, not storage. Defers to **PR-F**
+  (`ConfigurationError`).
+- **`postgres.py:73` `ImportError`** (missing psycopg). This is
+  "missing optional dependency at registration time." Defers to
+  **PR-E** (`RegistrationError`).
+
+These four are tracked as v1.0-rc1 follow-ons (dedicated DB-error PR
+post-rc1, but pre-1.0-final if a contributor with hands-on experience
+in the failure modes is available). If no contributor surfaces, they
+ship as-is for v1.0 — bubbling the underlying driver error is honest
+in the absence of correct recovery prose; making up prose would be
+worse.
+
+**Snapshot files:**
+
+- `invalid_store_url__bare_path.txt`
+- `invalid_store_url__unsupported_scheme.txt`
+- `non_serializable_event.txt`
+- `corrupted_event_payload.txt`
+- `schema_version_mismatch.txt`
+- `event_not_found.txt`
+- `duplicate_event.txt`
+
+Tests added: 11 in `tests/test_errors_format.py` (6 snapshots + 5
+back-compat assertions on multi-inheritance + 2 cross-checks that
+`except KeyError` / `except ValueError` still catch the new leaves).
+
+433 tests pass (422 + 11). Backward-compat absolute: all 384 v0-v0.9
+tests pass unchanged. The diligence demo (the v0.9 killer demo)
+still runs end-to-end against the migrated store layer with byte-
+identical trace output.
+
+**Hidden-surface count so far (audit value tracking):**
+
+- PR-A (ReplayError): 0 new leaves (single class)
+- PR-B (PatternError): 0 new leaves (single class, but 17 keyword
+  workaround branches that didn't exist as concrete prose)
+- PR-C (StorageError): **4 new leaves** + 4 flagged for follow-on
+
+Useful data for v1.1 planning. The PatternError keyword table and the
+PR-C new leaves both came from audit-as-side-effect work that a
+mechanical rewrite would have missed.
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```

@@ -1,0 +1,26 @@
+CorruptedEventPayloadError: event payload could not be decoded as JSON (at column 24)
+
+What failed:
+  While reading a stored event payload, the JSON parser failed at line 1, column 24:
+    Expecting value
+    payload preview: '{"goal": "x", "broken":'
+
+Why:
+  The store persists every event payload as JSON. A row that doesn't parse as JSON means the bytes on disk are corrupted, the store schema is mismatched (someone wrote a non-JSON format here), or an out-of-band edit damaged the file. The framework refuses to silently skip the row — that would make the replay contract unverifiable, and the next fork or diff would lie about what happened.
+
+How to fix:
+  Inspect events around the corruption to assess scope:
+      activegraph inspect <store> --tail 50
+
+  Open the store directly with sqlite3 / psql to view the
+  offending row. If you have the original payload elsewhere
+  (a previous run, a backup, a log), repair the row in place
+  and retry the load.
+
+  If the corruption is intrinsic and the run is not
+  recoverable, re-run from the original goal in a fresh
+  store. The store is append-only; partial corruption does
+  not propagate backward in time.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/corrupted-event-payload-error

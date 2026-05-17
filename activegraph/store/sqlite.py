@@ -109,8 +109,39 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             (SCHEMA_VERSION,),
         )
     elif row[0] != SCHEMA_VERSION:
-        raise RuntimeError(
-            f"unsupported schema_version {row[0]!r}; this build expects {SCHEMA_VERSION!r}"
+        from activegraph import __version__ as _aw_version
+        from activegraph.store.errors import SchemaVersionMismatch
+        raise SchemaVersionMismatch(
+            f"sqlite store schema_version {row[0]!r} does not match this build's expected {SCHEMA_VERSION!r}",
+            what_failed=(
+                f"The SQLite store records schema_version={row[0]!r} in its meta table, "
+                f"but activegraph {_aw_version} expects schema_version={SCHEMA_VERSION!r}."
+            ),
+            why=(
+                "The store file format evolves with the framework. The runtime "
+                "refuses to read a store with a different schema_version rather "
+                "than risk silent data loss — a newer framework might interpret "
+                "columns differently than the writer did, and an older framework "
+                "might drop fields it doesn't recognize. Either direction would "
+                "corrupt the audit trail."
+            ),
+            how_to_fix=(
+                f"One of three actions:\n"
+                f"  1. Install the activegraph version that wrote this store\n"
+                f"     (whichever shipped schema_version={row[0]!r}).\n"
+                f"  2. Migrate the run to a store written by this build:\n"
+                f"     activegraph migrate <src-url> <new-dst-url>\n"
+                f"     The destination is written with the current schema.\n"
+                f"  3. If the store is empty or expendable, delete and re-run.\n"
+                f"\n"
+                f"Schema version history is documented in CHANGELOG.md."
+            ),
+            context={
+                "found_version": row[0],
+                "expected_version": SCHEMA_VERSION,
+                "activegraph_version": _aw_version,
+                "driver": "sqlite",
+            },
         )
 
 
@@ -211,7 +242,32 @@ class SQLiteEventStore:
             (event_id, self.run_id),
         ).fetchone()
         if row is None:
-            raise KeyError(f"unknown event id: {event_id} in run {self.run_id}")
+            from activegraph.store.errors import EventNotFoundError
+            raise EventNotFoundError(
+                f"event {event_id!r} not found in run {self.run_id!r}",
+                what_failed=(
+                    f"The SQLite store has no event with id {event_id!r} in "
+                    f"run {self.run_id!r}."
+                ),
+                why=(
+                    "Event ids are the framework's addressing primitive. The "
+                    "store refuses to return a default for an unknown id — that "
+                    "would silently corrupt the audit trail and any downstream "
+                    "fork or replay."
+                ),
+                how_to_fix=(
+                    "Check the event id against what's actually in the run:\n"
+                    f"    activegraph inspect <store-url> --run-id {self.run_id} --tail 100\n"
+                    "\n"
+                    "Common causes: typo in a hand-typed id, referencing an id "
+                    "from a different run, or a run truncated by an earlier fork."
+                ),
+                context={
+                    "event_id": event_id,
+                    "run_id": self.run_id,
+                    "driver": "sqlite",
+                },
+            )
         return int(row["seq"])
 
     # ---------- v0.5 helpers (per-run) ----------
@@ -313,8 +369,33 @@ class SQLiteEventStore:
                 (at_event_id, parent_run_id),
             ).fetchone()
             if cut is None:
-                raise KeyError(
-                    f"event {at_event_id!r} not found in run {parent_run_id!r}"
+                from activegraph.store.errors import EventNotFoundError
+                raise EventNotFoundError(
+                    f"event {at_event_id!r} not found in run {parent_run_id!r}",
+                    what_failed=(
+                        f"Cannot fork run {parent_run_id!r} at event "
+                        f"{at_event_id!r}: that event does not exist in the run."
+                    ),
+                    why=(
+                        "Forking takes a parent run and copies events up to and "
+                        "including --at-event into a new run. The framework "
+                        "refuses to fork at an unknown event id rather than "
+                        "guess where the user meant — that would produce a "
+                        "fork that doesn't share lineage with its claimed parent."
+                    ),
+                    how_to_fix=(
+                        f"List the events in the parent run to find a valid "
+                        f"fork point:\n"
+                        f"    activegraph inspect <store-url> --run-id {parent_run_id} --tail 100\n"
+                        f"\n"
+                        f"Then re-issue the fork with a valid event id."
+                    ),
+                    context={
+                        "event_id": at_event_id,
+                        "run_id": parent_run_id,
+                        "operation": "fork",
+                        "driver": "sqlite",
+                    },
                 )
             parent_row = conn.execute(
                 "SELECT goal, frame_id FROM runs WHERE run_id = ?", (parent_run_id,)

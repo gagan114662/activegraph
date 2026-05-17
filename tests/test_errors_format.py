@@ -21,12 +21,18 @@ import pytest
 from activegraph import (
     ActiveGraphError,
     ConfigurationError,
+    CorruptedEventPayloadError,
+    DuplicateEventError,
+    EventNotFoundError,
     ExecutionError,
+    InvalidStoreURL,
+    NonSerializableEventError,
     PackError,
     PatternError,
     RegistrationError,
     ReplayDivergenceError,
     ReplayError,
+    SchemaVersionMismatch,
     StorageError,
     UnsupportedPatternError,
 )
@@ -415,3 +421,170 @@ def test_unsupported_pattern_names_the_offending_token() -> None:
     msg = str(err)
     assert "@!" in msg
     assert "position 17" in msg
+
+
+# ---------- PR-C: StorageError category --------------------------------
+
+
+def test_storage_leaves_inherit_from_storage_error() -> None:
+    """Every PR-C leaf is wired into the v1.0 hierarchy."""
+    for cls in (
+        InvalidStoreURL,
+        NonSerializableEventError,
+        CorruptedEventPayloadError,
+        SchemaVersionMismatch,
+        EventNotFoundError,
+        DuplicateEventError,
+    ):
+        assert issubclass(cls, StorageError), cls
+        assert issubclass(cls, ActiveGraphError), cls
+
+
+def test_storage_leaves_preserve_legacy_base_classes() -> None:
+    """Multi-inheritance with stdlib base classes preserves the user
+    code that catches the builtin around store operations."""
+    # NonSerializableEventError used to be a plain TypeError.
+    assert issubclass(NonSerializableEventError, TypeError)
+    # InvalidStoreURL used to be a plain ValueError.
+    assert issubclass(InvalidStoreURL, ValueError)
+    # EventNotFoundError multi-inherits KeyError so `except KeyError`
+    # around store lookups keeps working.
+    assert issubclass(EventNotFoundError, KeyError)
+    # DuplicateEventError multi-inherits ValueError for the same reason.
+    assert issubclass(DuplicateEventError, ValueError)
+
+
+def test_invalid_store_url_bare_path_snapshot() -> None:
+    """The most common operator mistake — typing the SQLite file path
+    without the scheme prefix. The fix is a one-line edit; the error
+    should show the exact corrected URL."""
+    from activegraph.store import parse_store_url
+    with pytest.raises(InvalidStoreURL) as excinfo:
+        parse_store_url("/tmp/run.db")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("invalid_store_url__bare_path", excinfo.value)
+
+
+def test_invalid_store_url_unsupported_scheme_snapshot() -> None:
+    """User tries a database the framework doesn't support. The
+    recovery enumerates supported schemes and points at the extension
+    path (the EventStore protocol)."""
+    from activegraph.store import parse_store_url
+    with pytest.raises(InvalidStoreURL) as excinfo:
+        parse_store_url("mysql://host/dbname")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("invalid_store_url__unsupported_scheme", excinfo.value)
+
+
+def test_non_serializable_event_snapshot() -> None:
+    """A payload containing a Python value the strict adapter can't
+    JSON-encode. The recovery names the offending field path and
+    suggests three concrete fixes plus the adapter-extension path."""
+    from activegraph.store.serde import encode_payload
+
+    class Custom:
+        pass
+
+    payload = {"goal": "x", "nested": {"value": Custom()}}
+    with pytest.raises(NonSerializableEventError) as excinfo:
+        encode_payload(payload)
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("non_serializable_event", excinfo.value)
+
+
+def test_corrupted_event_payload_snapshot() -> None:
+    """Stored JSON that doesn't parse. Recovery prose points at how to
+    inspect surrounding events and at the manual-repair path, without
+    referencing CLI flags that don't exist yet."""
+    from activegraph.store.serde import decode_payload
+    with pytest.raises(CorruptedEventPayloadError) as excinfo:
+        decode_payload('{"goal": "x", "broken":')
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("corrupted_event_payload", excinfo.value)
+
+
+def test_schema_version_mismatch_snapshot() -> None:
+    """The store was written by a different activegraph build. Recovery
+    enumerates three concrete actions (upgrade, migrate, drop)."""
+    from activegraph import __version__ as _aw_version
+    err = SchemaVersionMismatch(
+        f"sqlite store schema_version '99' does not match this build's expected '1'",
+        what_failed=(
+            f"The SQLite store records schema_version='99' in its meta table, "
+            f"but activegraph {_aw_version} expects schema_version='1'."
+        ),
+        why=(
+            "The store file format evolves with the framework. The runtime "
+            "refuses to read a store with a different schema_version rather "
+            "than risk silent data loss — a newer framework might interpret "
+            "columns differently than the writer did, and an older framework "
+            "might drop fields it doesn't recognize. Either direction would "
+            "corrupt the audit trail."
+        ),
+        how_to_fix=(
+            f"One of three actions:\n"
+            f"  1. Install the activegraph version that wrote this store\n"
+            f"     (whichever shipped schema_version='99').\n"
+            f"  2. Migrate the run to a store written by this build:\n"
+            f"     activegraph migrate <src-url> <new-dst-url>\n"
+            f"     The destination is written with the current schema.\n"
+            f"  3. If the store is empty or expendable, delete and re-run.\n"
+            f"\n"
+            f"Schema version history is documented in CHANGELOG.md."
+        ),
+        context={
+            "found_version": "99",
+            "expected_version": "1",
+            "activegraph_version": _aw_version,
+            "driver": "sqlite",
+        },
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("schema_version_mismatch", err)
+
+
+def test_event_not_found_snapshot() -> None:
+    """The high-traffic store lookup error. Fires from inspect, fork,
+    causal-chain, basically every operator command that names an event
+    id. Recovery points at `activegraph inspect ... --tail` so the
+    operator can see which ids actually exist."""
+    from activegraph.store import InMemoryEventStore
+    store = InMemoryEventStore(run_id="run_test")
+    with pytest.raises(EventNotFoundError) as excinfo:
+        list(store.iter_events(after="evt_does_not_exist"))
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("event_not_found", excinfo.value)
+
+
+def test_event_not_found_is_a_key_error() -> None:
+    """User code catching KeyError around store lookups keeps working."""
+    from activegraph.store import InMemoryEventStore
+    store = InMemoryEventStore(run_id="run_test")
+    with pytest.raises(KeyError):
+        list(store.iter_events(after="evt_does_not_exist"))
+
+
+def test_duplicate_event_snapshot() -> None:
+    """Hand-constructed events colliding on id. Voice frames this as
+    a programmer error (the id generator is monotonic in normal use)."""
+    from activegraph import Event
+    from activegraph.store import InMemoryEventStore
+    store = InMemoryEventStore(run_id="run_test")
+    e1 = Event(id="evt_001", type="goal.created", payload={}, timestamp="2026-05-17T00:00:00Z")
+    e2 = Event(id="evt_001", type="goal.created", payload={}, timestamp="2026-05-17T00:00:01Z")
+    store.append(e1)
+    with pytest.raises(DuplicateEventError) as excinfo:
+        store.append(e2)
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("duplicate_event", excinfo.value)
+
+
+def test_duplicate_event_is_a_value_error() -> None:
+    """User code catching ValueError around appends keeps working."""
+    from activegraph import Event
+    from activegraph.store import InMemoryEventStore
+    store = InMemoryEventStore(run_id="run_test")
+    e1 = Event(id="evt_001", type="goal.created", payload={}, timestamp="2026-05-17T00:00:00Z")
+    store.append(e1)
+    with pytest.raises(ValueError):
+        store.append(e1)

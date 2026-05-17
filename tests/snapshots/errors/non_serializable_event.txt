@@ -1,0 +1,19 @@
+NonSerializableEventError: event payload field 'nested.value' is not JSON-serializable (type: Custom)
+
+What failed:
+  While encoding an event payload for the store, the value at 'nested.value' (type Custom) could not be JSON-encoded.
+    underlying: object of type Custom is not JSON-serializable
+
+Why:
+  The store persists events as JSON so the audit trail is human-inspectable and round-trips through any JSON-aware tool. Custom Python types serialize through a strict adapter (Decimal → string, datetime → ISO 8601, set → sorted list); anything else is refused at emit-time rather than silently pickled or dropped, because a silently-dropped event would corrupt the replay contract.
+
+How to fix:
+  Convert 'nested.value' to a JSON primitive before emitting. Common fixes:
+    - Pydantic model:  payload['nested.value'] = model.model_dump()
+    - dataclass:       payload['nested.value'] = dataclasses.asdict(value)
+    - custom object:   payload['nested.value'] = str(value)
+
+  If the type really should serialize, add an adapter clause to ``_default`` in activegraph/store/serde.py (Decimal and datetime are precedents).
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/non-serializable-event-error
