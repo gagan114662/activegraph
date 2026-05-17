@@ -3683,6 +3683,16 @@ docs/
     policies.md
     replay.md
     forking.md
+    patterns.md                 # v1.0 doc-site (PR-B batch): pattern
+                                # subscriptions as a first-class primitive.
+                                # Added to #5 because the cross-reference
+                                # from UnsupportedPatternError.syntax_error
+                                # recovery prose surfaced the structural
+                                # gap — pattern subscriptions have their
+                                # own decorator argument, their own CONTRACT
+                                # v0.7 #8 subset decisions, their own error
+                                # class. Burying them in behaviors.md
+                                # undersold a first-class primitive.
     failure-model.md            # v1.0 PR-F: events-not-exceptions principle,
                                 # exception hierarchy, behavior.failed /
                                 # tool.failed flows, budget / approval events
