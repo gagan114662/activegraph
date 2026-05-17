@@ -831,6 +831,7 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
             # Internal: the parser accepted an operator the evaluator does
             # not recognize. Either the parser drifted from _OPS or the
             # AST was constructed externally.
+            from activegraph import __version__ as _aw_version
             raise UnsupportedPatternError(
                 f"unknown comparison operator {expr.op!r}",
                 what_failed=(
@@ -847,8 +848,16 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
                 how_to_fix=(
                     "This is an internal inconsistency between the parser and the "
                     "evaluator. File an issue with the offending pattern at\n"
-                    "    https://github.com/yoheinakajima/activegraph/issues"
+                    "    https://github.com/yoheinakajima/activegraph/issues\n"
+                    f"\n"
+                    f"Please include: activegraph {_aw_version}, the operator "
+                    f"{expr.op!r}, and the pattern source if possible."
                 ),
+                context={
+                    "activegraph_version": _aw_version,
+                    "operator": expr.op,
+                    "internal": True,
+                },
             )
         return fn(left, right)
     if isinstance(expr, NotExpr):
@@ -875,6 +884,7 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
         return True
     # Internal: an AST node the evaluator does not recognize. Should not
     # happen given the parser produces a closed set of node types.
+    from activegraph import __version__ as _aw_version
     raise UnsupportedPatternError(
         f"unrecognized WHERE AST node {type(expr).__name__}",
         what_failed=(
@@ -891,8 +901,16 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
         how_to_fix=(
             "This is an internal inconsistency. File an issue with the "
             "offending pattern at\n"
-            "    https://github.com/yoheinakajima/activegraph/issues"
+            "    https://github.com/yoheinakajima/activegraph/issues\n"
+            f"\n"
+            f"Please include: activegraph {_aw_version}, the AST node type "
+            f"{type(expr).__name__!r}, and the pattern source if possible."
         ),
+        context={
+            "activegraph_version": _aw_version,
+            "ast_node_type": type(expr).__name__,
+            "internal": True,
+        },
     )
 
 
