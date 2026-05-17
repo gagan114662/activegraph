@@ -98,3 +98,7 @@ nav:
           - InvalidStoreURL: reference/errors/invalid-store-url-error.md
           - NonSerializableEventError: reference/errors/non-serializable-event-error.md
           - SchemaVersionMismatch: reference/errors/schema-version-mismatch.md
+          - LLMBehaviorError: reference/errors/llm-behavior-error.md
+          - ToolError: reference/errors/tool-error.md
+          - UnknownToolError: reference/errors/unknown-tool-error.md
+          - ApprovalNotFoundError: reference/errors/approval-not-found-error.md
