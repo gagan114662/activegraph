@@ -1,4 +1,5 @@
-"""Cross-store migration. CONTRACT v0.8 #5 (revised: transaction-per-run).
+"""Cross-store migration. CONTRACT v0.8 #5 (revised: transaction-per-run),
++ v1.0 CLI follow-on (--skip-corrupted).
 
 Each run migrates in a single transaction against the destination. If a
 run fails partway, that run's destination state is unchanged. Writes
@@ -9,14 +10,23 @@ returned (and printed by the CLI; ``--json`` dumps the same shape).
 
 Migration is one-directional and explicit. No sync mode, no rollback,
 no automatic recovery. To go back, migrate the other direction.
+
+v1.0 adds opt-in ``skip_corrupted`` mode: a corrupted-payload row no
+longer halts a run's migration. The corrupt row is recorded in the
+per-run report's ``skipped_events`` list; surrounding events still
+migrate. Driver-specific raw row iteration is required because Python
+generators die after raising — see ``_iter_*_skip_corrupted`` helpers.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
+from activegraph.core.event import Event
 from activegraph.store.base import RunRecord
+from activegraph.store.errors import CorruptedEventPayloadError
+from activegraph.store.serde import decode_event
 from activegraph.store.url import parse_store_url
 
 
@@ -26,6 +36,9 @@ class MigrationRunReport:
     status: str  # "ok" | "skipped" | "failed"
     events_migrated: int
     error: Optional[str] = None
+    # v1.0 CLI follow-on: event ids that could not be decoded and were
+    # skipped under --skip-corrupted. Empty on a clean migration.
+    skipped_events: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,6 +62,7 @@ def migrate(
     *,
     only_run_ids: Optional[list[str]] = None,
     on_progress: Optional[Callable[[MigrationRunReport], None]] = None,
+    skip_corrupted: bool = False,
 ) -> MigrationReport:
     """Copy every run (or a subset) from ``source_url`` into ``dest_url``.
 
@@ -58,6 +72,11 @@ def migrate(
         only_run_ids: if given, migrate only these runs.
         on_progress: called after each run finishes (success or failure)
             with the ``MigrationRunReport`` for that run.
+        skip_corrupted: if True, rows whose payload fails JSON decode
+            are skipped (not migrated, not failing the run). The
+            skipped event ids appear in the per-run report's
+            ``skipped_events``. The resulting destination run is
+            **partial** — the operator is on notice.
 
     Returns:
         A ``MigrationReport``. The overall operation is considered
@@ -73,7 +92,7 @@ def migrate(
 
     reports: list[MigrationRunReport] = []
     for rec in run_records:
-        report = _migrate_one_run(src, dst, rec)
+        report = _migrate_one_run(src, dst, rec, skip_corrupted=skip_corrupted)
         reports.append(report)
         if on_progress is not None:
             on_progress(report)
@@ -138,17 +157,28 @@ def _resolve(url: str) -> _StoreFacade:
 
 
 def _migrate_one_run(
-    src: _StoreFacade, dst: _StoreFacade, rec: RunRecord
+    src: _StoreFacade, dst: _StoreFacade, rec: RunRecord,
+    *, skip_corrupted: bool = False,
 ) -> MigrationRunReport:
     src_store = src.open_run(rec.run_id)
+    skipped_ids: list[str] = []
     try:
-        events = list(src_store.iter_events())
+        if skip_corrupted:
+            events = []
+            for ev, err, raw_id in _iter_events_skip_corrupted(src, rec.run_id):
+                if err is None and ev is not None:
+                    events.append(ev)
+                else:
+                    skipped_ids.append(raw_id or "<unknown>")
+        else:
+            events = list(src_store.iter_events())
     except Exception as e:
         return MigrationRunReport(
             run_id=rec.run_id,
             status="failed",
             events_migrated=0,
             error=f"read failure: {e}",
+            skipped_events=tuple(skipped_ids),
         )
     finally:
         src_store.close()
@@ -161,11 +191,107 @@ def _migrate_one_run(
             status="failed",
             events_migrated=0,
             error=f"write failure: {e}",
+            skipped_events=tuple(skipped_ids),
         )
 
     return MigrationRunReport(
-        run_id=rec.run_id, status="ok", events_migrated=n
+        run_id=rec.run_id,
+        status="ok",
+        events_migrated=n,
+        skipped_events=tuple(skipped_ids),
     )
+
+
+# ---- skip-corrupted iteration (v1.0 CLI follow-on) ----------------------
+#
+# Python generators die after raising, so iter_events() can't be wrapped
+# in a per-row try/except to skip a corrupt event mid-stream. The
+# skip-corrupted path iterates raw rows (driver-specific) and decodes
+# each one individually, yielding (event, None, id) for clean rows and
+# (None, error, id) for corrupted ones. Callers collect the skipped ids
+# into the per-run report.
+
+
+def _iter_events_skip_corrupted(
+    facade: _StoreFacade, run_id: str
+) -> Iterator[tuple[Optional[Event], Optional[CorruptedEventPayloadError], str]]:
+    if facade.kind == "sqlite":
+        yield from _iter_sqlite_skip_corrupted(facade.target, run_id)
+        return
+    yield from _iter_postgres_skip_corrupted(facade.target, run_id)
+
+
+def _iter_sqlite_skip_corrupted(
+    path: str, run_id: str
+) -> Iterator[tuple[Optional[Event], Optional[CorruptedEventPayloadError], str]]:
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        for row in conn.execute(
+            "SELECT * FROM events WHERE run_id = ? ORDER BY seq", (run_id,)
+        ):
+            row_id = row["id"]
+            try:
+                yield decode_event({
+                    "id": row["id"],
+                    "type": row["type"],
+                    "payload": row["payload"],
+                    "actor": row["actor"],
+                    "frame_id": row["frame_id"],
+                    "caused_by": row["caused_by"],
+                    "timestamp": row["timestamp"],
+                }), None, row_id
+            except CorruptedEventPayloadError as e:
+                yield None, e, row_id
+    finally:
+        conn.close()
+
+
+def _iter_postgres_skip_corrupted(
+    url: str, run_id: str
+) -> Iterator[tuple[Optional[Event], Optional[CorruptedEventPayloadError], str]]:
+    from activegraph.store.postgres import _ConnectionSource
+
+    source = _ConnectionSource(url)
+    try:
+        with source.transaction() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, type, actor, payload, frame_id, caused_by, timestamp
+                    FROM events
+                    WHERE run_id = %s
+                    ORDER BY seq
+                    """,
+                    (run_id,),
+                )
+                for row in cur.fetchall():
+                    row_id = row[0]
+                    try:
+                        # Postgres returns JSONB as Python dict already;
+                        # decode_event expects a JSON string in payload.
+                        # Re-encode if needed so the decode path is uniform.
+                        payload = row[3]
+                        if isinstance(payload, (dict, list)):
+                            import json
+                            payload_s = json.dumps(payload)
+                        else:
+                            payload_s = payload
+                        yield decode_event({
+                            "id": row[0],
+                            "type": row[1],
+                            "actor": row[2],
+                            "payload": payload_s,
+                            "frame_id": row[4],
+                            "caused_by": row[5],
+                            "timestamp": row[6],
+                        }), None, row_id
+                    except CorruptedEventPayloadError as e:
+                        yield None, e, row_id
+    finally:
+        source.close()
 
 
 # ---- driver-specific transactional writers ------------------------------

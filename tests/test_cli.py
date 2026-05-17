@@ -410,3 +410,126 @@ class TestMigrate:
             cli, ["migrate", "--from", temp_db, "--to", dst]
         )
         assert result.exit_code == EXIT_USAGE_ERROR, result.output
+
+    def test_skip_corrupted_recovers_partial_run(self, temp_db, runner, tmp_path):
+        """v1.0 CLI follow-on: --skip-corrupted lets a migration recover the
+        readable subset of a run with a corrupted-payload row, instead of
+        failing the whole run.
+
+        Inject a corruption directly into the source store's events
+        table (the only way to produce one — encode_payload refuses
+        non-JSON at emit-time). Then migrate with --skip-corrupted and
+        confirm the destination run has the readable events minus the
+        corrupt one, and the per-run report names the skipped id.
+        """
+        import sqlite3
+
+        run_id = _seed_run(temp_db)
+        # Find a real event id in the run, then corrupt its payload column.
+        with sqlite3.connect(temp_db) as conn:
+            row = conn.execute(
+                "SELECT id FROM events WHERE run_id = ? AND type = 'object.created' LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            assert row is not None
+            corrupt_event_id = row[0]
+            conn.execute(
+                "UPDATE events SET payload = ? WHERE id = ? AND run_id = ?",
+                ('{"goal": "x", "broken":', corrupt_event_id, run_id),
+            )
+            conn.commit()
+            total_events = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE run_id = ?", (run_id,)
+            ).fetchone()[0]
+
+        dst = str(tmp_path / "dst_skip.db")
+        result = runner.invoke(
+            cli,
+            [
+                "migrate",
+                "--from", f"sqlite:///{temp_db}",
+                "--to", f"sqlite:///{dst}",
+                "--skip-corrupted",
+                "--json",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        obj = json.loads(result.output)
+        run_report = next(r for r in obj["runs"] if r["run_id"] == run_id)
+        assert run_report["status"] == "ok", run_report
+        assert run_report["events_migrated"] == total_events - 1
+        assert run_report["skipped_events"] == [corrupt_event_id]
+
+    def test_skip_corrupted_text_output_names_skipped_ids(
+        self, temp_db, runner, tmp_path
+    ):
+        """Text mode of --skip-corrupted prints a `skipped (corrupted):
+        evt_NNN` line per skipped event so an operator running the
+        command interactively sees what was dropped."""
+        import sqlite3
+
+        run_id = _seed_run(temp_db)
+        with sqlite3.connect(temp_db) as conn:
+            row = conn.execute(
+                "SELECT id FROM events WHERE run_id = ? AND type = 'object.created' LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            corrupt_event_id = row[0]
+            conn.execute(
+                "UPDATE events SET payload = ? WHERE id = ? AND run_id = ?",
+                ('{"goal": "x", "broken":', corrupt_event_id, run_id),
+            )
+            conn.commit()
+
+        dst = str(tmp_path / "dst_skip_text.db")
+        result = runner.invoke(
+            cli,
+            [
+                "migrate",
+                "--from", f"sqlite:///{temp_db}",
+                "--to", f"sqlite:///{dst}",
+                "--skip-corrupted",
+            ],
+        )
+        assert result.exit_code == EXIT_OK, result.output
+        assert corrupt_event_id in result.output
+        assert "skipped (corrupted)" in result.output
+        assert "skipped=1" in result.output
+
+    def test_without_skip_corrupted_a_bad_row_fails_the_run(
+        self, temp_db, runner, tmp_path
+    ):
+        """Default behavior preserved: without --skip-corrupted, a
+        corrupted-payload row fails the run."""
+        import sqlite3
+
+        run_id = _seed_run(temp_db)
+        with sqlite3.connect(temp_db) as conn:
+            row = conn.execute(
+                "SELECT id FROM events WHERE run_id = ? AND type = 'object.created' LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            conn.execute(
+                "UPDATE events SET payload = ? WHERE id = ? AND run_id = ?",
+                ('{"goal": "x", "broken":', row[0], run_id),
+            )
+            conn.commit()
+
+        dst = str(tmp_path / "dst_strict.db")
+        result = runner.invoke(
+            cli,
+            [
+                "migrate",
+                "--from", f"sqlite:///{temp_db}",
+                "--to", f"sqlite:///{dst}",
+                "--json",
+            ],
+        )
+        # Migration exits non-zero when any run fails (existing CLI
+        # convention); the per-run report still has the structured
+        # error context.
+        assert result.exit_code == EXIT_GENERIC_ERROR, result.output
+        obj = json.loads(result.output)
+        run_report = next(r for r in obj["runs"] if r["run_id"] == run_id)
+        assert run_report["status"] == "failed"
+        assert "CorruptedEventPayloadError" in run_report["error"]

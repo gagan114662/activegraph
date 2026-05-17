@@ -670,9 +670,24 @@ def _fallback_text(trace, f) -> None:
     multiple=True,
     help="Migrate only these run(s). Repeat to specify multiple.",
 )
+@click.option(
+    "--skip-corrupted",
+    is_flag=True,
+    help=(
+        "Skip events whose payload fails JSON decode instead of failing "
+        "the run. The skipped event ids appear in the per-run report's "
+        "`skipped_events`. The resulting destination run is PARTIAL — the "
+        "operator is on notice. Use this to recover the readable subset "
+        "of a run with a corrupted event payload."
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
 def cmd_migrate(
-    src: str, dst: str, run_id: tuple[str, ...], as_json: bool
+    src: str,
+    dst: str,
+    run_id: tuple[str, ...],
+    skip_corrupted: bool,
+    as_json: bool,
 ) -> None:
     """Copy runs from a source store to a destination store.
 
@@ -680,6 +695,11 @@ def cmd_migrate(
     transaction. A failure mid-run rolls back that run's destination
     state. Writes are idempotent (ON CONFLICT DO NOTHING) so re-running
     after a failure is safe.
+
+    With ``--skip-corrupted``, a corrupted-payload event is skipped
+    (recorded in the per-run ``skipped_events``) instead of failing
+    the whole run. The destination run is partial; the operator is
+    on notice.
     """
     from activegraph.observability.migration import migrate
     from activegraph.store.url import InvalidStoreURL, parse_store_url
@@ -692,7 +712,7 @@ def cmd_migrate(
         raise SystemExit(EXIT_USAGE_ERROR)
 
     only = list(run_id) if run_id else None
-    report = migrate(src, dst, only_run_ids=only)
+    report = migrate(src, dst, only_run_ids=only, skip_corrupted=skip_corrupted)
 
     if as_json:
         out = {
@@ -704,6 +724,11 @@ def cmd_migrate(
                     "status": r.status,
                     "events_migrated": r.events_migrated,
                     **({"error": r.error} if r.error else {}),
+                    **(
+                        {"skipped_events": list(r.skipped_events)}
+                        if r.skipped_events
+                        else {}
+                    ),
                 }
                 for r in report.runs
             ],
@@ -715,7 +740,12 @@ def cmd_migrate(
             line = f"  {r.status:7s} run={r.run_id} events={r.events_migrated}"
             if r.error:
                 line += f" error={r.error}"
+            if r.skipped_events:
+                line += f" skipped={len(r.skipped_events)}"
             click.echo(line)
+            if r.skipped_events:
+                for sid in r.skipped_events:
+                    click.echo(f"    skipped (corrupted): {sid}")
         click.echo(
             f"summary: {sum(1 for r in report.runs if r.status == 'ok')} ok, "
             f"{len(report.failures)} failed"

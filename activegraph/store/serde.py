@@ -143,18 +143,24 @@ def decode_payload(s: str) -> dict[str, Any]:
                 "diff would lie about what happened."
             ),
             how_to_fix=(
-                "Inspect events around the corruption to assess scope:\n"
+                "Recover the readable subset of the run by migrating with\n"
+                "--skip-corrupted (this skips only the unreadable events and\n"
+                "keeps everything else; the destination run is partial but\n"
+                "load-bearing events around the corruption are preserved):\n"
+                "    activegraph migrate --from <src> --to <new-dst> --skip-corrupted\n"
+                "The skipped event ids appear in the per-run report.\n"
+                "\n"
+                "If you need to inspect the corruption first:\n"
                 "    activegraph inspect <store> --tail 50\n"
                 "\n"
-                "Open the store directly with sqlite3 / psql to view the\n"
-                "offending row. If you have the original payload elsewhere\n"
-                "(a previous run, a backup, a log), repair the row in place\n"
-                "and retry the load.\n"
+                "If you have the original payload elsewhere (a previous run,\n"
+                "a backup, a log), open the store directly with sqlite3 / psql\n"
+                "and repair the row in place — preferable to skip-and-lose.\n"
                 "\n"
-                "If the corruption is intrinsic and the run is not\n"
-                "recoverable, re-run from the original goal in a fresh\n"
-                "store. The store is append-only; partial corruption does\n"
-                "not propagate backward in time."
+                "If the corruption is intrinsic and the run is not worth\n"
+                "recovering, re-run from the original goal in a fresh store.\n"
+                "The store is append-only; partial corruption does not\n"
+                "propagate backward in time."
             ),
             context={
                 "line": e.lineno,

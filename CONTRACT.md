@@ -2860,6 +2860,58 @@ Useful data for v1.1 planning. The PatternError keyword table and the
 PR-C new leaves both came from audit-as-side-effect work that a
 mechanical rewrite would have missed.
 
+### v1.0 CLI follow-ons landed (between PR-C and PR-D)
+
+Two follow-ons triggered by PR-C review:
+
+**`activegraph migrate --skip-corrupted`** — the operator-facing recovery
+tool that `CorruptedEventPayloadError`'s prose pointed at. Without this
+flag, the prose was honest but the floor was too high (manual sqlite3/psql
+repair). The principle: every error message that points at "manual repair"
+is a finding that the framework owes the operator a tool.
+
+Implementation (no new runtime capability):
+
+- New optional `skip_corrupted: bool` parameter on
+  `activegraph.observability.migration.migrate()` and on
+  `_migrate_one_run`.
+- New driver-specific helpers `_iter_sqlite_skip_corrupted` and
+  `_iter_postgres_skip_corrupted`. These iterate raw rows and decode
+  each one individually so a single `CorruptedEventPayloadError` is
+  recorded-and-skipped rather than killing the whole iterator (Python
+  generators die after raising — that's why the existing `iter_events`
+  can't be wrapped in a per-row try/except).
+- New `skipped_events: tuple[str, ...]` field on `MigrationRunReport`.
+  Lists the event ids that were skipped. Empty on a clean migration.
+- `--skip-corrupted` flag on the CLI command. Text mode prints
+  `skipped (corrupted): <event_id>` per skipped row; JSON mode adds
+  `skipped_events: [...]` to each run's report shape.
+- `CorruptedEventPayloadError`'s recovery prose updated to reference
+  the flag as the first option. Manual sqlite3/psql repair remains in
+  the prose as the second option (for operators with a backup of the
+  original payload) — preferable to skip-and-lose when possible.
+
+The skip-corrupted path is a **partial recovery**: the destination run
+is missing the corrupt event. The operator is on notice via both the
+flag's help text and the per-run report. Idempotency keys on
+`(id, run_id)` mean re-running the migration after a manual repair
+won't duplicate.
+
+**Version-sync CI gate** — new `tests/test_version_sync.py` asserts that
+`activegraph.__version__` matches `pyproject.toml`'s `[project] version`.
+Caught the stale `__version__ = "0.9.0"` constant during PR-B (pyproject
+was already `0.9.1`); the gate prevents the next drift. Every error
+message that embeds the version (PR-B internal-error contexts, PR-C
+SchemaVersionMismatch) reads `activegraph.__version__`, so a drift
+would produce wrong-version error reports — exactly the confusing
+GitHub Issue we want to avoid.
+
+Tests added: 3 for `--skip-corrupted` (JSON shape with skipped_events,
+text-mode output naming skipped ids, default-strict behavior preserved)
+plus 1 for the version-sync gate.
+
+437 tests pass (433 + 4). All v0–v0.9 tests pass unchanged.
+
 ## v1.0 #5. Doc site structure is the contract
 
 ```

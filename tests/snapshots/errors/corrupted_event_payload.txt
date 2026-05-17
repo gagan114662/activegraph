@@ -9,18 +9,24 @@ Why:
   The store persists every event payload as JSON. A row that doesn't parse as JSON means the bytes on disk are corrupted, the store schema is mismatched (someone wrote a non-JSON format here), or an out-of-band edit damaged the file. The framework refuses to silently skip the row — that would make the replay contract unverifiable, and the next fork or diff would lie about what happened.
 
 How to fix:
-  Inspect events around the corruption to assess scope:
+  Recover the readable subset of the run by migrating with
+  --skip-corrupted (this skips only the unreadable events and
+  keeps everything else; the destination run is partial but
+  load-bearing events around the corruption are preserved):
+      activegraph migrate --from <src> --to <new-dst> --skip-corrupted
+  The skipped event ids appear in the per-run report.
+
+  If you need to inspect the corruption first:
       activegraph inspect <store> --tail 50
 
-  Open the store directly with sqlite3 / psql to view the
-  offending row. If you have the original payload elsewhere
-  (a previous run, a backup, a log), repair the row in place
-  and retry the load.
+  If you have the original payload elsewhere (a previous run,
+  a backup, a log), open the store directly with sqlite3 / psql
+  and repair the row in place — preferable to skip-and-lose.
 
-  If the corruption is intrinsic and the run is not
-  recoverable, re-run from the original goal in a fresh
-  store. The store is append-only; partial corruption does
-  not propagate backward in time.
+  If the corruption is intrinsic and the run is not worth
+  recovering, re-run from the original goal in a fresh store.
+  The store is append-only; partial corruption does not
+  propagate backward in time.
 
 More:
   https://yoheinakajima.github.io/activegraph/errors/corrupted-event-payload-error
