@@ -41,8 +41,17 @@ from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
 from activegraph.policy import Policy
 from activegraph.runtime.budget import Budget
 from activegraph.runtime.diff import Diff, DivergentObject, DivergentRelation
+from activegraph.runtime.config_errors import (
+    IncompatibleRuntimeState,
+    InvalidArgumentType,
+    InvalidRuntimeConfiguration,
+)
 from activegraph.runtime.errors import ReplayDivergenceError
-from activegraph.runtime.exec_errors import ApprovalNotFoundError
+from activegraph.runtime.exec_errors import (
+    ApprovalNotFoundError,
+    InvalidPatchLifecycleState,
+    RuntimeContextRequiredError,
+)
 from activegraph.runtime.patterns import UnsupportedPatternError
 from activegraph.runtime.runtime import Runtime
 from activegraph.store import (
@@ -134,7 +143,11 @@ __all__ = [
     "Graph",
     "IDGen",
     "InMemoryEventStore",
+    "IncompatibleRuntimeState",
     "InvalidActivateAfter",
+    "InvalidArgumentType",
+    "InvalidPatchLifecycleState",
+    "InvalidRuntimeConfiguration",
     "InvalidStoreURL",
     "InvalidToolRegistration",
     "LLMBehavior",
@@ -173,6 +186,7 @@ __all__ = [
     "ReplayError",
     "RunRecord",
     "Runtime",
+    "RuntimeContextRequiredError",
     "RuntimeStatus",
     "SQLiteEventStore",
     "SchemaVersionMismatch",

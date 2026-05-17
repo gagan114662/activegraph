@@ -1,0 +1,19 @@
+RuntimeContextRequiredError: ctx.propose_object requires a runtime-bound context
+
+What failed:
+  A behavior called ctx.propose_object on a BehaviorGraph context that was constructed without a Runtime — likely a test fixture that stubbed the graph without going through Runtime.
+
+Why:
+  ctx.propose_object writes to the runtime's pending-approvals queue and emits a `approval.proposed` event. Without a runtime, neither side effect can happen, and a no-op would silently break the policy gate the behavior depends on — the audit trail would show no proposal and the operator would have no record to approve.
+
+  See https://yoheinakajima.github.io/activegraph/concepts/failure-model for when the framework prefers exceptions over silent no-ops.
+
+How to fix:
+  Construct the BehaviorGraph through a Runtime:
+      rt = Runtime(graph, ...)
+      rt.run_goal('...')   # behaviors see ctx bound to rt
+
+  In a test, drive the behavior through a real Runtime — the ctx is built from the runtime's context factory and bound automatically. Mocking the ctx directly bypasses this; if the test really needs to bypass the runtime, mock the policy gate as well so propose_object isn't reached.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/runtime-context-required-error

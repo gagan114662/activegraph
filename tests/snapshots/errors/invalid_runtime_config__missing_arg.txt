@@ -1,0 +1,20 @@
+InvalidRuntimeConfiguration: save_state() requires path= when no store is attached
+
+What failed:
+  runtime.save_state() was called without a `path=` argument, but this runtime has no store attached. Without either, save_state has nowhere to write.
+
+Why:
+  save_state() is the bridge between an in-memory runtime and a durable store. It needs either a pre-attached store (from Runtime construction) or an explicit `path=` argument naming a SQLite file. Defaulting to a temp file would silently lose runs the next time the process exited.
+
+How to fix:
+  Either attach a store at construction time:
+      rt = Runtime(graph, persist_to='/path/to/run.db')
+      rt.run_goal('...')
+      rt.save_state()
+  or pass a path explicitly:
+      rt.save_state(path='/path/to/run.db')
+
+  For ephemeral runs that should not persist, omit save_state() — the in-memory graph is the run's lifetime.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-runtime-configuration

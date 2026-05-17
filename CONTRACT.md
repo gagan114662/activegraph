@@ -3184,6 +3184,145 @@ The 13 new leaves alone vindicates the audit-as-series approach: a
 mechanical find-replace across the 50+ pre-PR-A error sites would
 have produced 0 new leaves and 0 flagged-for-follow-on findings.
 
+### v1.0 PR-F landed (ConfigurationError + cross-category audit)
+
+PR-F audit looked at 9 candidate raise sites that were flagged as
+ConfigurationError on the PR-E hand-off list. Per the PR-F review
+discipline note ("Don't force fit. If a raise site looks like a
+configuration problem but is actually an execution-time invariant
+violation, classify it correctly"), the audit produced a
+**cross-category finding**:
+
+- **6 sites** → genuinely `ConfigurationError` (construction-time
+  argument validation, runtime backend constraints)
+- **2 sites** → reclassified to `ExecutionError` (execution-time
+  invariant violations that surfaced during the PR-F audit)
+- **1 site** → deferred to v1.0-rc1 follow-on (internal evaluator
+  inconsistency that warrants framework-version context, similar to
+  PR-B's two internal cases)
+
+This is the cleanest validation of the events-not-exceptions
+principle yet — the audit's first classification was wrong, and the
+principle's "exceptions interrupt control flow, events extend the
+audit trail" framing surfaced the right one on second reading.
+
+#### ConfigurationError leaves (3 new)
+
+- **`InvalidRuntimeConfiguration(ConfigurationError, ValueError)`** —
+  catch-all for argument-shape problems at construction or method-call
+  time. Used by 4 sites:
+  - `runtime.py:257` — conflicting `persist_to=` and `store=`
+  - `runtime.py:1460` — `recent < 0` in `status()`
+  - `runtime.py:1812` — `save_state(path=X)` when already attached to Y
+  - `runtime.py:1825` — `save_state()` with no store and no path
+  Construct with summary + structured fields; recovery prose is
+  per-site, not table-driven (each misconfiguration has a different
+  fix).
+- **`InvalidArgumentType(ConfigurationError, TypeError)`** — wrong
+  type at construction. Used by 1 site:
+  - `postgres.py:107` — PostgresEventStore target not URL / Connection
+    / ConnectionPool
+  Multi-inherits TypeError.
+- **`IncompatibleRuntimeState(ConfigurationError, RuntimeError)`** —
+  operation requires a runtime state that's not satisfied. Used by
+  2 sites:
+  - `runtime.py:1960` — fork() requires SQLite-backed runtime
+  - `graph.py:240` — attach_store when one is already attached
+  Recovery prose for the fork case flags the Postgres-native-fork
+  gap as a v1.1 follow-on (the primitive shape is known but needs
+  Postgres operational experience to land).
+
+#### Cross-category ExecutionError leaves (2 new)
+
+These were flagged to PR-F by PR-E's audit, but PR-F's closer reading
+reclassified them. They live in `activegraph/runtime/exec_errors.py`
+alongside PR-D's `ApprovalNotFoundError`.
+
+- **`RuntimeContextRequiredError(ExecutionError, RuntimeError)`** —
+  `ctx.propose_object` (or another ctx method requiring the runtime)
+  was called from a behavior whose context isn't runtime-bound.
+  Fires inside a running behavior — execution-time, not
+  construction-time. Recovery prose explains the "test fixture
+  mocked the ctx but not the runtime" pattern that produces it.
+- **`InvalidPatchLifecycleState(ExecutionError, ValueError)`** —
+  `graph.apply_patch(patch_id)` called on a patch that isn't in
+  `'proposed'` state. Fires during the patch lifecycle, mid-execution.
+  Recovery prose explains that re-applying an applied patch would
+  break the replay contract (duplicate `patch.applied` event).
+
+Both leaves' recovery prose cross-references
+`/concepts/failure-model` — the new doc page from CONTRACT v1.0 #4b
+addendum. Snapshot tests verify the URL appears.
+
+#### Deferred to v1.0-rc1 follow-on
+
+- `graph.py:766` `ValueError("unknown where operator: X")` —
+  internal evaluator inconsistency. Same shape as PR-B's two
+  internal-evaluator cases that got framework-version context. Defers
+  to a v1.0-rc1 follow-on commit that adds framework-version context
+  to internal-bug raises across the framework (PR-B's two,
+  graph.py's one, possibly more found during the doc-site phase).
+
+#### Snapshot files (8, reverse-audit-order)
+
+Hardest first: the two cross-category ExecutionError leaves were
+written first because their classification was the substantive
+finding of PR-F's audit. The mechanical ConfigurationError leaves
+inherited the standard.
+
+1. `runtime_context_required.txt` (cross-category, ExecutionError)
+2. `invalid_patch_lifecycle_state.txt` (cross-category, ExecutionError)
+3. `incompatible_runtime_state__fork.txt`
+4. `incompatible_runtime_state__attach_store.txt`
+5. `invalid_argument_type__postgres_target.txt`
+6. `invalid_runtime_config__conflicting_args.txt`
+7. `invalid_runtime_config__missing_arg.txt`
+8. `invalid_runtime_config__out_of_range.txt`
+
+#### Tests, suite total, smoke
+
+Tests added: 14 in `tests/test_errors_format.py` (8 snapshots + 3
+hierarchy assertions + 1 cross-category classification check + 2
+back-compat builtin-base assertions). Plus a check that the two
+cross-category leaves' recovery prose references
+`/concepts/failure-model` per the contract addendum.
+
+480 tests pass (466 + 14). All v0–v0.9 tests pass unchanged. The
+diligence demo runs end-to-end with byte-identical trace.
+
+#### Hidden-surface count update
+
+- PR-A (ReplayError): 0 new
+- PR-B (PatternError): 0 new + 17 prose branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): 1 new + 6 flagged
+- PR-E (RegistrationError): 8 new + 22 partial + 7 flagged
+- **PR-F (ConfigurationError + cross-category): 5 new (3 Config, 2 ExecutionError) + 1 flagged**
+
+Running total: **18 new leaves** + 17 prose branches + 22 partial +
+~18 flagged-for-follow-on.
+
+**v1.1 error-completeness milestone scope (now firmly real):**
+
+1. The 22 partial Pack* migrations (PR-E)
+2. The 4 deferred DB-error wrappers (PR-C)
+3. The internal-evaluator framework-version follow-on (3 sites:
+   PR-B's two + PR-F's one in graph.py:766)
+4. Any PR-G flagged items not done by rc1
+5. Real-user-test gate output (item 1 in the rc1 → v1.0 transition)
+
+#### Discipline win
+
+The discipline note that the audit's job is to surface what raise
+sites should have been classified as, not to force them into the
+target category, produced 2 reclassifications in 9 sites — a 22%
+correction rate. Both reclassifications happened because the
+events-not-exceptions principle (CONTRACT v1.0 #4b) gave the audit a
+sharper question than "is this Configuration?": it asks "is this
+caller-actionable at static configuration time, or is the caller
+already executing when it fires?" The Configuration vs. Execution
+distinction collapses to that single question.
+
 ## v1.0 #4b. Events-not-exceptions principle (framework-wide)
 
 Surfaced by PR-D's audit and worth locking explicitly before PR-E

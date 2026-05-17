@@ -10,10 +10,17 @@ cleanly into either topic.
 PR-D adds:
 
 - :class:`ApprovalNotFoundError` — pending-approval lookup miss.
-  Fires from ``runtime.approve(approval_id)`` when the id doesn't
-  refer to any pending approval. Multi-inherits :class:`LookupError`
-  for back-compat with user code catching the builtin around the
-  approval API.
+
+PR-F adds (cross-category audit findings — sites that looked like
+ConfigurationError on the PR-E hand-off list but classified as
+ExecutionError on closer reading):
+
+- :class:`RuntimeContextRequiredError` — ``ctx.propose_object`` was
+  called from a behavior whose context wasn't bound to a runtime.
+  Fires inside a running behavior, not at construction time.
+- :class:`InvalidPatchLifecycleState` — ``graph.apply_patch`` was
+  called on a patch that isn't in ``"proposed"`` state. Fires during
+  the patch lifecycle, mid-execution.
 """
 
 from __future__ import annotations
@@ -78,4 +85,103 @@ class ApprovalNotFoundError(ExecutionError, LookupError):
                 "shows the canonical pattern: enumerate, then approve by id."
             ),
             context=ctx,
+        )
+
+
+class RuntimeContextRequiredError(ExecutionError, RuntimeError):
+    """``ctx.propose_object`` (or another ctx method that requires the
+    runtime) was called from a behavior whose context isn't bound to a
+    runtime.
+
+    Fires at execution time, inside a running behavior — the caller is
+    the behavior body that invoked the ctx method, not the framework's
+    construction code. Multi-inherits :class:`RuntimeError` for
+    back-compat.
+    """
+
+    _doc_slug = "runtime-context-required-error"
+
+    def __init__(self, *, method: str = "ctx.propose_object") -> None:
+        self.method = method
+        ExecutionError.__init__(
+            self,
+            f"{method} requires a runtime-bound context",
+            what_failed=(
+                f"A behavior called {method} on a BehaviorGraph context that "
+                f"was constructed without a Runtime — likely a test fixture "
+                f"that stubbed the graph without going through Runtime."
+            ),
+            why=(
+                "ctx.propose_object writes to the runtime's pending-approvals "
+                "queue and emits a `approval.proposed` event. Without a "
+                "runtime, neither side effect can happen, and a no-op would "
+                "silently break the policy gate the behavior depends on — "
+                "the audit trail would show no proposal and the operator "
+                "would have no record to approve.\n"
+                "\n"
+                "See https://yoheinakajima.github.io/activegraph/concepts/failure-model "
+                "for when the framework prefers exceptions over silent no-ops."
+            ),
+            how_to_fix=(
+                "Construct the BehaviorGraph through a Runtime:\n"
+                "    rt = Runtime(graph, ...)\n"
+                "    rt.run_goal('...')   # behaviors see ctx bound to rt\n"
+                "\n"
+                "In a test, drive the behavior through a real Runtime — the "
+                "ctx is built from the runtime's context factory and bound "
+                "automatically. Mocking the ctx directly bypasses this; if "
+                "the test really needs to bypass the runtime, mock the "
+                "policy gate as well so propose_object isn't reached."
+            ),
+            context={"method": method},
+        )
+
+
+class InvalidPatchLifecycleState(ExecutionError, ValueError):
+    """``graph.apply_patch(patch_id)`` was called on a patch that isn't
+    in ``"proposed"`` state.
+
+    Patches go through ``proposed → applied`` (success) or ``proposed →
+    rejected`` (policy or behavior rejection). Calling ``apply_patch``
+    on an already-applied or already-rejected patch is a programmer
+    error in the calling code path; the framework refuses rather than
+    re-apply or silently no-op. Multi-inherits :class:`ValueError`.
+    """
+
+    _doc_slug = "invalid-patch-lifecycle-state"
+
+    def __init__(self, *, patch_id: str, current_status: str) -> None:
+        self.patch_id = patch_id
+        self.current_status = current_status
+        ExecutionError.__init__(
+            self,
+            f"patch {patch_id} is {current_status!r}, not 'proposed'",
+            what_failed=(
+                f"graph.apply_patch({patch_id!r}) was called, but the patch's "
+                f"current status is {current_status!r}. Only patches in the "
+                f"'proposed' state can be applied."
+            ),
+            why=(
+                "Patches are one-shot: a 'proposed' patch becomes 'applied' "
+                "(success) or 'rejected' (refusal) exactly once. Re-applying "
+                "an already-applied patch would emit a duplicate "
+                "`patch.applied` event, which would break the replay "
+                "contract — replay would produce a different event stream "
+                "than the original run. The framework refuses re-application "
+                "rather than emit the duplicate.\n"
+                "\n"
+                "See https://yoheinakajima.github.io/activegraph/concepts/failure-model "
+                "for the patch-lifecycle invariants."
+            ),
+            how_to_fix=(
+                f"Check the patch's current status before applying:\n"
+                f"    patch = graph.get_patch({patch_id!r})\n"
+                f"    if patch.status == 'proposed':\n"
+                f"        graph.apply_patch({patch_id!r})\n"
+                f"\n"
+                f"If the patch is already applied and the caller wants a "
+                f"new mutation, propose a new patch — patches don't get "
+                f"re-used."
+            ),
+            context={"patch_id": patch_id, "current_status": current_status},
         )

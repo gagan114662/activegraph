@@ -29,7 +29,11 @@ from activegraph import (
     DuplicateEventError,
     EventNotFoundError,
     ExecutionError,
+    IncompatibleRuntimeState,
     InvalidActivateAfter,
+    InvalidArgumentType,
+    InvalidPatchLifecycleState,
+    InvalidRuntimeConfiguration,
     InvalidStoreURL,
     InvalidToolRegistration,
     LLMBehaviorError,
@@ -45,6 +49,7 @@ from activegraph import (
     RegistrationError,
     ReplayDivergenceError,
     ReplayError,
+    RuntimeContextRequiredError,
     SchemaVersionMismatch,
     StorageError,
     ToolError,
@@ -1004,3 +1009,296 @@ def test_invalid_tool_registration_snapshot() -> None:
     err = InvalidToolRegistration(bare_function)
     _assert_format_compliant(err)
     _check_snapshot("invalid_tool_registration", err)
+
+
+# ---------- PR-F: ConfigurationError category --------------------------
+#
+# Snapshots in reverse-audit-order. The hardest leaves per PR-F's audit
+# turned out to be the cross-category ones: RuntimeContextRequiredError
+# and InvalidPatchLifecycleState are classified as ExecutionError (not
+# ConfigurationError) because they fire from within an executing
+# behavior or during patch lifecycle, not at static construction time.
+# Writing those first set the bar for the more mechanical Configuration
+# leaves.
+
+
+def test_config_leaves_inherit_from_configuration_error() -> None:
+    """The three ConfigurationError leaves are in the v1.0 hierarchy."""
+    for cls in (
+        InvalidRuntimeConfiguration,
+        InvalidArgumentType,
+        IncompatibleRuntimeState,
+    ):
+        assert issubclass(cls, ConfigurationError), cls
+        assert issubclass(cls, ActiveGraphError), cls
+
+
+def test_config_leaves_preserve_legacy_base_classes() -> None:
+    """Multi-inheritance preserves builtin lineage:
+      - InvalidRuntimeConfiguration keeps ValueError
+      - InvalidArgumentType keeps TypeError
+      - IncompatibleRuntimeState keeps RuntimeError
+    """
+    assert issubclass(InvalidRuntimeConfiguration, ValueError)
+    assert issubclass(InvalidArgumentType, TypeError)
+    assert issubclass(IncompatibleRuntimeState, RuntimeError)
+
+
+def test_pr_f_cross_category_leaves_are_execution() -> None:
+    """PR-F audit produced 2 leaves classified as ExecutionError, not
+    ConfigurationError. The classification matters because the doc-site
+    cross-reference at /concepts/failure-model walks readers from the
+    error class to its category; misclassifying would land readers on
+    the wrong page."""
+    assert issubclass(RuntimeContextRequiredError, ExecutionError)
+    assert issubclass(InvalidPatchLifecycleState, ExecutionError)
+    assert not issubclass(RuntimeContextRequiredError, ConfigurationError)
+    assert not issubclass(InvalidPatchLifecycleState, ConfigurationError)
+
+
+# --- Reverse-audit-order snapshots (hardest first) ---
+
+
+def test_runtime_context_required_snapshot() -> None:
+    """The cross-category leaf: looked like a configuration error on
+    the PR-E hand-off list but classified as ExecutionError on closer
+    reading. The recovery prose references /concepts/failure-model as
+    the canonical cross-reference for 'when the framework prefers
+    exceptions over silent no-ops.'"""
+    err = RuntimeContextRequiredError(method="ctx.propose_object")
+    _assert_format_compliant(err)
+    _check_snapshot("runtime_context_required", err)
+
+
+def test_invalid_patch_lifecycle_state_snapshot() -> None:
+    """The other cross-category leaf: patch lifecycle invariant fires
+    during execution. The recovery prose references
+    /concepts/failure-model for the patch-lifecycle rules."""
+    err = InvalidPatchLifecycleState(patch_id="patch_017", current_status="applied")
+    _assert_format_compliant(err)
+    _check_snapshot("invalid_patch_lifecycle_state", err)
+
+
+def test_incompatible_runtime_state_fork_snapshot() -> None:
+    """fork() on a non-SQLite runtime. Recovery walks through the
+    migrate-then-fork pattern and flags the Postgres-native-fork gap
+    as a v1.1 follow-on."""
+    err = IncompatibleRuntimeState(
+        "runtime.fork() requires a SQLite-backed runtime (current: PostgresEventStore)",
+        what_failed=(
+            "runtime.fork() was called on a runtime with "
+            "PostgresEventStore. The fork primitive currently only "
+            "supports SQLite-backed runtimes."
+        ),
+        why=(
+            "Fork copies events up to the fork point using the store's "
+            "native primitives (SQLite uses a direct SQL copy under a "
+            "single transaction). Postgres has a different transactional "
+            "shape and an in-memory store has no copy primitive at all. "
+            "v0.8 deliberately scoped the fork command to SQLite first — "
+            "the limitation is documented in CONTRACT v0.8 #5."
+        ),
+        how_to_fix=(
+            "Migrate the run to a SQLite store first, then fork:\n"
+            "    activegraph migrate --from <current-url> --to sqlite:///fork-source.db\n"
+            "    activegraph fork sqlite:///fork-source.db --run-id <run> --at-event <evt>\n"
+            "\n"
+            "For Postgres-native forking, file an issue — the primitive "
+            "shape (transactional copy of events up to a seq cutoff) is "
+            "known, and a contributor with Postgres operational experience "
+            "could land it as a v1.1 follow-on."
+        ),
+        context={"current_store_kind": "PostgresEventStore"},
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("incompatible_runtime_state__fork", err)
+
+
+def test_incompatible_runtime_state_attach_store_snapshot() -> None:
+    """The other IncompatibleRuntimeState case — Graph.attach_store
+    when a store is already attached. Recovery references migrate as
+    the way to copy a run to a different store."""
+    err = IncompatibleRuntimeState(
+        "graph already has a store attached",
+        what_failed=(
+            "Graph.attach_store() was called, but this graph already has "
+            "a store. Stores attach at most once per graph lifetime."
+        ),
+        why=(
+            "A graph's store is the durability target for every event it "
+            "emits. Re-attaching a second store would either (a) split the "
+            "event log across two stores, with subsequent events going to "
+            "the new one and earlier events stuck in the old, or (b) try "
+            "to copy the old log to the new store, which is a migration, "
+            "not an attach. The framework refuses re-attach so neither "
+            "failure mode is reachable silently."
+        ),
+        how_to_fix=(
+            "If you want to copy the graph's run to a new store, use the "
+            "migration primitive on the existing store's URL after the "
+            "run completes:\n"
+            "    activegraph migrate --from <old-url> --to <new-url>\n"
+            "\n"
+            "If the graph is fresh and the existing store is a placeholder "
+            "(e.g., from a test fixture), construct a new Graph rather "
+            "than re-attaching."
+        ),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("incompatible_runtime_state__attach_store", err)
+
+
+def test_invalid_argument_type_postgres_target_snapshot() -> None:
+    """PostgresEventStore target type check. Recovery enumerates the
+    three accepted types with concrete usage."""
+    err = InvalidArgumentType(
+        "PostgresEventStore target has wrong type (got int)",
+        what_failed=(
+            "PostgresEventStore was constructed with a target of type int:\n"
+            "  value: 42\n  type:  int\n"
+            "Accepted types are: a `postgres://...` URL string, a "
+            "`psycopg.Connection`, or a `psycopg_pool.ConnectionPool`."
+        ),
+        why=(
+            "PostgresEventStore's constructor branches on the target's "
+            "type — strings open a fresh connection, Connections are "
+            "borrowed without ownership, and ConnectionPools are checked "
+            "out per operation. An unknown type has no defined connection "
+            "lifecycle, and a fuzzy match would silently leak connections "
+            "or double-close them."
+        ),
+        how_to_fix=(
+            "Pass one of:\n"
+            "    PostgresEventStore('postgres://host/dbname', run_id=...)\n"
+            "    PostgresEventStore(my_psycopg_connection, run_id=...)\n"
+            "    PostgresEventStore(my_connection_pool, run_id=...)\n"
+            "\n"
+            "If you already have a SQLAlchemy engine or another "
+            "abstraction, extract a raw psycopg.Connection from it and "
+            "pass that."
+        ),
+        context={"type": "int", "repr": "42"},
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("invalid_argument_type__postgres_target", err)
+
+
+def test_invalid_runtime_config_conflicting_args_snapshot() -> None:
+    """Runtime(persist_to=, store=) — the most common misconfiguration."""
+    err = InvalidRuntimeConfiguration(
+        "Runtime(...) was passed both `persist_to=` and `store=`",
+        what_failed=(
+            "Runtime construction received both a `persist_to=` path and "
+            "an explicit `store=` instance. The two kwargs are alternative "
+            "ways to attach storage — only one can be used per Runtime."
+        ),
+        why=(
+            "`persist_to=` is shorthand for 'open a SQLite store at this "
+            "path and attach it.' `store=` is the explicit form for any "
+            "EventStore implementation. If both were accepted, the runtime "
+            "would have to pick one or merge them, and silent precedence "
+            "rules would surface as bugs the first time an operator "
+            "switched stores."
+        ),
+        how_to_fix=(
+            "Pass exactly one:\n"
+            "    Runtime(graph, persist_to='/path/to/run.db')\n"
+            "or:\n"
+            "    Runtime(graph, store=SQLiteEventStore('/path/to/run.db'))\n"
+            "\n"
+            "The two forms produce equivalent runtimes for SQLite. Use "
+            "`store=` when you need a non-SQLite backend or want to share "
+            "an open store across runtimes."
+        ),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("invalid_runtime_config__conflicting_args", err)
+
+
+def test_invalid_runtime_config_missing_arg_snapshot() -> None:
+    """save_state(path=) required when no store attached. Tests
+    InvalidRuntimeConfiguration with the missing-required-arg shape."""
+    err = InvalidRuntimeConfiguration(
+        "save_state() requires path= when no store is attached",
+        what_failed=(
+            "runtime.save_state() was called without a `path=` argument, "
+            "but this runtime has no store attached. Without either, "
+            "save_state has nowhere to write."
+        ),
+        why=(
+            "save_state() is the bridge between an in-memory runtime and "
+            "a durable store. It needs either a pre-attached store (from "
+            "Runtime construction) or an explicit `path=` argument naming "
+            "a SQLite file. Defaulting to a temp file would silently lose "
+            "runs the next time the process exited."
+        ),
+        how_to_fix=(
+            "Either attach a store at construction time:\n"
+            "    rt = Runtime(graph, persist_to='/path/to/run.db')\n"
+            "    rt.run_goal('...')\n"
+            "    rt.save_state()\n"
+            "or pass a path explicitly:\n"
+            "    rt.save_state(path='/path/to/run.db')\n"
+            "\n"
+            "For ephemeral runs that should not persist, omit save_state() "
+            "— the in-memory graph is the run's lifetime."
+        ),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("invalid_runtime_config__missing_arg", err)
+
+
+def test_invalid_runtime_config_out_of_range_snapshot() -> None:
+    """status(recent=-1). Out-of-range argument."""
+    err = InvalidRuntimeConfiguration(
+        "runtime.status(recent=-1) — recent must be >= 0",
+        what_failed=(
+            "runtime.status(recent=-1) was called with a negative count. "
+            "The `recent` argument controls the length of the "
+            "`recent_events` tail in the status snapshot."
+        ),
+        why=(
+            "A negative recent count has no defined semantics — the tail "
+            "length is a non-negative integer by construction. The "
+            "framework refuses the call rather than silently coerce to "
+            "zero, because the caller's intent is ambiguous (did they "
+            "mean zero? did they compute the value and end up with a "
+            "negative? did they want 'all events' and pass -1 from "
+            "another API's convention?)."
+        ),
+        how_to_fix=(
+            "Pass a non-negative integer:\n"
+            "    rt.status(recent=20)    # last 20 events\n"
+            "    rt.status(recent=0)     # no recent events in the\n"
+            "                            # snapshot (just totals)\n"
+            "\n"
+            "To get every event, read `rt.graph.events` directly rather "
+            "than passing a large `recent`."
+        ),
+        context={"recent": -1},
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("invalid_runtime_config__out_of_range", err)
+
+
+def test_runtime_context_required_is_a_runtime_error() -> None:
+    """User code catching RuntimeError around behavior dispatch keeps
+    working."""
+    err = RuntimeContextRequiredError()
+    assert isinstance(err, RuntimeError)
+
+
+def test_invalid_patch_lifecycle_state_is_a_value_error() -> None:
+    err = InvalidPatchLifecycleState(patch_id="patch_001", current_status="applied")
+    assert isinstance(err, ValueError)
+
+
+def test_config_recovery_prose_references_failure_model() -> None:
+    """Per CONTRACT v1.0 #4b addendum, snapshot recovery prose for the
+    cross-category ExecutionError leaves references the canonical
+    /concepts/failure-model URL so readers land on the right page when
+    the doc site builds."""
+    ctx_err = RuntimeContextRequiredError()
+    patch_err = InvalidPatchLifecycleState(patch_id="p", current_status="applied")
+    assert "/concepts/failure-model" in str(ctx_err)
+    assert "/concepts/failure-model" in str(patch_err)

@@ -1,0 +1,21 @@
+InvalidArgumentType: PostgresEventStore target has wrong type (got int)
+
+What failed:
+  PostgresEventStore was constructed with a target of type int:
+    value: 42
+    type:  int
+  Accepted types are: a `postgres://...` URL string, a `psycopg.Connection`, or a `psycopg_pool.ConnectionPool`.
+
+Why:
+  PostgresEventStore's constructor branches on the target's type — strings open a fresh connection, Connections are borrowed without ownership, and ConnectionPools are checked out per operation. An unknown type has no defined connection lifecycle, and a fuzzy match would silently leak connections or double-close them.
+
+How to fix:
+  Pass one of:
+      PostgresEventStore('postgres://host/dbname', run_id=...)
+      PostgresEventStore(my_psycopg_connection, run_id=...)
+      PostgresEventStore(my_connection_pool, run_id=...)
+
+  If you already have a SQLAlchemy engine or another abstraction, extract a raw psycopg.Connection from it and pass that.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-argument-type

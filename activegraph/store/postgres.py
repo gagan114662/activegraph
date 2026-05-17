@@ -106,9 +106,40 @@ class _ConnectionSource:
             # Looks like a Connection. Don't take ownership.
             self._conn = target
         else:
-            raise TypeError(
-                f"PostgresEventStore target {target!r} is not a URL string, "
-                f"psycopg.Connection, or psycopg_pool.ConnectionPool"
+            from activegraph.runtime.config_errors import InvalidArgumentType
+            type_name = type(target).__name__
+            target_repr = repr(target)
+            if len(target_repr) > 80:
+                target_repr = target_repr[:77] + "..."
+            raise InvalidArgumentType(
+                f"PostgresEventStore target has wrong type (got {type_name})",
+                what_failed=(
+                    f"PostgresEventStore was constructed with a target of "
+                    f"type {type_name}:\n  value: {target_repr}\n"
+                    f"  type:  {type_name}\n"
+                    f"Accepted types are: a `postgres://...` URL string, a "
+                    f"`psycopg.Connection`, or a `psycopg_pool.ConnectionPool`."
+                ),
+                why=(
+                    "PostgresEventStore's constructor branches on the "
+                    "target's type — strings open a fresh connection, "
+                    "Connections are borrowed without ownership, and "
+                    "ConnectionPools are checked out per operation. An "
+                    "unknown type has no defined connection lifecycle, and "
+                    "a fuzzy match would silently leak connections or "
+                    "double-close them."
+                ),
+                how_to_fix=(
+                    "Pass one of:\n"
+                    "    PostgresEventStore('postgres://host/dbname', run_id=...)\n"
+                    "    PostgresEventStore(my_psycopg_connection, run_id=...)\n"
+                    "    PostgresEventStore(my_connection_pool, run_id=...)\n"
+                    "\n"
+                    "If you already have a SQLAlchemy engine or another "
+                    "abstraction, extract a raw psycopg.Connection from it "
+                    "and pass that."
+                ),
+                context={"type": type_name, "repr": target_repr},
             )
 
     # ---- ctx mgrs ----

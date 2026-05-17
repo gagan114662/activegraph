@@ -1,0 +1,18 @@
+InvalidRuntimeConfiguration: runtime.status(recent=-1) — recent must be >= 0
+
+What failed:
+  runtime.status(recent=-1) was called with a negative count. The `recent` argument controls the length of the `recent_events` tail in the status snapshot.
+
+Why:
+  A negative recent count has no defined semantics — the tail length is a non-negative integer by construction. The framework refuses the call rather than silently coerce to zero, because the caller's intent is ambiguous (did they mean zero? did they compute the value and end up with a negative? did they want 'all events' and pass -1 from another API's convention?).
+
+How to fix:
+  Pass a non-negative integer:
+      rt.status(recent=20)    # last 20 events
+      rt.status(recent=0)     # no recent events in the
+                              # snapshot (just totals)
+
+  To get every event, read `rt.graph.events` directly rather than passing a large `recent`.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-runtime-configuration

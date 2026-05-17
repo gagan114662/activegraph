@@ -237,7 +237,35 @@ class Graph:
         if self._store is store:
             return
         if self._store is not None:
-            raise RuntimeError("graph already has a store attached")
+            from activegraph.runtime.config_errors import IncompatibleRuntimeState
+            raise IncompatibleRuntimeState(
+                "graph already has a store attached",
+                what_failed=(
+                    "Graph.attach_store() was called, but this graph already "
+                    "has a store. Stores attach at most once per graph "
+                    "lifetime."
+                ),
+                why=(
+                    "A graph's store is the durability target for every "
+                    "event it emits. Re-attaching a second store would "
+                    "either (a) split the event log across two stores, "
+                    "with subsequent events going to the new one and "
+                    "earlier events stuck in the old, or (b) try to copy "
+                    "the old log to the new store, which is a migration, "
+                    "not an attach. The framework refuses re-attach so "
+                    "neither failure mode is reachable silently."
+                ),
+                how_to_fix=(
+                    "If you want to copy the graph's run to a new store, "
+                    "use the migration primitive on the existing store's "
+                    "URL after the run completes:\n"
+                    "    activegraph migrate --from <old-url> --to <new-url>\n"
+                    "\n"
+                    "If the graph is fresh and the existing store is a "
+                    "placeholder (e.g., from a test fixture), construct a "
+                    "new Graph rather than re-attaching."
+                ),
+            )
         self._store = store
 
     @property
@@ -541,7 +569,10 @@ class Graph:
         if patch is None:
             raise KeyError(f"unknown patch: {patch_id}")
         if patch.status != "proposed":
-            raise ValueError(f"patch {patch_id} is {patch.status}, not proposed")
+            from activegraph.runtime.exec_errors import InvalidPatchLifecycleState
+            raise InvalidPatchLifecycleState(
+                patch_id=patch_id, current_status=patch.status,
+            )
         target_obj = self._objects.get(patch.target)
         current_version = target_obj.version if target_obj else 0
         if current_version != patch.expected_version:

@@ -1,0 +1,18 @@
+InvalidRuntimeConfiguration: Runtime(...) was passed both `persist_to=` and `store=`
+
+What failed:
+  Runtime construction received both a `persist_to=` path and an explicit `store=` instance. The two kwargs are alternative ways to attach storage — only one can be used per Runtime.
+
+Why:
+  `persist_to=` is shorthand for 'open a SQLite store at this path and attach it.' `store=` is the explicit form for any EventStore implementation. If both were accepted, the runtime would have to pick one or merge them, and silent precedence rules would surface as bugs the first time an operator switched stores.
+
+How to fix:
+  Pass exactly one:
+      Runtime(graph, persist_to='/path/to/run.db')
+  or:
+      Runtime(graph, store=SQLiteEventStore('/path/to/run.db'))
+
+  The two forms produce equivalent runtimes for SQLite. Use `store=` when you need a non-SQLite backend or want to share an open store across runtimes.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-runtime-configuration
