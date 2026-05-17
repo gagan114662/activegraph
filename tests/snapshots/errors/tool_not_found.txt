@@ -1,0 +1,16 @@
+ToolNotFoundError: no tool named 'fetch_pdfs' is loaded
+
+What failed:
+  runtime.get_tool('fetch_pdfs') could not resolve the name to a registered tool.
+    registered: 'diligence.fetch_company_docs', 'diligence.fetch_filings'
+
+Why:
+  Tools are addressable by their declared name. The runtime refuses to fall back to a fuzzy match because the tool's input/output schema is part of the contract — invoking the wrong tool with the right name would silently produce wrong-shape data.
+
+How to fix:
+  Check the spelling against the registered tools above. If the tool comes from a pack, confirm the pack is loaded. If the tool is in user code, confirm the @tool decorator ran (module imported) before the runtime is constructed.
+
+  For canonical lookups across packs, use `'pack_name.tool_name'`.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/tool-not-found-error

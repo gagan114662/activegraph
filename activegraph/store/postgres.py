@@ -70,9 +70,11 @@ def _require_psycopg() -> Any:
     try:
         import psycopg  # type: ignore
     except ImportError as e:  # pragma: no cover — exercised only without dep
-        raise ImportError(
-            "PostgresEventStore requires psycopg>=3.1. Install with "
-            "`pip install 'activegraph[postgres]'`."
+        from activegraph.errors import MissingOptionalDependency
+        raise MissingOptionalDependency(
+            package="psycopg",
+            feature="PostgresEventStore",
+            extras="postgres",
         ) from e
     return psycopg
 

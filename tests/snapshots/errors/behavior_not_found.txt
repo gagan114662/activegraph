@@ -1,0 +1,18 @@
+BehaviorNotFoundError: no behavior named 'extract_claims' is loaded
+
+What failed:
+  runtime.get_behavior('extract_claims') could not resolve the name to a registered behavior.
+    registered: 'diligence.researcher', 'diligence.memo_synthesizer'
+
+Why:
+  Behaviors are addressable by their declared name. The lookup is strict — the runtime refuses to fall back to a fuzzy match or a no-op because a wrong-behavior dispatch would silently corrupt the audit trail. Behaviors live either in the global registry (decorated with `@behavior` or `@llm_behavior` at module load) or in a loaded pack.
+
+How to fix:
+  Check the spelling against the registered behaviors above. If the behavior comes from a pack, confirm the pack is loaded:
+      rt.load_pack(my_pack)
+  If the behavior is defined in user code, confirm the decorator ran (the module is imported) before the runtime is constructed.
+
+  For canonical lookups across packs, use the fully-qualified form `'pack_name.behavior_name'`.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/behavior-not-found-error

@@ -3019,6 +3019,171 @@ toward "the existing scope already covers most of the framework";
 PR-E and PR-F should see the bulk of remaining migration since
 they're where the bare-builtin clusters live.
 
+### v1.0 PR-E landed (RegistrationError, largest by class count)
+
+PR-E audit produced **8 new leaves + 7 re-parented + 22 partial
+migrations + 7 flagged-not-migrated**, organized below by sub-category
+as a structured audit report. Every raise in scope was confirmed
+caller-actionable per CONTRACT v1.0 #4b; no events created.
+
+#### Sub-category 1: LLM / Tool registration (2 re-parented)
+
+- **`MissingProviderError(RegistrationError, RuntimeError)`** — was
+  bare RuntimeError. Now constructed with optional `behavior_name=`;
+  recovery shows both `AnthropicProvider()` and
+  `RecordedLLMProvider(...)` construction.
+- **`MissingToolError(RegistrationError, RuntimeError)`** — was bare
+  RuntimeError. New signature `(tool_name, *, behavior_name=,
+  registered=)`. The two call sites pass `registered=tuple(
+  tool_registry.keys())` so the rendered message enumerates the
+  available tools.
+
+#### Sub-category 2: Pack registration (5 re-parented, 1 new)
+
+The five Pack* registration leaves multi-inherit
+`(RegistrationError, PackError)` so `except PackError` and
+`except RegistrationError` both catch them. `PackSchemaViolation`
+stays PackError-only — it fires at add_object, not load_pack — and
+migrates to structured format in PR-G.
+
+- `PackValidationError(RegistrationError, PackError)` — re-parented
+- `PackConflictError(RegistrationError, PackError)` — re-parented;
+  two high-traffic call sites in `loader.py` migrated to structured
+  format (behavior + tool name conflict). Recovery enumerates the
+  three concrete actions (pick one, rename, separate runtime).
+- `PackVersionConflictError(RegistrationError, PackError)` —
+  re-parented; the `loader.py` site migrated.
+- `PackSettingsMissingError(RegistrationError, PackError)` — re-parented
+- `PackPromptLoadError(RegistrationError, PackError)` — re-parented
+- `PackNotFoundError(RegistrationError, LookupError)` — **new**.
+  Replaces bare LookupError at `packs/__init__.py:782`. Recovery
+  shows `pip show`, `discover()`, and the exact pyproject.toml
+  entry-point declaration.
+
+Each Pack* class also gained its own `_doc_slug` so the
+`More:` URL points at a class-specific doc page
+(`pack-conflict-error`, `pack-version-conflict-error`, etc.) instead
+of the generic `registration-error`.
+
+**Partial migration note:** 22 of the 28 Pack* registration-error
+raise sites are unmigrated — they continue using the legacy
+single-message ActiveGraphError __init__ branch (format-noncompliant
+but valid). PR-E migrated only the 2 high-value loader.py sites where
+the rich pack-conflict context was worth the prose. The classes are
+in the v1.0 hierarchy; messages catch up incrementally as a
+v1.0-rc1 follow-on.
+
+#### Sub-category 3: Runtime lookup (4 new)
+
+- **`BehaviorNotFoundError(RegistrationError, LookupError)`** — was
+  bare LookupError at 3 sites in `runtime.get_behavior()`. New
+  signature `(name, *, registered=, pack_state=)` carries the
+  candidate list so "What failed:" names actual registered behaviors.
+- **`AmbiguousBehaviorError(RegistrationError, ValueError)`** — was
+  bare ValueError at 1 site. Names which packs collide. Recovery
+  shows the canonical form using one conflicting pack as a copy-paste
+  example.
+- **`ToolNotFoundError(RegistrationError, LookupError)`** — was bare
+  LookupError at 3 sites. Symmetric with `BehaviorNotFoundError`.
+- **`AmbiguousToolError(RegistrationError, ValueError)`** — was bare
+  ValueError at 1 site. Symmetric with `AmbiguousBehaviorError`.
+
+#### Sub-category 4: Scheduler + Runtime construction (2 new)
+
+- **`InvalidActivateAfter(RegistrationError, ValueError)`** — was
+  bare ValueError at 5 sites in `scheduler.parse_activate_after`.
+  Single class with a `kind` discriminator (bool-not-int, wall-clock,
+  unparseable, wrong-type, out-of-range). Each variant has its own
+  recovery prose; the "Why:" is uniform (event-count not wall-clock,
+  CONTRACT v0.7 #13).
+- **`InvalidToolRegistration(RegistrationError, TypeError)`** — was
+  bare TypeError at `runtime.py:381`. Constructor takes the offending
+  value; "What failed:" shows the value and its type. Recovery shows
+  the @tool decorator pattern.
+
+#### Sub-category 5: Optional-dependency import-time (1 new, shared)
+
+- **`MissingOptionalDependency(RegistrationError, ImportError)`** —
+  was 3 bare `raise ImportError(...)` sites:
+  - `activegraph/packs/__init__.py:52` (pydantic missing)
+  - `activegraph/store/postgres.py:73` (psycopg missing)
+  - `activegraph/observability/prometheus.py:95` (prometheus_client
+    missing)
+
+  Single shared class; construct with `package=`, `feature=`,
+  `extras=`. Recovery prose builds the install line from `extras`
+  (`pip install 'activegraph[<extras>]'`). Lives in
+  `activegraph/errors.py` rather than a topic module since it's
+  cross-cutting — the only registration leaf at the base-module
+  level.
+
+#### Audit findings — flagged-not-migrated (deferred to other PRs)
+
+- `postgres.py:107` TypeError (bad target type) → **PR-F**
+- `runtime.py:166` RuntimeError (`ctx.propose_object` outside
+  context) → **PR-F**
+- `runtime.py:1938` RuntimeError (fork requires SQLite) → **PR-F**
+- `runtime.py:257, 1464, 1790, 1803` ValueError (argument validation)
+  → **PR-F**
+- `graph.py:240` RuntimeError ("graph already has a store") → **PR-F**
+- `graph.py:544` ValueError (patch not proposed) → **PR-G** or
+  v1.0-rc1 follow-on (patch lifecycle, post-PR-D territory)
+- `graph.py:766` ValueError (unknown where operator) — internal
+  evaluator → v1.0-rc1 follow-on (warrants framework-version context)
+
+#### Snapshot files (13, reverse-audit-order)
+
+Written hardest-first per the PR-E discipline note: the multi-pack
+interaction leaves were written first so the standard becomes the
+floor for the mechanical ones, not the ceiling.
+
+1. `pack_version_conflict.txt` — multi-pack version interaction
+2. `pack_conflict__behavior.txt` — multi-pack canonical-name conflict
+3. `ambiguous_behavior.txt` — short-name resolution
+4. `ambiguous_tool.txt` — same, tool side
+5. `pack_not_found.txt` — entry-point discovery
+6. `missing_optional_dependency__postgres.txt` — cross-cutting
+7. `missing_provider.txt`
+8. `missing_tool.txt`
+9. `behavior_not_found.txt`
+10. `tool_not_found.txt`
+11. `invalid_activate_after__wall_clock.txt`
+12. `invalid_activate_after__unparseable.txt`
+13. `invalid_tool_registration.txt`
+
+#### Tests, suite total, smoke
+
+Tests added: 16 in `tests/test_errors_format.py` (13 snapshots + 3
+hierarchy / back-compat assertions, including a check that
+`PackConflictError` and `PackVersionConflictError` retain `except
+PackError` lineage).
+
+466 tests pass (450 + 16). All v0–v0.9 tests pass unchanged. The
+diligence demo runs end-to-end with byte-identical trace output.
+
+#### Hidden-surface count update
+
+- PR-A (ReplayError): 0 new leaves
+- PR-B (PatternError): 0 new + 17 keyword-workaround branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): 1 new + 6 flagged
+- **PR-E (RegistrationError): 8 new + 22 partial-migration + 7 flagged**
+
+Running total: **13 new leaves** + ~17 prose-table branches + 22
+partial-format Pack* sites + ~17 flagged for other PRs / follow-ons.
+
+**v1.1 planning signal:** at 13 new leaves with 22 partial migrations
+still pending, this is the data the running count was designed to
+surface. **v1.1 should have an explicit "error-completeness"
+milestone**: finish the 22 partial Pack* migrations, address the
+4 deferred DB-error wrappers from PR-C, write recovery prose for the
+2 internal-evaluator cases that warrant framework-version context, and
+consolidate any PR-F / PR-G flagged items still pending after rc1.
+
+The 13 new leaves alone vindicates the audit-as-series approach: a
+mechanical find-replace across the 50+ pre-PR-A error sites would
+have produced 0 new leaves and 0 flagged-for-follow-on findings.
+
 ## v1.0 #4b. Events-not-exceptions principle (framework-wide)
 
 Surfaced by PR-D's audit and worth locking explicitly before PR-E

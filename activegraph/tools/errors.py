@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from activegraph.errors import ExecutionError
+from activegraph.errors import ExecutionError, RegistrationError
 
 
 def _tool_prose_timeout(message: str) -> tuple[str, str, str]:
@@ -149,12 +149,67 @@ def _tool_fallback_prose(reason: str, message: str) -> tuple[str, str, str]:
     )
 
 
-class MissingToolError(RuntimeError):
-    """Raised at LLM-behavior registration when a tool name isn't registered.
+class MissingToolError(RegistrationError, RuntimeError):
+    """An ``@llm_behavior`` declares a tool name the runtime cannot find
+    in its tool registry at startup.
 
-    Stays a plain RuntimeError subclass through PR-D. PR-E migrates this
-    to :class:`activegraph.errors.RegistrationError`.
+    Fires at construction time, not at LLM-call time — the runtime
+    validates the declared tools once when the behavior registers.
+    Multi-inherits :class:`RuntimeError` for back-compat.
     """
+
+    _doc_slug = "missing-tool-error"
+
+    def __init__(
+        self,
+        tool_name: str,
+        *,
+        behavior_name: Optional[str] = None,
+        registered: Optional[tuple[str, ...]] = None,
+    ) -> None:
+        self.tool_name = tool_name
+        self.behavior_name = behavior_name
+        self.registered = registered or ()
+        ctx: dict[str, Any] = {"tool_name": tool_name}
+        if behavior_name:
+            ctx["behavior_name"] = behavior_name
+        if self.registered:
+            ctx["registered"] = list(self.registered)
+        sample = ""
+        if self.registered:
+            preview = ", ".join(repr(n) for n in list(self.registered)[:6])
+            extra = f" (+{len(self.registered) - 6} more)" if len(self.registered) > 6 else ""
+            sample = f"\n  registered tools: {preview}{extra}"
+        on_behavior = (
+            f" on @llm_behavior {behavior_name!r}" if behavior_name else ""
+        )
+        RegistrationError.__init__(
+            self,
+            f"no tool named {tool_name!r} is registered",
+            what_failed=(
+                f"@llm_behavior declares the tool {tool_name!r}{on_behavior}, "
+                f"but the Runtime's tool registry has no tool by that name.{sample}"
+            ),
+            why=(
+                "@llm_behavior validates its declared tools at startup so a "
+                "misconfiguration fails before any LLM call burns budget. "
+                "A missing tool at LLM-call time would either produce "
+                "UnknownToolError on every invocation (cost without "
+                "progress) or silently drop the call (which would corrupt "
+                "the audit trail). Validation at registration prevents both."
+            ),
+            how_to_fix=(
+                "Either register the tool with the runtime:\n"
+                "    rt = Runtime(graph, tools=[my_tool, ...])\n"
+                "or, if the tool comes from a pack, load the pack:\n"
+                "    rt.load_pack(my_pack)\n"
+                "\n"
+                "For pack-scoped tools, use the canonical name "
+                "`'pack_name.tool_name'` in the @llm_behavior's "
+                "`tools=[...]` argument."
+            ),
+            context=ctx,
+        )
 
 
 class UnknownToolError(ExecutionError, RuntimeError):

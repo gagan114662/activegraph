@@ -1,0 +1,17 @@
+InvalidActivateAfter: activate_after='abc' is invalid (unparseable string)
+
+What failed:
+  A behavior decorator was given `activate_after='abc'`, which the scheduler refused as unparseable string.
+
+Why:
+  `activate_after` schedules a behavior to fire N events after its triggering event. The runtime evaluates the schedule against the event log (not wall-clock) so replay produces identical timing — wall-clock units are intentionally out of scope (CONTRACT v0.7 #13). An unparseable value would make scheduling silently wrong, which would corrupt the audit trail at every replay.
+
+How to fix:
+  Use one of:
+      activate_after=5
+      activate_after='5'
+      activate_after='5 events'
+      activate_after='5 event'
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-activate-after

@@ -1,0 +1,21 @@
+InvalidToolRegistration: tool registration value is not a Tool instance (got function)
+
+What failed:
+  Runtime(tools=[...]) was given a value that isn't a Tool instance:
+    value: <function test_invalid_tool_registration_snapshot.<locals>.bare_function at 0...
+    type:  function
+
+Why:
+  The Tool wrapper carries the tool's declared name, input schema, output schema, timeout, and deterministic flag. Registering a bare function would skip those declarations and the runtime could not validate calls into the tool — schema-violating calls would reach the body and produce wrong-shape data. The check fails fast at construction.
+
+How to fix:
+  Decorate the function with @tool, and pass the decorated object:
+      @tool(name='my_tool', input_schema=..., output_schema=...)
+      def my_tool(args, ctx): ...
+
+      rt = Runtime(graph, tools=[my_tool])
+
+  If the function was already decorated, confirm you're passing the decorator's return value (the wrapped Tool), not the original function.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-tool-registration

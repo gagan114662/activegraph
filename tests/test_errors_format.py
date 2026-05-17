@@ -20,16 +20,27 @@ import pytest
 
 from activegraph import (
     ActiveGraphError,
+    AmbiguousBehaviorError,
+    AmbiguousToolError,
     ApprovalNotFoundError,
+    BehaviorNotFoundError,
     ConfigurationError,
     CorruptedEventPayloadError,
     DuplicateEventError,
     EventNotFoundError,
     ExecutionError,
+    InvalidActivateAfter,
     InvalidStoreURL,
+    InvalidToolRegistration,
     LLMBehaviorError,
+    MissingOptionalDependency,
+    MissingProviderError,
+    MissingToolError,
     NonSerializableEventError,
+    PackConflictError,
     PackError,
+    PackNotFoundError,
+    PackVersionConflictError,
     PatternError,
     RegistrationError,
     ReplayDivergenceError,
@@ -37,6 +48,7 @@ from activegraph import (
     SchemaVersionMismatch,
     StorageError,
     ToolError,
+    ToolNotFoundError,
     UnknownToolError,
     UnsupportedPatternError,
 )
@@ -734,3 +746,261 @@ def test_approval_not_found_is_a_lookup_error() -> None:
     working."""
     err = ApprovalNotFoundError("approval_999", pending_count=0)
     assert isinstance(err, LookupError)
+
+
+# ---------- PR-E: RegistrationError category ---------------------------
+#
+# Snapshots written in REVERSE AUDIT ORDER per the PR-E discipline
+# note: the least-well-understood leaves come first so they get the
+# freshest attention. The standard set by the hardest leaf becomes the
+# floor for the easier ones.
+
+
+def test_registration_leaves_inherit_from_registration_error() -> None:
+    """Every PR-E leaf — new or re-parented — is in the v1.0 hierarchy."""
+    for cls in (
+        MissingProviderError,
+        MissingToolError,
+        MissingOptionalDependency,
+        BehaviorNotFoundError,
+        AmbiguousBehaviorError,
+        ToolNotFoundError,
+        AmbiguousToolError,
+        InvalidActivateAfter,
+        InvalidToolRegistration,
+        PackNotFoundError,
+        PackConflictError,
+        PackVersionConflictError,
+    ):
+        assert issubclass(cls, RegistrationError), cls
+        assert issubclass(cls, ActiveGraphError), cls
+
+
+def test_pack_registration_leaves_keep_pack_error_lineage() -> None:
+    """The Pack* registration leaves multi-inherit RegistrationError +
+    PackError so `except PackError` and `except RegistrationError` both
+    catch them. CONTRACT v1.0 PR-E backward-compat clause."""
+    for cls in (PackConflictError, PackVersionConflictError, PackNotFoundError):
+        if cls is PackNotFoundError:
+            # PackNotFoundError is new; it doesn't inherit from PackError.
+            continue
+        assert issubclass(cls, PackError), cls
+
+
+def test_registration_leaves_preserve_legacy_base_classes() -> None:
+    """Multi-inheritance preserves builtin lineage for existing
+    catches:
+      - MissingProviderError keeps RuntimeError
+      - MissingToolError keeps RuntimeError
+      - MissingOptionalDependency keeps ImportError
+      - BehaviorNotFoundError / ToolNotFoundError / PackNotFoundError
+        keep LookupError
+      - AmbiguousBehaviorError / AmbiguousToolError keep ValueError
+      - InvalidActivateAfter keeps ValueError
+      - InvalidToolRegistration keeps TypeError
+    """
+    assert issubclass(MissingProviderError, RuntimeError)
+    assert issubclass(MissingToolError, RuntimeError)
+    assert issubclass(MissingOptionalDependency, ImportError)
+    assert issubclass(BehaviorNotFoundError, LookupError)
+    assert issubclass(ToolNotFoundError, LookupError)
+    assert issubclass(PackNotFoundError, LookupError)
+    assert issubclass(AmbiguousBehaviorError, ValueError)
+    assert issubclass(AmbiguousToolError, ValueError)
+    assert issubclass(InvalidActivateAfter, ValueError)
+    assert issubclass(InvalidToolRegistration, TypeError)
+
+
+# --- Reverse-audit-order snapshots (hardest first) ---
+
+
+def test_pack_version_conflict_snapshot() -> None:
+    """A runtime cannot hold two versions of the same pack. The recovery
+    walks through the three concrete actions (rename, fresh runtime,
+    pick-one)."""
+    err = PackVersionConflictError(
+        "pack 'diligence': already loaded version '0.1.0', attempted to load version '0.2.0'",
+        what_failed=(
+            "runtime.load_pack('diligence', version='0.2.0') was rejected "
+            "because the runtime already holds 'diligence' version '0.1.0'."
+        ),
+        why=(
+            "A runtime can hold at most one version of any pack. Two "
+            "versions would compete for the same canonical names in the "
+            "registry — `pack.behavior_name` would resolve differently "
+            "depending on dispatch order, which would silently corrupt the "
+            "audit trail."
+        ),
+        how_to_fix=(
+            "Pick one version. If you need both behaviors, the older "
+            "version's namespace can be retained under a renamed pack: "
+            "copy the pack, change its `name=` declaration, and load both. "
+            "The two versions then have distinct canonical namespaces.\n"
+            "\n"
+            "To unload the current version and load the new one, construct "
+            "a fresh Runtime — load_pack does not support version swapping "
+            "in place."
+        ),
+        context={
+            "pack": "diligence",
+            "loaded_version": "0.1.0",
+            "attempted_version": "0.2.0",
+        },
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("pack_version_conflict", err)
+
+
+def test_pack_conflict_behavior_snapshot() -> None:
+    """Two packs declaring the same canonical behavior name. The hardest
+    PR-E case to write recovery prose for because the choice between
+    'pick one' / 'rename' / 'separate runtime' depends on the user's
+    intent."""
+    err = PackConflictError(
+        "behavior name conflict: 'diligence.researcher' declared by both pack 'diligence' and pack 'research'",
+        what_failed=(
+            "runtime.load_pack('research') was rejected: the behavior name "
+            "'diligence.researcher' is already registered by pack 'diligence'."
+        ),
+        why=(
+            "Canonical names in the runtime registry are unique across "
+            "loaded packs. Two packs claiming the same canonical name "
+            "would silently route dispatch one way or the other depending "
+            "on pack-load order; the runtime refuses the load instead so "
+            "the conflict is visible and the operator decides which pack "
+            "to keep."
+        ),
+        how_to_fix=(
+            "One of three actions:\n"
+            "  1. Don't load both packs in the same runtime — pick one.\n"
+            "  2. Rename one pack: copy its source, change the\n"
+            "     `Pack(name=...)` declaration, re-install, and load\n"
+            "     under the new name. The behaviors are then under\n"
+            "     a different canonical prefix.\n"
+            "  3. If both behaviors should run, the second pack's\n"
+            "     pyproject can re-export the behavior under a\n"
+            "     different name within its declaration."
+        ),
+        context={
+            "kind": "behavior",
+            "canonical": "diligence.researcher",
+            "owner_pack": "diligence",
+            "conflicting_pack": "research",
+        },
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("pack_conflict__behavior", err)
+
+
+def test_ambiguous_behavior_snapshot() -> None:
+    """Short name resolves to behaviors in multiple loaded packs. Recovery
+    shows the canonical form using one of the conflicting packs as the
+    example so the operator can copy-paste."""
+    err = AmbiguousBehaviorError(
+        "researcher", packs=("diligence", "research"),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("ambiguous_behavior", err)
+
+
+def test_ambiguous_tool_snapshot() -> None:
+    err = AmbiguousToolError(
+        "fetch_docs", packs=("diligence", "research"),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("ambiguous_tool", err)
+
+
+def test_pack_not_found_snapshot() -> None:
+    """Entry-point discovery turned up nothing. Recovery shows how to
+    list discovered packs and the exact pyproject.toml entry-point
+    declaration."""
+    err = PackNotFoundError(
+        "diligence",
+        installed=("research", "memory"),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("pack_not_found", err)
+
+
+def test_missing_optional_dependency_postgres_snapshot() -> None:
+    """The shared MissingOptionalDependency leaf — Postgres case.
+    Pattern is uniform across the three call sites (postgres, prometheus,
+    pydantic), only the package/feature/extras vary."""
+    err = MissingOptionalDependency(
+        package="psycopg",
+        feature="PostgresEventStore",
+        extras="postgres",
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("missing_optional_dependency__postgres", err)
+
+
+def test_missing_provider_snapshot() -> None:
+    """@llm_behavior was registered but the runtime has no provider.
+    Re-parented from RuntimeError; recovery shows both real-provider and
+    recorded-provider construction."""
+    err = MissingProviderError(behavior_name="diligence.researcher")
+    _assert_format_compliant(err)
+    _check_snapshot("missing_provider", err)
+
+
+def test_missing_tool_snapshot() -> None:
+    """@llm_behavior declares a tool the runtime can't find. Recovery
+    enumerates registered tools and points at both Runtime(tools=) and
+    load_pack."""
+    err = MissingToolError(
+        "web_search",
+        behavior_name="diligence.researcher",
+        registered=("diligence.fetch_company_docs", "diligence.fetch_filings"),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("missing_tool", err)
+
+
+def test_behavior_not_found_snapshot() -> None:
+    err = BehaviorNotFoundError(
+        "extract_claims",
+        registered=("diligence.researcher", "diligence.memo_synthesizer"),
+        pack_state=True,
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("behavior_not_found", err)
+
+
+def test_tool_not_found_snapshot() -> None:
+    err = ToolNotFoundError(
+        "fetch_pdfs",
+        registered=("diligence.fetch_company_docs", "diligence.fetch_filings"),
+    )
+    _assert_format_compliant(err)
+    _check_snapshot("tool_not_found", err)
+
+
+def test_invalid_activate_after_wall_clock_snapshot() -> None:
+    """activate_after=`5 seconds` — the most common operator mistake.
+    Recovery explains the event-count vs wall-clock distinction
+    explicitly because the distinction is load-bearing for replay."""
+    from activegraph.runtime.scheduler import parse_activate_after
+    with pytest.raises(InvalidActivateAfter) as excinfo:
+        parse_activate_after("5 seconds")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("invalid_activate_after__wall_clock", excinfo.value)
+
+
+def test_invalid_activate_after_unparseable_snapshot() -> None:
+    from activegraph.runtime.scheduler import parse_activate_after
+    with pytest.raises(InvalidActivateAfter) as excinfo:
+        parse_activate_after("abc")
+    _assert_format_compliant(excinfo.value)
+    _check_snapshot("invalid_activate_after__unparseable", excinfo.value)
+
+
+def test_invalid_tool_registration_snapshot() -> None:
+    """Runtime(tools=[some_function]) — common mistake of forgetting
+    @tool decorator. Recovery shows the @tool decorator usage explicitly."""
+    def bare_function():
+        return 42
+    err = InvalidToolRegistration(bare_function)
+    _assert_format_compliant(err)
+    _check_snapshot("invalid_tool_registration", err)

@@ -48,11 +48,13 @@ import tomllib
 
 try:
     from pydantic import BaseModel
-except ImportError:  # pragma: no cover — pydantic is a hard dep for packs
-    raise ImportError(
-        "activegraph.packs requires pydantic. Install with `pip install "
-        "activegraph[llm]` or `pip install pydantic`."
-    )
+except ImportError as _e:  # pragma: no cover — pydantic is a hard dep for packs
+    from activegraph.errors import MissingOptionalDependency
+    raise MissingOptionalDependency(
+        package="pydantic",
+        feature="activegraph.packs (the pack format)",
+        extras="llm",
+    ) from _e
 
 from activegraph.behaviors.base import (
     Behavior,
@@ -65,60 +67,146 @@ from activegraph.tools.base import Tool
 
 # ---------------------------------------------------------------- exceptions
 #
-# v1.0 PR-A: PackError is re-homed under `activegraph.errors.PackError`,
-# the v1.0 category base in the ActiveGraphError hierarchy. The pack
-# leaves (PackValidationError, PackConflictError, ...) continue to
-# inherit from it; their existing `raise PackError("message")` call sites
-# go through the legacy `__init__` branch on ActiveGraphError. PR-F
-# migrates each leaf into the v1.0 structured format.
+# v1.0 PR-A re-homed PackError under `activegraph.errors.PackError` as the
+# v1.0 category base.
+#
+# v1.0 PR-E multi-inherits the registration-time leaves with
+# `RegistrationError` so `except RegistrationError` catches them
+# alongside the LLM/tool/Pack-not-found leaves. The runtime-shape leaf
+# (`PackSchemaViolation`) stays PackError-only and migrates in PR-G.
+#
+# The 28 existing `raise PackXError("message")` call sites continue
+# using the legacy single-message ActiveGraphError __init__ branch
+# (format-noncompliant but valid). PR-E migrates a few high-value
+# sites (loader.py PackConflict / PackVersionConflict) to the
+# structured form; the remainder is tracked as a v1.0-rc1 follow-on.
 
-from activegraph.errors import PackError as PackError  # re-export for back-compat
+from activegraph.errors import (
+    MissingOptionalDependency,
+    PackError as PackError,  # re-export for back-compat
+    RegistrationError,
+)
 
 
-class PackValidationError(PackError):
+class PackNotFoundError(RegistrationError, LookupError):
+    """`activegraph.packs.load_by_name(name)` could not find an installed
+    pack with that name in the entry-point registry.
+
+    Multi-inherits :class:`LookupError` for back-compat with user code
+    catching the builtin around pack discovery.
+    """
+
+    _doc_slug = "pack-not-found-error"
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        installed: tuple[str, ...] = (),
+    ) -> None:
+        self.name = name
+        self.installed = installed
+        ctx: dict[str, Any] = {"name": name}
+        if installed:
+            ctx["installed"] = list(installed)
+        installed_list = (
+            ", ".join(repr(p) for p in installed)
+            if installed
+            else "(no packs installed)"
+        )
+        RegistrationError.__init__(
+            self,
+            f"no installed pack named {name!r}",
+            what_failed=(
+                f"activegraph.packs.load_by_name({name!r}) searched the "
+                f"`activegraph.packs` entry-point group and found no pack "
+                f"with that name.\n  installed: {installed_list}"
+            ),
+            why=(
+                "Packs register via Python entry points so the framework "
+                "can discover them without import-side-effect cost. A "
+                "missing pack means either the pack isn't installed "
+                "(pip install hasn't run), or the installed pack's "
+                "entry-point group is wrong, or the name is a typo."
+            ),
+            how_to_fix=(
+                "Confirm the pack is installed:\n"
+                f"    pip show <pack-distribution-name>\n"
+                "\n"
+                "List currently-discovered packs:\n"
+                "    from activegraph.packs import discover\n"
+                "    [p.name for p in discover()]\n"
+                "\n"
+                "If the pack is present but not discovered, its "
+                "pyproject.toml should declare:\n"
+                "    [project.entry-points.\"activegraph.packs\"]\n"
+                "    your_pack = \"your_pack_module:pack\""
+            ),
+            context=ctx,
+        )
+
+
+class PackValidationError(RegistrationError, PackError):
     """A `Pack(...)` constructor argument failed validation.
 
     Raised at construction time, not at load time. Covers things like
     duplicate behavior names, an invalid pack name, an unhashable
-    settings_schema, etc.
+    settings_schema, etc. Multi-inherits RegistrationError (v1.0 PR-E)
+    and PackError (v0.9 base).
     """
 
+    _doc_slug = "pack-validation-error"
 
-class PackConflictError(PackError):
+
+class PackConflictError(RegistrationError, PackError):
     """Two loaded packs conflict on a declared identifier.
 
     Raised at `runtime.load_pack` time. Pre-mutation: a failed
     `load_pack` call leaves the runtime exactly as it was.
     """
 
+    _doc_slug = "pack-conflict-error"
 
-class PackVersionConflictError(PackError):
+
+class PackVersionConflictError(RegistrationError, PackError):
     """Same pack name loaded with two different versions.
 
     A runtime cannot hold two versions of the same pack. Pre-mutation,
     same as `PackConflictError`.
     """
 
+    _doc_slug = "pack-version-conflict-error"
+
 
 class PackSchemaViolation(PackError, ValueError):
     """`graph.add_object` or `graph.add_relation` data failed schema
     validation against a loaded pack's declared type.
 
+    Runtime-shape error (fires at add_object, not at pack load), so
+    stays under PackError only. PR-G migrates this to the structured
+    format alongside the rest of the runtime-shape PackError leaves.
+
     Subclass of `ValueError` so user code that catches `ValueError`
     around graph mutations continues to work.
     """
 
+    _doc_slug = "pack-schema-violation"
 
-class PackSettingsMissingError(PackError):
+
+class PackSettingsMissingError(RegistrationError, PackError):
     """`runtime.load_pack(pack)` called without `settings=` for a pack
     whose `settings_schema` doesn't accept no-arg construction.
     """
 
+    _doc_slug = "pack-settings-missing-error"
 
-class PackPromptLoadError(PackError):
+
+class PackPromptLoadError(RegistrationError, PackError):
     """A prompt file is malformed, missing required frontmatter, or
-    unreadable.
+    unreadable. Pack registration time.
     """
+
+    _doc_slug = "pack-prompt-load-error"
 
 
 # ----------------------------------------------------- value objects (frozen)
@@ -699,13 +787,12 @@ def clear_discovery_cache() -> None:
 
 def load_by_name(name: str) -> Pack:
     """Find a discovered pack by name. Raises `LookupError` if not found."""
-    for entry in discover():
-        if entry.name == name:
-            return entry.pack
-    raise LookupError(
-        f"no installed pack named {name!r}. Use activegraph.packs.discover() "
-        f"to list available packs."
-    )
+    installed = tuple(entry.name for entry in discover())
+    if name in installed:
+        for entry in discover():
+            if entry.name == name:
+                return entry.pack
+    raise PackNotFoundError(name, installed=installed)
 
 
 # ----------------------------------------------------- approval primitives

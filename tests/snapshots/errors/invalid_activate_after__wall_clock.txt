@@ -1,0 +1,17 @@
+InvalidActivateAfter: activate_after='5 seconds' is invalid (wall-clock unit)
+
+What failed:
+  A behavior decorator was given `activate_after='5 seconds'`, which the scheduler refused as wall-clock unit.
+
+Why:
+  `activate_after` schedules a behavior to fire N events after its triggering event. The runtime evaluates the schedule against the event log (not wall-clock) so replay produces identical timing — wall-clock units are intentionally out of scope (CONTRACT v0.7 #13). An unparseable value would make scheduling silently wrong, which would corrupt the audit trail at every replay.
+
+How to fix:
+  Wall-clock units (seconds/minutes/hours) are not supported. Express the delay as an event count:
+      activate_after=5
+      activate_after='5 events'
+
+  If you genuinely need wall-clock scheduling, file an issue — the v1+ contract leaves room for it behind a separate primitive (see CONTRACT v0.7 #23).
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-activate-after

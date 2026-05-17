@@ -85,6 +85,45 @@ _WALL_CLOCK_WORDS = {
 }
 
 
+from activegraph.errors import RegistrationError as _RegistrationError
+
+
+class InvalidActivateAfter(_RegistrationError, ValueError):
+    """``activate_after=`` on a @behavior / @llm_behavior decorator was
+    passed an unparseable or out-of-range value.
+
+    Multi-inherits :class:`ValueError` for back-compat with user code
+    catching the builtin around behavior registration.
+    """
+
+    _doc_slug = "invalid-activate-after"
+
+    def __init__(self, *, spec: Any, kind: str, hint: str) -> None:
+        self.spec = spec
+        self.kind = kind
+        self.hint = hint
+        from activegraph.errors import RegistrationError as _R
+        _R.__init__(
+            self,
+            f"activate_after={spec!r} is invalid ({kind})",
+            what_failed=(
+                f"A behavior decorator was given `activate_after={spec!r}`, "
+                f"which the scheduler refused as {kind}."
+            ),
+            why=(
+                "`activate_after` schedules a behavior to fire N events after "
+                "its triggering event. The runtime evaluates the schedule "
+                "against the event log (not wall-clock) so replay produces "
+                "identical timing — wall-clock units are intentionally out "
+                "of scope (CONTRACT v0.7 #13). An unparseable value would "
+                "make scheduling silently wrong, which would corrupt the "
+                "audit trail at every replay."
+            ),
+            how_to_fix=hint,
+            context={"spec": repr(spec), "kind": kind},
+        )
+
+
 def parse_activate_after(spec: Any) -> int:
     """Parse `activate_after=` into an integer event count.
 
@@ -99,7 +138,16 @@ def parse_activate_after(spec: Any) -> int:
     """
     if isinstance(spec, bool):
         # bool is an int in Python — guard against accidental True/False.
-        raise ValueError(f"activate_after must be a positive int, got {spec!r}")
+        raise InvalidActivateAfter(
+            spec=spec,
+            kind="bool not int",
+            hint=(
+                "Pass an integer event count instead:\n"
+                "    activate_after=5\n"
+                "or a string with the 'events' unit:\n"
+                "    activate_after='5 events'"
+            ),
+        )
     if isinstance(spec, int):
         n = spec
     elif isinstance(spec, str):
@@ -107,24 +155,52 @@ def parse_activate_after(spec: Any) -> int:
         # Detect wall-clock units and reject with a CONTRACT-pointing message.
         for word in _WALL_CLOCK_WORDS:
             if word in s.split():
-                raise ValueError(
-                    f"activate_after={spec!r}: wall-clock units are not "
-                    f"supported in v0.7 (CONTRACT v0.7 #13). Use an integer "
-                    f"event count, e.g. activate_after=5 or '5 events'."
+                raise InvalidActivateAfter(
+                    spec=spec,
+                    kind="wall-clock unit",
+                    hint=(
+                        f"Wall-clock units (seconds/minutes/hours) are not "
+                        f"supported. Express the delay as an event count:\n"
+                        f"    activate_after=5\n"
+                        f"    activate_after='5 events'\n"
+                        f"\n"
+                        f"If you genuinely need wall-clock scheduling, file "
+                        f"an issue — the v1+ contract leaves room for it "
+                        f"behind a separate primitive (see CONTRACT v0.7 #23)."
+                    ),
                 )
         m = _DURATION_RE.match(s)
         if not m:
-            raise ValueError(
-                f"activate_after={spec!r}: expected int or 'N events', "
-                f"got an unparseable string."
+            raise InvalidActivateAfter(
+                spec=spec,
+                kind="unparseable string",
+                hint=(
+                    "Use one of:\n"
+                    "    activate_after=5\n"
+                    "    activate_after='5'\n"
+                    "    activate_after='5 events'\n"
+                    "    activate_after='5 event'"
+                ),
             )
         n = int(m.group(1))
     else:
-        raise ValueError(
-            f"activate_after={spec!r}: expected int or 'N events'."
+        raise InvalidActivateAfter(
+            spec=spec,
+            kind=f"type {type(spec).__name__}",
+            hint=(
+                "Pass an int or a string. Example:\n"
+                "    activate_after=5\n"
+                "    activate_after='5 events'"
+            ),
         )
     if n < 1:
-        raise ValueError(
-            f"activate_after={spec!r}: must be >= 1 event."
+        raise InvalidActivateAfter(
+            spec=spec,
+            kind="must be >= 1",
+            hint=(
+                "`activate_after` schedules N events after the trigger. "
+                "Zero or negative N has no defined meaning. The minimum "
+                "is 1 (fire on the very next event after the trigger)."
+            ),
         )
     return n

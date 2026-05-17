@@ -21,12 +21,21 @@ from activegraph.errors import (
     ActiveGraphError,
     ConfigurationError,
     ExecutionError,
+    MissingOptionalDependency,
     PackError,
     PatternError,
     RegistrationError,
     ReplayError,
     StorageError,
 )
+from activegraph.runtime.registration_errors import (
+    AmbiguousBehaviorError,
+    AmbiguousToolError,
+    BehaviorNotFoundError,
+    InvalidToolRegistration,
+    ToolNotFoundError,
+)
+from activegraph.runtime.scheduler import InvalidActivateAfter
 from activegraph.frame import Frame
 from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
 from activegraph.policy import Policy
@@ -83,6 +92,7 @@ from activegraph.packs import (
     Pack,
     PackConflictError,
     PackError,
+    PackNotFoundError,
     PackPolicy,
     PackPrompt,
     PackPromptLoadError,
@@ -100,8 +110,11 @@ from activegraph.packs import (
 
 __all__ = [
     "ActiveGraphError",
+    "AmbiguousBehaviorError",
+    "AmbiguousToolError",
     "ApprovalNotFoundError",
     "Behavior",
+    "BehaviorNotFoundError",
     "Budget",
     "Clock",
     "ConfigurationError",
@@ -121,12 +134,15 @@ __all__ = [
     "Graph",
     "IDGen",
     "InMemoryEventStore",
+    "InvalidActivateAfter",
     "InvalidStoreURL",
+    "InvalidToolRegistration",
     "LLMBehavior",
     "LLMBehaviorError",
     "Metrics",
     "MigrationReport",
     "MigrationRunReport",
+    "MissingOptionalDependency",
     "MissingProviderError",
     "MissingToolError",
     "NoOpMetrics",
@@ -136,6 +152,7 @@ __all__ = [
     "Pack",
     "PackConflictError",
     "PackError",
+    "PackNotFoundError",
     "PackPolicy",
     "PackPromptLoadError",
     "PackPrompt",
@@ -164,6 +181,7 @@ __all__ = [
     "Tool",
     "ToolContext",
     "ToolError",
+    "ToolNotFoundError",
     "UnknownToolError",
     "UnsupportedPatternError",
     "View",

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from activegraph.errors import ExecutionError
+from activegraph.errors import ExecutionError, RegistrationError
 
 
 # Per-reason prose for LLMBehaviorError. The voice principle from
@@ -159,14 +159,58 @@ def _llm_fallback_prose(reason: str, message: str) -> tuple[str, str, str]:
     )
 
 
-class MissingProviderError(RuntimeError):
-    """Raised when an @llm_behavior is invoked but no provider is wired.
+class MissingProviderError(RegistrationError, RuntimeError):
+    """Raised when an @llm_behavior is invoked but no LLM provider is
+    wired on the Runtime.
 
-    Stays a plain RuntimeError subclass through PR-D. PR-E migrates this
-    to :class:`activegraph.errors.RegistrationError` along with the
-    other registration-time leaves (MissingToolError, the pack
-    registration errors).
+    Fires at registration / startup, not at every invocation — the
+    runtime validates the configuration once. Multi-inherits
+    :class:`RuntimeError` for back-compat with user code catching the
+    builtin around runtime construction.
     """
+
+    _doc_slug = "missing-provider-error"
+
+    def __init__(self, behavior_name: Optional[str] = None) -> None:
+        self.behavior_name = behavior_name
+        what = (
+            f"An LLM-backed behavior ({behavior_name!r}) was registered, "
+            f"but Runtime(...) was constructed without an `llm_provider=` "
+            f"argument."
+            if behavior_name
+            else (
+                "An @llm_behavior was registered, but Runtime(...) was "
+                "constructed without an `llm_provider=` argument."
+            )
+        )
+        ctx: dict[str, Any] = {}
+        if behavior_name:
+            ctx["behavior_name"] = behavior_name
+        RegistrationError.__init__(
+            self,
+            "no LLM provider configured for @llm_behavior",
+            what_failed=what,
+            why=(
+                "@llm_behavior dispatches LLM calls through the provider "
+                "attached to the runtime at construction. Failing loud at "
+                "registration rather than at first invocation is the v0.6 "
+                "contract — silently no-op'ing the behavior would corrupt "
+                "the audit trail (behaviors fire and produce events; a "
+                "missing provider would produce events that claim to "
+                "depend on an LLM call that never happened)."
+            ),
+            how_to_fix=(
+                "Pass `llm_provider=` to the Runtime constructor:\n"
+                "    from activegraph.llm.anthropic import AnthropicProvider\n"
+                "    rt = Runtime(graph, llm_provider=AnthropicProvider())\n"
+                "\n"
+                "For offline replay or tests, use a recorded or scripted "
+                "provider:\n"
+                "    from activegraph.llm.recorded import RecordedLLMProvider\n"
+                "    rt = Runtime(graph, llm_provider=RecordedLLMProvider(...))"
+            ),
+            context=ctx,
+        )
 
 
 class LLMBehaviorError(ExecutionError, Exception):

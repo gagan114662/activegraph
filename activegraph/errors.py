@@ -190,6 +190,67 @@ class PackError(ActiveGraphError):
     _doc_slug = "pack-error"
 
 
+class MissingOptionalDependency(RegistrationError, ImportError):
+    """A subsystem requires an optional Python package that isn't installed.
+
+    Used by the Postgres store, the Prometheus metrics backend, and the
+    Pack format (which requires Pydantic). Multi-inherits :class:`ImportError`
+    so user code that catches the builtin around optional-dep imports
+    continues to work. v1.0 PR-E.
+
+    Construct with the missing package name and the activegraph extras
+    name that bundles it; the structured message walks the user through
+    the install line.
+    """
+
+    _doc_slug = "missing-optional-dependency"
+
+    def __init__(
+        self,
+        *,
+        package: str,
+        feature: str,
+        extras: str | None = None,
+    ) -> None:
+        self.package = package
+        self.feature = feature
+        self.extras = extras
+        install_line = (
+            f"pip install 'activegraph[{extras}]'"
+            if extras
+            else f"pip install {package}"
+        )
+        ctx = {"package": package, "feature": feature}
+        if extras is not None:
+            ctx["extras"] = extras
+        RegistrationError.__init__(
+            self,
+            f"{feature} requires the {package!r} Python package",
+            what_failed=(
+                f"While initializing {feature}, the import of {package!r} "
+                f"failed because the package is not installed in this "
+                f"environment."
+            ),
+            why=(
+                "The framework keeps optional subsystems off the default "
+                "install path so a minimal install stays small. Each "
+                "optional subsystem declares its dependency explicitly; "
+                "missing it produces this error rather than failing later "
+                "with a confusing AttributeError or ImportError deep inside "
+                "the subsystem."
+            ),
+            how_to_fix=(
+                f"Install the optional dependency:\n"
+                f"    {install_line}\n"
+                f"\n"
+                f"If you don't need {feature}, the bare `activegraph` "
+                f"install does not depend on {package!r} — the error only "
+                f"fires when the subsystem is actually used."
+            ),
+            context=ctx,
+        )
+
+
 __all__ = [
     "ActiveGraphError",
     "ConfigurationError",
@@ -199,4 +260,5 @@ __all__ = [
     "StorageError",
     "PatternError",
     "PackError",
+    "MissingOptionalDependency",
 ]

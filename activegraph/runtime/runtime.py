@@ -347,11 +347,7 @@ class Runtime:
         if self.llm_provider is None:
             for b in source:
                 if isinstance(b, LLMBehavior):
-                    raise MissingProviderError(
-                        f"behavior {b.name!r} is an @llm_behavior but the "
-                        f"runtime has no llm_provider. Pass "
-                        f"`Runtime(graph, llm_provider=...)`."
-                    )
+                    raise MissingProviderError(behavior_name=b.name)
         self.registry = Registry(source)
 
         # v0.7: assemble the tool registry. Explicit tools= override the
@@ -378,10 +374,10 @@ class Runtime:
         self.tool_registry = {}
         for t in tools_source:
             if not isinstance(t, Tool):
-                raise TypeError(
-                    f"tool {t!r} is not a Tool instance "
-                    f"(decorate with @tool or pass a Tool object)"
+                from activegraph.runtime.registration_errors import (
+                    InvalidToolRegistration,
                 )
+                raise InvalidToolRegistration(t)
             self.tool_registry[t.name] = t
             # v0.9: globally-exported pack tools are also registered
             # under their short name.
@@ -396,9 +392,9 @@ class Runtime:
                 name = t.name if isinstance(t, Tool) else str(t)
                 if name not in self.tool_registry:
                     raise MissingToolError(
-                        f"behavior {b.name!r} declares tool {name!r} but it "
-                        f"is not registered (register with @tool or pass via "
-                        f"Runtime(tools=[...]))"
+                        name,
+                        behavior_name=b.name,
+                        registered=tuple(self.tool_registry.keys()),
                     )
 
     def run_goal(self, goal: str, *, actor: str = "user") -> None:
@@ -722,7 +718,7 @@ class Runtime:
                 self._emit_behavior_failed(
                     b.name,
                     event.id,
-                    MissingToolError(f"unregistered tool: {name}"),
+                    MissingToolError(name, registered=tuple(self.tool_registry.keys())),
                     reason="tool.unknown_tool",
                     extras={"tool": name},
                 )
@@ -1595,24 +1591,39 @@ class Runtime:
         guarantees this invariant). Raises `LookupError` if not found
         or `ValueError` if ambiguous. CONTRACT v0.9 #8.
         """
+        from activegraph.runtime.registration_errors import (
+            AmbiguousBehaviorError,
+            BehaviorNotFoundError,
+        )
         # Canonical lookup first
         if "." in name:
             for b in self._pack_behaviors:
                 if b.name == name:
                     return b
-            raise LookupError(f"no behavior named {name!r} is loaded")
+            raise BehaviorNotFoundError(
+                name, registered=tuple(b.name for b in self._pack_behaviors),
+            )
         # Short name
         if self._pack_state is None:
-            raise LookupError(f"no behavior named {name!r} is loaded")
+            raise BehaviorNotFoundError(
+                name, registered=tuple(b.name for b in self._pack_behaviors),
+                pack_state=False,
+            )
         from activegraph.packs.loader import AMBIGUOUS
         canonical = self._pack_state.behavior_short_to_canonical.get(name)
         if canonical is None:
-            raise LookupError(f"no behavior named {name!r} is loaded")
-        if canonical == AMBIGUOUS:
-            raise ValueError(
-                f"behavior name {name!r} is ambiguous across loaded packs; "
-                f"use the fully-qualified form (e.g. 'pack_name.{name}')"
+            raise BehaviorNotFoundError(
+                name,
+                registered=tuple(b.name for b in self._pack_behaviors),
+                pack_state=True,
             )
+        if canonical == AMBIGUOUS:
+            # Find which packs collide on this short name.
+            owners = tuple(
+                p for c, p in self._pack_state.behavior_owners.items()
+                if c.endswith(f".{name}")
+            )
+            raise AmbiguousBehaviorError(name, packs=owners)
         return self.get_behavior(canonical)
 
     def get_tool(self, name: str):
@@ -1620,16 +1631,24 @@ class Runtime:
 
         Same resolution rule as `get_behavior`. CONTRACT v0.9 #8 / #9.
         """
+        from activegraph.runtime.registration_errors import (
+            AmbiguousToolError,
+            ToolNotFoundError,
+        )
         if "." in name:
             t = self.tool_registry.get(name)
             if t is None:
-                raise LookupError(f"no tool named {name!r} is loaded")
+                raise ToolNotFoundError(
+                    name, registered=tuple(self.tool_registry.keys()),
+                )
             return t
         # Short name
         if self._pack_state is None:
             t = self.tool_registry.get(name)
             if t is None:
-                raise LookupError(f"no tool named {name!r} is loaded")
+                raise ToolNotFoundError(
+                    name, registered=tuple(self.tool_registry.keys()),
+                )
             return t
         from activegraph.packs.loader import AMBIGUOUS
         canonical = self._pack_state.tool_short_to_canonical.get(name)
@@ -1637,13 +1656,16 @@ class Runtime:
             # Maybe a globally-exported tool registered under its short name
             t = self.tool_registry.get(name)
             if t is None:
-                raise LookupError(f"no tool named {name!r} is loaded")
+                raise ToolNotFoundError(
+                    name, registered=tuple(self.tool_registry.keys()),
+                )
             return t
         if canonical == AMBIGUOUS:
-            raise ValueError(
-                f"tool name {name!r} is ambiguous across loaded packs; "
-                f"use the fully-qualified form (e.g. 'pack_name.{name}')"
+            owners = tuple(
+                p for c, p in self._pack_state.tool_owners.items()
+                if c.endswith(f".{name}")
             )
+            raise AmbiguousToolError(name, packs=owners)
         return self.tool_registry[canonical]
 
     def _pack_settings_for_behavior(self, b) -> Any:
