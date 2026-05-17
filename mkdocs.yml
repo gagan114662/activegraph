@@ -114,3 +114,8 @@ nav:
           - PackVersionConflictError: reference/errors/pack-version-conflict-error.md
           - InvalidActivateAfter: reference/errors/invalid-activate-after.md
           - InvalidToolRegistration: reference/errors/invalid-tool-registration.md
+          - InvalidRuntimeConfiguration: reference/errors/invalid-runtime-configuration.md
+          - InvalidArgumentType: reference/errors/invalid-argument-type.md
+          - IncompatibleRuntimeState: reference/errors/incompatible-runtime-state.md
+          - RuntimeContextRequiredError: reference/errors/runtime-context-required-error.md
+          - InvalidPatchLifecycleState: reference/errors/invalid-patch-lifecycle-state.md
