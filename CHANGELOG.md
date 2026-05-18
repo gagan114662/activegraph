@@ -21,11 +21,119 @@ Nothing yet. v1.1 scope is tracked in
 ## [v1.0] — TBD
 
 Placeholder. v1.0 final ships after a lighter-weight verification
-pass against v1.0-rc2 (steps 1, 2, and 7 of the tutorial — the
-beats the rc1 user-test gate hit blockers on) confirms the rc2
-fixes resolved the gate findings.
+pass against v1.0-rc3 (the same shape as the rc2 lighter pass,
+re-run against the rc3 PyPI artifact) confirms the rc3 fixes
+resolved the rc2 gate findings.
 
-Scope = v1.0-rc2 + any lighter-pass findings.
+Scope = v1.0-rc3 + any lighter-pass findings.
+
+## [v1.0-rc3] — 2026-05-18
+
+The lighter-user-test-findings milestone. Two findings from the
+[CONTRACT v1.0 #C4](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md)
+lighter pass against rc2 addressed; both surfaced
+discipline gaps that ship with new v1.1 CI gates institutionalizing
+the verification layer that caught them. No runtime capability
+changes; no public-API renames.
+
+### Added
+
+- **Wheel-completeness CI gate**
+  (`.github/workflows/wheel-completeness.yml` +
+  `tests/test_wheel_completeness.py`). CONTRACT v1.1 #8. Builds the
+  wheel via `python -m build`, installs it into a fresh venv (NOT
+  editable), runs `activegraph quickstart` against the installed
+  wheel, fails if any runtime data file is missing. Catches the
+  class of bug that's structurally invisible to source-tree tests
+  and editable installs. Marked `slow`; CI invokes via
+  `pytest -m slow tests/test_wheel_completeness.py`. To be
+  configured as a required status check on main per CONTRACT
+  v1.1 #8 implementation scope.
+- **Deploy-verification CI gate**
+  (`.github/workflows/deploy-verification.yml` +
+  `tests/test_doc_site_reachable.py`). CONTRACT v1.1 #9. Fetches
+  `DOCS_BASE_URL` + 4 known-good page paths, asserts HTTP 200
+  and that the response body contains `Active Graph` (the mkdocs
+  `site_name`). Failure-mode design distinguishes DNS failure,
+  HTTP 404, and content mismatch — each fails with a message that
+  names the operational step to fix it. The HTTP-reachability
+  complement to `tests/test_doc_links.py`, which is source-tree-
+  scoped only. Runs on push to main + daily cron (catches drift
+  if the site goes down without a code change). Required for
+  merge once GitHub Pages is enabled.
+
+### Changed
+
+- **B3 fix: `prompts/*.md` ship in the wheel.** The v1.0-rc2 user-
+  test gate surfaced that `pip install activegraph==1.0.0rc2`
+  followed by `activegraph quickstart` crashed with
+  `PackPromptLoadError: prompts directory does not exist`. Root
+  cause: `pyproject.toml` declared no
+  `[tool.setuptools.package-data]` block, so setuptools' default
+  behavior (ship only `.py` files) omitted the 4 `.md` prompt
+  files. Audit confirmed exactly 4 non-`.py` files in
+  `activegraph/`, all in `packs/diligence/prompts/`. Fix is a
+  single key/glob; rc3 #1 commit. The wheel-completeness gate
+  above is the enforcement layer that prevents this class from
+  recurring.
+- **Domain cutover: `docs.activegraph.dev` → `docs.activegraph.ai`.**
+  CONTRACT v1.0 #C6 amended (rc3 amendment block in CONTRACT.md).
+  Primary domain switched to the already-owned
+  `docs.activegraph.ai`. `.dev` becomes a redirect-source the
+  maintainer registers and configures separately (externally
+  owned). The codebase holds exactly one primary; the constant
+  `DOCS_BASE_URL` is the single swap point. Affected files:
+  `activegraph/errors.py` (constant), `docs/CNAME`, `mkdocs.yml`
+  (`site_url`), `README.md` (5 link refs), `CHANGELOG.md` (11 link
+  refs), `HANDOFF.md`, `docs/about/publishing.md`,
+  `examples/quickstart_session.txt`,
+  `.github/workflows/docs.yml` (comments). Error snapshots
+  rebaselined via `UPDATE_SNAPSHOTS=1` — 58 files. The cutover
+  pattern worked as designed: one constant change propagates to
+  every URL through `f"{DOCS_BASE_URL}/..."` interpolation.
+  `tests/test_doc_links.py` continues to recognize the .dev URL
+  form so historical CHANGELOG entries linking to .dev still pass
+  the source-presence check.
+
+### Externally owned (B4 findings; the gate is shipped, the
+operational steps are yours):
+
+- **GitHub Pages must be enabled on the repo.** Per rc3 step-4
+  investigation: `has_pages: false` is the smoking-gun finding;
+  the doc site at any URL 404s because there's nothing to serve.
+  Fix: Settings → Pages → Source: GitHub Actions. Precondition:
+  the repo must be public (free plan) or on GitHub Pro/Team
+  /Enterprise (paid). Until this lands, the v1.1 #9 deploy-
+  verification gate is red on every CI run; that's the correct
+  signal.
+- **DNS for `docs.activegraph.ai` must be configured.** CNAME
+  record pointing at `yoheinakajima.github.io` (the GitHub Pages
+  default subdomain). The v1.1 #9 gate's failure message names
+  this when DNS is the missing piece.
+- **`docs.activegraph.dev` redirect.** Register the .dev domain
+  and configure it to 301/302-redirect to
+  `docs.activegraph.ai`. Not strictly required for the v1.1 #9
+  gate to pass (gate only checks .ai), but needed for historical
+  CHANGELOG entries' .dev links to keep resolving for users.
+
+### Boundary shift (CONTRACT v1.1 framing):
+
+The two new gates each move the user-test boundary outward by one
+layer.
+
+- **v1.1 #8 (wheel-completeness):** after this gate lands, the
+  lighter user-test verifies the PyPI artifact (CDN, upload,
+  distribution) — not the wheel itself.
+- **v1.1 #9 (deploy-verification):** after this gate lands, the
+  lighter user-test verifies the published-domain experience
+  (does the README link land on a page that reads well? does
+  navigation feel right?) — not the basic reachability question
+  of "does this URL return 200."
+
+Same rc1-vs-rc2 discipline pattern noted in the CONTRACT entries:
+each rc surfaces a finding that's structurally invisible to the
+prior layer's CI; each rc institutionalizes the verification
+layer that caught it.
 
 ## [v1.0-rc2] — 2026-05-18
 
