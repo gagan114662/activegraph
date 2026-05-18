@@ -254,10 +254,16 @@ fork_rt.load_pack(
 )
 fork_rt.run_until_idle()
 fork_rt.save_state()
-print(f"forked: {FORK_RUN}")
+
+print(f"forked: {FORK_RUN}  (parent: {PARENT_RUN})")
+print(f"next:   activegraph diff {PARENT_URL} \\")
+print(f"            --run-a {PARENT_RUN} --run-b {FORK_RUN}")
 ```
 
-Then diff:
+The snippet does the fork half of fork-and-diff; the diff half is a
+CLI command that reads the same SQLite file from outside. The
+snippet's final two `print` lines spell out the exact command — copy
+it from the terminal output, or use the block below:
 
 ```bash
 activegraph diff sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db \
@@ -265,10 +271,13 @@ activegraph diff sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db \
     --run-b quickstart_cautious
 ```
 
-You'll see four counts (shared events, parent-only, fork-only,
-divergent objects) and a list of objects that exist in both runs
-with different state. The first divergent object is where the
-threshold change started producing different work.
+You'll see five counts (shared events, parent-only events, fork-only
+events, divergent objects, divergent relations) and a list of
+objects that exist in both runs with different state. On the
+bundled fixtures the diff produces 61 divergent objects and 49
+divergent relations — the threshold change fans out further than
+you'd guess. The first divergent object is where the threshold
+change started producing different work.
 
 What you just did: ran the same starting state through a different
 decision, and got a structural comparison of the results.
