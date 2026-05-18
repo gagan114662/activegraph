@@ -4,11 +4,10 @@ The v0.9 reference pack. Investment diligence: claims, evidence,
 contradictions, risks, memos. Three behaviors are LLM-backed;
 fixtures ship with the pack for reproducible demos.
 
-For the conceptual overview see
-[`packs/diligence`](../../packs/diligence.md) (forward-reference;
-lands with the packs section). For pack-authoring guidance using
-this pack as the reference see
-[Authoring packs](../../../guides/authoring-packs.md).
+For pack-authoring guidance using this pack as the reference see
+[Authoring packs](../../../guides/authoring-packs.md). A
+dedicated pack overview page lands post-merge alongside other
+pack documentation.
 
 ## Settings
 
