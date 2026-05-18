@@ -1,0 +1,53 @@
+# Deploy-verification CI gate. CONTRACT v1.1 #9.
+#
+# Fetches DOCS_BASE_URL and a small set of known-good page paths,
+# asserts HTTP 200 and that the body contains the mkdocs `site_name`.
+# Fails loud if the doc site is unreachable.
+#
+# This is the HTTP-reachability complement to tests/test_doc_links.py,
+# which is source-tree-scoped only. Two together: source presence
+# (always-green) + HTTP reachability (green once Pages is enabled
+# and DNS resolves).
+#
+# Triggers:
+#   - push to main (post-merge verification)
+#   - cron daily at 06:00 UTC (catches drift if the site goes down
+#     later without a code change — same failure-mode B4 exposed)
+#   - manual dispatch
+#
+# Pull-request trigger is intentionally omitted: branch PRs don't
+# change what's published, so per-PR runs would be noise. The push-
+# to-main trigger catches drift introduced by merges.
+#
+# This workflow is configured as a required status check on the
+# main branch ONCE Pages is enabled. Until then it runs as
+# advisory — its red signal is the discipline call to enable Pages
+# and configure DNS.
+
+name: deploy-verification
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  deploy-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package and pytest
+        # Editable install pulls in pydantic/click for the conftest
+        # import. The gate itself uses only stdlib (urllib) for the
+        # fetch, so no extra deps needed.
+        run: |
+          pip install pytest
+          pip install -e .
+      - name: Run deploy-verification gate
+        run: pytest -m slow tests/test_doc_site_reachable.py -v

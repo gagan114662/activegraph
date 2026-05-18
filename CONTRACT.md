@@ -4369,6 +4369,125 @@ by hand).
   (e.g., snippets used only by the docs build). Those aren't
   shipped in the wheel and are gated by other CI steps.
 
+## v1.1 #9. Deploy-verification CI gate (from user-test B4)
+
+The v1.0-rc2 user-test gate surfaced **B4**: the doc site at
+`https://yoheinakajima.github.io/activegraph/` (and at
+`docs.activegraph.dev` per the pre-rc3 primary) returned 404, and
+nobody noticed for the entire duration of the doc-site phase. Root
+cause per the rc3 #2 investigation: `has_pages: false` on the repo
+(GitHub Pages was never enabled) + `private: true` (private-repo
+Pages requires a paid GitHub plan). Both are externally-owned
+operational decisions; the agent flagged them and paused for the
+user's call.
+
+The deeper finding behind B4: `tests/test_doc_links.py` is scoped
+to source-tree presence, not HTTP reachability. Its own docstring
+called this out (*"a separate check can verify the rendered URLs
+resolve over HTTP"*) but the separate check never landed. The 404
+dwelled silently because every CI gate verified the docs `.md`
+source files existed, not that they were being served.
+
+v1.1 #9 closes the loop. Same shape as v1.1 #8: small, mechanical,
+prevents a class of regression.
+
+**Why this gate is in v1.1 and not v1.0:**
+
+v1.0's CI verified the docs source tree (`test_doc_links.py`); the
+doc site's *reachability* was assumed-without-checking. Same
+boundary as the B3 case: internal source-tree checks ship green,
+the external artifact is broken, the user-test catches it because
+no other layer exists to catch it. v1.1 #9 institutionalizes HTTP-
+reachability verification inside CI, which moves the user-test
+boundary outward by one more layer. After this gate lands, the
+lighter user-test verifies the published-domain experience as a
+whole (does the link from the README land on a page that reads
+well? does the navigation feel right?) — not the basic
+reachability question of "does this URL return 200."
+
+**Implementation scope:**
+
+- New test file: `tests/test_doc_site_reachable.py`. Imports
+  `DOCS_BASE_URL` from `activegraph.errors` so the test stays in
+  sync with the cutover constant. Fetches the base URL and a
+  small set of known-good page paths (`/quickstart`,
+  `/reference/errors/`, one per top-level section). Asserts
+  HTTP 200 and that the response body contains `Active Graph`
+  (the `site_name` from `mkdocs.yml` — broad enough to survive
+  theme changes, narrow enough that an unrelated catchall page
+  fails the check).
+- Marked `slow` so local `pytest` doesn't pay the network cost
+  on every invocation. CI invokes the test explicitly via
+  `pytest -m slow tests/test_doc_site_reachable.py`.
+- New workflow file: `.github/workflows/deploy-verification.yml`.
+  Runs on push to main (post-deploy verification) and on a
+  scheduled cron (catches drift if the site goes down later
+  without a code change). Pull-request trigger is intentionally
+  omitted — branch PRs don't change what's published, so running
+  the check per-PR is noise.
+- **Required for merge once Pages is enabled.** Same status as
+  the v1.1 #8 gate. The branch protection rule is the user-owned
+  flip; the workflow exists immediately, runs immediately, but
+  blocking only kicks in when the gate is stably green.
+- **Advisory until then.** The user's rc3 visibility decision was
+  "yes public but wait til fully ready" — meaning the gate WILL
+  be red on every rc3 CI run. The red signal is the discipline
+  call to action: the gate is green only when the doc site is
+  actually live. Until then, the gate's failure message names
+  the operational steps that close the gap (enable Pages,
+  configure DNS, register .dev redirect).
+
+**Failure-mode design:**
+
+When the gate fails, the failure message must distinguish the
+common cases so the maintainer doesn't have to debug:
+
+- DNS failure (host not found) -> "DNS for $DOCS_BASE_URL is not
+  resolving. Verify the CNAME record points at
+  yoheinakajima.github.io."
+- HTTP 404 -> "$DOCS_BASE_URL resolves but returns 404. Verify
+  GitHub Pages is enabled (Settings → Pages → Source: GitHub
+  Actions) and that the docs workflow's most recent deploy job
+  succeeded."
+- HTTP 200 but content mismatch -> "$DOCS_BASE_URL returns 200 but
+  the body does not contain 'Active Graph'. Verify the deploy
+  artifact is the framework's site, not a default Pages
+  landing page or a catchall."
+
+**What this gate does NOT do:**
+
+- It does not verify every URL in the docs site (link-rot
+  detection). That's a higher-frequency check (mkdocs's own link
+  checker, run during `mkdocs build`) and a different scope.
+  v1.1 #9 verifies the *site is reachable*; mkdocs verifies the
+  *site is internally consistent*.
+- It does not verify the doc site's rendering quality (broken
+  CSS, missing fonts, JS errors). That's a manual user-test
+  concern; the gate is a binary reachability check.
+- It does not verify the .dev redirect, since the redirect is
+  user-owned operational state outside the codebase. If you
+  want a redirect-correctness check, it lives in the same gate
+  later as a separate assertion ("GET docs.activegraph.dev
+  should 301/302 to docs.activegraph.ai") — adding it now would
+  fail loudly during the period before you register .dev.
+
+**Edge cases:**
+
+- CI without outbound network: GitHub Actions runners have
+  network access; if the test ever runs in an air-gapped
+  environment (some forks of the workflow), it will fail with a
+  connect error, which is correct — the gate cannot verify what
+  it cannot reach.
+- Transient site outage: a single fetch failure shouldn't be
+  enough to fail the gate. The test retries on connection
+  errors (3 attempts, exponential backoff) before giving up.
+  HTTP 404 / 500 status codes are not retried — those are real
+  failures, not transient.
+- Rate-limiting from GitHub Pages: unlikely at the gate's
+  frequency (cron + post-merge), but the test uses a 10-second
+  timeout per request so a hung connection fails the gate
+  rather than the workflow.
+
 ## v1.1 #7 and beyond
 
 The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series
