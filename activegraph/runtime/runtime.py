@@ -2278,20 +2278,53 @@ def _requeue_unfired(rt: "Runtime", events: list[Event]) -> None:
 
     See CONTRACT v0.5 diff #8 in CONTRACT.md for the rationale.
 
-    INVARIANT (v0.5 only): under the single-threaded, run-to-completion loop
+    INVARIANT: under the single-threaded, run-to-completion loop
     (CONTRACT #10), an event has either been popped — in which case ALL
     matching behaviors have already had behavior.started emitted on it, or
     the runtime crashed before the loop could pop the next event. There is
-    no partial-fanout state. So "no behavior.started ever referenced this
-    event id" is equivalent to "this event was still in the queue when the
-    runtime stopped". When v1 introduces parallelism (decision #16: out of
-    scope for v0.5), this heuristic breaks — a fanout where 2 of 5 matched
-    behaviors started before the crash would be re-queued, double-firing
-    the 2 that did start. Revisit this function at the same time as the
-    parallel-loop redesign.
+    no partial-fanout state.
+
+    The naive inference "no behavior.started ever referenced this event id"
+    ⟹ "this event was still in the queue when the runtime stopped" is false:
+    an event with zero matching subscribers is popped-and-discarded with no
+    behavior.started emitted. In a real run, the majority of events
+    (llm.requested, llm.responded, tool.requested, tool.responded,
+    relation.created, patch.applied, downstream object.created) have no
+    subscribers and would be falsely requeued. The bug surface is
+    `runtime.status().queue_depth` reading e.g. 416 on a freshly loaded
+    cleanly-drained run (CONTRACT v1.0 user-test finding C3).
+
+    The fix uses `runtime.idle` as the high-water mark. The runtime emits
+    `runtime.idle` only after the queue empties (see `_emit_idle_or_exhausted`);
+    every event at or before the last `runtime.idle` has by definition been
+    popped. Only events emitted after the last `runtime.idle` are candidates
+    for "still in queue when the runtime stopped."
+
+    `runtime.budget_exhausted` is NOT a drain marker. It fires when the
+    budget hits while the queue may still have events; those un-popped
+    events are exactly the resume-recovery cases v0.5 #8 was designed for.
+    Using `runtime.budget_exhausted` as a high-water mark would break
+    budget-bounded pause-and-resume (a documented v0.5 contract surface).
+
+    When v1 introduces parallelism (decision #16: out of scope for v0.5),
+    this still holds — `runtime.idle` fires only when the queue is empty
+    regardless of loop concurrency. The double-fire-from-partial-fanout
+    concern documented in the original v0.5 invariant is still real for
+    a crash mid-fanout, but that's bounded to events after the last idle,
+    not the whole log.
     """
+    # Find the highest index of a runtime.idle event. Events at or before
+    # that index were necessarily processed-and-drained; only the suffix
+    # can hold unprocessed events.
+    drain_idx: int = -1
+    for i, e in enumerate(events):
+        if e.type == "runtime.idle":
+            drain_idx = i
+    suffix = events[drain_idx + 1:]
+    if not suffix:
+        return
     fired_on: set[str] = set()
-    for e in events:
+    for e in suffix:
         if (
             e.type.startswith("behavior.")
             or e.type.startswith("relation_behavior.")
@@ -2299,7 +2332,7 @@ def _requeue_unfired(rt: "Runtime", events: list[Event]) -> None:
             eid = e.payload.get("event_id") if isinstance(e.payload, dict) else None
             if eid:
                 fired_on.add(eid)
-    for e in events:
+    for e in suffix:
         if _is_lifecycle(e):
             continue
         if e.id in fired_on:
