@@ -60,6 +60,16 @@ amendment.
   `docs/concepts/*.md` navigation 1:1; complements but does not
   duplicate "What you get" (which is feature-oriented; the new
   section is primitive-oriented).
+- **Deploy-verification workflow gains a `pull_request` trigger.**
+  Discovered at v1.0 final merge time: the gate (CONTRACT v1.1 #9)
+  ran on push-to-main and cron but not on PR events, so the
+  required-status-check rule on branch protection had nothing to
+  match against on the PR. A `workflow_dispatch` run reported under
+  a different context name and didn't satisfy the rule. Adding
+  `pull_request:` to the workflow's `on:` triggers lets the check
+  report alongside the other CI gates on every PR; the existing
+  push and cron triggers continue to run unchanged. Config-only
+  change; the gate's logic is untouched.
 
 ### Fixed
 

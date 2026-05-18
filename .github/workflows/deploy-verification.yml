@@ -11,13 +11,13 @@
 #
 # Triggers:
 #   - push to main (post-merge verification)
+#   - pull_request (so the check reports on PR events and can serve
+#     as a required status check on merge — added during the v1.0
+#     final merge when branch protection couldn't match the
+#     workflow_dispatch context's check name)
 #   - cron daily at 06:00 UTC (catches drift if the site goes down
 #     later without a code change — same failure-mode B4 exposed)
 #   - manual dispatch
-#
-# Pull-request trigger is intentionally omitted: branch PRs don't
-# change what's published, so per-PR runs would be noise. The push-
-# to-main trigger catches drift introduced by merges.
 #
 # This workflow is configured as a required status check on the
 # main branch ONCE Pages is enabled. Until then it runs as
@@ -29,6 +29,7 @@ name: deploy-verification
 on:
   push:
     branches: [main]
+  pull_request:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
