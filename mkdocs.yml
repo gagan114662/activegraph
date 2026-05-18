@@ -83,8 +83,12 @@ strict: false
 nav:
   - Home: index.md
   - Concepts:
-      - Failure model: concepts/failure-model.md
+      - Graph: concepts/graph.md
+      - Events: concepts/events.md
+      - Behaviors: concepts/behaviors.md
+      - Relations: concepts/relations.md
       - Pattern subscriptions: concepts/patterns.md
+      - Failure model: concepts/failure-model.md
   - Guides:
       - Operating in production: guides/operating-in-production.md
       - Authoring packs: guides/authoring-packs.md
