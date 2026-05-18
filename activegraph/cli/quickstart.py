@@ -345,18 +345,25 @@ def _prepare_interactive_subdir(stream: TextIO, prompt_fn) -> Optional[Path]:
         f"  [s] suffix the new one (my_first_behavior_2.py, etc.)\n"
         f"  [q] quit\n"
     )
-    choice = prompt_fn("choose [o/s/q]: ", default="s").strip().lower()
-    if choice == "q":
-        return None
-    if choice == "o":
-        return behavior_file
-    # Default to suffix on anything not explicitly 'o' or 'q'.
-    n = 2
+    # Re-prompt on unrecognized input. Pre-rc2 behavior fell through
+    # to suffix on any non-o/q input, which swallowed typeahead from
+    # the next step's prompt (CONTRACT v1.0-rc2 finding M1). Mirrors
+    # the iteration loop's "(unrecognized: ...; type X or Y)" pattern
+    # below so the interactive flow's two prompts have the same voice.
     while True:
-        candidate = subdir / f"my_first_behavior_{n}.py"
-        if not candidate.exists():
-            return candidate
-        n += 1
+        choice = prompt_fn("choose [o/s/q]: ", default="s").strip().lower()
+        if choice == "q":
+            return None
+        if choice == "o":
+            return behavior_file
+        if choice == "s" or choice == "":
+            n = 2
+            while True:
+                candidate = subdir / f"my_first_behavior_{n}.py"
+                if not candidate.exists():
+                    return candidate
+                n += 1
+        stream.write(f"(unrecognized: {choice!r}; choose o, s, or q)\n")
 
 
 def run_interactive_mode(
