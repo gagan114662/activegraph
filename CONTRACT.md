@@ -4228,6 +4228,19 @@ above):
 - The 4 deferred DB-error wrappers from CONTRACT v1.0 PR-C.
 - The 2 internal-evaluator errors needing framework-version
   context from CONTRACT v1.0 PR-G.
+- **Fork cache pre-population symmetry** (discovered during
+  v1.0-rc2 #4/8 B2 fix). `Runtime.fork(at_event=...)` in-process
+  pre-populates the LLM cache from the parent's recorded
+  `llm.responded` events (CONTRACT v0.6 #8). The persistent shape
+  (`SQLiteEventStore.fork_run()` followed by `Runtime.load(...,
+  run_id=<fork>)`) does not — the loaded fork sees only the
+  fork's events, which end at the fork point. Forks via the
+  persistent shape replay their LLM behaviors against the live
+  provider rather than the cache. The two paths should be
+  symmetric: `Runtime.load` of a fork run should look up the
+  parent's `forked_at_event_id` (already on the runs row) and
+  pre-populate the cache from the parent's events through that
+  point. New runtime behavior, banned in v1.0; opens up in v1.1.
 - Any additional v1.0-rc2 user-test findings (the lighter
   verification pass after rc2 lands).
 

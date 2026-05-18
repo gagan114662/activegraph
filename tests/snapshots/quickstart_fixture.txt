@@ -724,9 +724,10 @@ Memos for Stellar Logistics, Pinecone Bio were produced under the same contract.
      against a real provider would show real costs and latencies.
 
      (The framework also has a separate replay cache that records
-     llm.responded events and serves them back on fork or replay —
-     that's where `cache_hit=true` appears in the trace. Different
-     layer; you'll see it if you fork this run.)
+     llm.responded events and serves them back under strict-replay mode
+     or in-process Runtime.fork() — that's where `cache_hit=true` appears
+     in the trace. Different layer from the provider; see the
+     concepts/replay and concepts/forking pages for the deep dive.)
 
   4. Each memo cites evidence for every claim, surfaces at least one
      risk, and either lists open contradictions or states explicitly
