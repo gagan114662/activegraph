@@ -5,12 +5,15 @@
 # checker (tests/test_doc_links.py) is the burndown meter for the
 # doc-site phase.
 #
-# Custom domain: docs.activegraph.dev (CONTRACT v1.0 #C6). Until
-# DNS is live, the site serves on the github.io fallback. The
-# `docs/CNAME` file is the trigger for the custom-domain swap.
+# Custom domain: docs.activegraph.ai (CONTRACT v1.0 #C6, v1.0-rc3
+# amendment — primary domain switched from .dev to .ai). Until DNS
+# is live (and Pages is enabled on the repo), the site is
+# unreachable; the v1.1 #9 deploy-verification gate is the failure
+# signal until that lands. The `docs/CNAME` file is the trigger for
+# the custom-domain swap once Pages is up.
 
 site_name: Active Graph
-site_url: https://docs.activegraph.dev/
+site_url: https://docs.activegraph.ai/
 site_description: An event-sourced reactive graph runtime for long-running, auditable, agentic systems.
 site_author: Active Graph contributors
 

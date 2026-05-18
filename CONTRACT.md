@@ -2439,6 +2439,47 @@ reach. v1.0:
   message URLs plus a one-line CNAME update. Documented in the
   CHANGELOG so the swap is reproducible.
 
+**v1.0-rc3 amendment: primary domain switched from
+`activegraph.dev` to `activegraph.ai`.** Same cutover pattern,
+different target. `activegraph.ai` is already owned;
+`activegraph.dev` will be registered and configured as a redirect
+to the primary (the registration is externally owned; the redirect
+is a server-side concern, not a codebase concern). The codebase
+holds exactly one primary domain — `docs.activegraph.ai` — and the
+constant `DOCS_BASE_URL` is the swap point as before.
+
+Concrete effects of the rc3 amendment:
+
+- `docs/CNAME` updated to `docs.activegraph.ai`.
+- `mkdocs.yml` `site_url` updated to `https://docs.activegraph.ai/`.
+- `activegraph.errors.DOCS_BASE_URL` updated to
+  `https://docs.activegraph.ai`. Every error message URL and every
+  `DOCS_BASE_URL`-derived f-string updates with it.
+- README, CHANGELOG, HANDOFF, and `docs/about/publishing.md`
+  references updated to the primary domain.
+- `tests/test_doc_links.py` continues to recognize the old
+  `docs.activegraph.dev` URLs as valid (so historical CHANGELOG
+  entries' .dev URLs still pass the source-presence check). The
+  new primary `docs.activegraph.ai` is added; both resolve to the
+  same `docs/` source tree.
+- Error snapshots regenerated under the new `DOCS_BASE_URL` via
+  `UPDATE_SNAPSHOTS=1`. The regenerated snapshots are the new
+  contract baseline for the format gate.
+
+Discipline note on what this amendment does NOT do:
+
+- It does not retroactively rewrite historical CONTRACT entries
+  that referenced `docs.activegraph.dev`. Those entries are records
+  of what was decided at the time and stay accurate as history.
+  Forward-looking spec text (the URL pattern for error pages, the
+  current-state description of where the site serves) is updated.
+- It does not assume the `.dev` redirect is live. The codebase
+  ships with `.ai` as the primary; the `.dev` redirect is a
+  user-owned operational step that lands separately. Until it
+  does, users who type the old `.dev` URL by hand hit the same
+  404 the rc2 user-test surfaced — the fix is the redirect, not
+  more codebase changes.
+
 ### v1.0 #C7. v0.9.1 lands before v1.0 PR-A
 
 The two follow-ups (granular approval-demo output, prompt_normalized
@@ -2549,11 +2590,11 @@ How to fix:
   <concrete action the developer can take>
 
 More:
-  https://docs.activegraph.dev/errors/<error-class-slug>
+  https://docs.activegraph.ai/errors/<error-class-slug>
 ```
 
 Snapshot-tested per-error-class. Doc URL must resolve to a real
-page; broken links fail CI. Until DNS for `docs.activegraph.dev` is
+page; broken links fail CI. Until DNS for `docs.activegraph.ai` is
 live, the URL renders as the github.io fallback (#C6) and the swap
 is the documented cutover.
 

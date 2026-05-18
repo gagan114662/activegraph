@@ -14,4 +14,4 @@ How to fix:
   For Postgres-native forking, file an issue — the primitive shape (transactional copy of events up to a seq cutoff) is known, and a contributor with Postgres operational experience could land it as a v1.1 follow-on.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/incompatible-runtime-state
+  https://docs.activegraph.ai/errors/incompatible-runtime-state

@@ -3,7 +3,7 @@
 This document is the working context for the next session (human or
 agent) picking up v1.0 final work. It's a working artifact, not a
 user-facing reference — the doc site at
-[docs.activegraph.dev](https://docs.activegraph.dev/) is for users;
+[docs.activegraph.ai](https://docs.activegraph.ai/) is for users;
 this is for whoever drives the framework forward from here.
 
 Read it first. Then read CONTRACT.md. Then start.

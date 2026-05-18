@@ -16,4 +16,4 @@ How to fix:
   For pack-scoped tools, use the canonical name `'pack_name.tool_name'` in the @llm_behavior's `tools=[...]` argument.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/missing-tool-error
+  https://docs.activegraph.ai/errors/missing-tool-error

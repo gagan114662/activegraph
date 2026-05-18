@@ -743,8 +743,8 @@ Memos for Stellar Logistics, Pinecone Bio were produced under the same contract.
 
   See your run:        activegraph inspect sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db
   Write a behavior:    activegraph quickstart --interactive
-  Read the tutorial:   https://yoheinakajima.github.io/activegraph/quickstart
-  Concept: the graph:  https://yoheinakajima.github.io/activegraph/concepts/graph
-  Concept: behaviors:  https://yoheinakajima.github.io/activegraph/concepts/behaviors
-  Common patterns:     https://yoheinakajima.github.io/activegraph/cookbook/common-patterns
+  Read the tutorial:   https://docs.activegraph.ai/quickstart
+  Concept: the graph:  https://docs.activegraph.ai/concepts/graph
+  Concept: behaviors:  https://docs.activegraph.ai/concepts/behaviors
+  Common patterns:     https://docs.activegraph.ai/cookbook/common-patterns
 

@@ -12,4 +12,4 @@ How to fix:
   Either add 'web_search' to the @llm_behavior's `tools=[...]` list (and confirm the tool is registered with @tool), or adjust the prompt so the model stops asking for it. If the model is consistently asking for an undeclared tool, the prompt may be implying capabilities the behavior doesn't have — be explicit about which tools are available.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/unknown-tool-error
+  https://docs.activegraph.ai/errors/unknown-tool-error

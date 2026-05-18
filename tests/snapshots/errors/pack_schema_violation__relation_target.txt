@@ -13,4 +13,4 @@ How to fix:
     - Remove `target_types=` to accept any target type.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/pack-schema-violation
+  https://docs.activegraph.ai/errors/pack-schema-violation

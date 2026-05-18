@@ -5,12 +5,12 @@ All notable changes to **activegraph** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Per-version migration notes reference the
-[Migration from v0.7](https://docs.activegraph.dev/cookbook/migration-from-v0-7/)
+[Migration from v0.7](https://docs.activegraph.ai/cookbook/migration-from-v0-7/)
 cookbook, the canonical runbook for upgrading runs and code across
 milestones.
 
 The doc site mirrors this file at
-[Changelog](https://docs.activegraph.dev/about/changelog/) via the
+[Changelog](https://docs.activegraph.ai/about/changelog/) via the
 mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 
 ## [Unreleased]
@@ -39,7 +39,7 @@ v0.5. No new runtime capability; no public-API renames.
 - **PyPI publish workflow** (`.github/workflows/publish.yml`).
   Tag-push trigger matching `v*` triggers `python -m build` then
   upload via PyPI trusted publishing (OIDC-based). Documented in
-  [Publishing a release](https://docs.activegraph.dev/about/publishing/).
+  [Publishing a release](https://docs.activegraph.ai/about/publishing/).
   Externally owned per
   [CONTRACT v1.0 #C8](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md)
   — the agent ships the workflow, the maintainer runs the publish.
@@ -166,8 +166,8 @@ extend the framework without reading source code."
 - **Per-error reference catalog.** Every error message ends with a
   `More:` link to a dedicated page documenting when it fires, why,
   how to diagnose, and how to fix. Catalog at
-  [docs.activegraph.dev/reference/errors](https://docs.activegraph.dev/reference/errors/replay-divergence-error/).
-- **Documentation site at [docs.activegraph.dev](https://docs.activegraph.dev/)**:
+  [docs.activegraph.ai/reference/errors](https://docs.activegraph.ai/reference/errors/replay-divergence-error/).
+- **Documentation site at [docs.activegraph.ai](https://docs.activegraph.ai/)**:
   concepts pages for every primitive (graph, events, behaviors,
   relations, patches, views, frames, policies, patterns, replay,
   forking, failure model); guides; cookbook (common patterns,
@@ -178,7 +178,7 @@ extend the framework without reading source code."
   `--interactive` mode walks the user through writing their first
   behavior.
 - **10-minute tutorial at
-  [docs.activegraph.dev/quickstart](https://docs.activegraph.dev/quickstart/).**
+  [docs.activegraph.ai/quickstart](https://docs.activegraph.ai/quickstart/).**
   Install → run → write a behavior → save and inspect → fork and
   diff. Seven steps; every example runs.
 - **CI gates on the public surface.** Version-sync gate
@@ -226,7 +226,7 @@ surfaced during the error-rewrite audits were removed.
 ### Migration from v0.9.1
 
 Additive. See
-[Migration from v0.7 § 5–6](https://docs.activegraph.dev/cookbook/migration-from-v0-7/#5-adopt-the-v10-error-hierarchy-v09--v10):
+[Migration from v0.7 § 5–6](https://docs.activegraph.ai/cookbook/migration-from-v0-7/#5-adopt-the-v10-error-hierarchy-v09--v10):
 
 ```python
 # v1.0 — broader catches with structured context:
@@ -246,7 +246,7 @@ lineage.
 
 - `fork --set <pack>.<key>=<value>` for cheap fork-with-override
   experiments (CONTRACT v1.1 #1; canonical Python-API recipe at
-  [Cookbook § Fork with a pack-setting override](https://docs.activegraph.dev/cookbook/common-patterns/#fork-with-a-pack-setting-override-v10-python-api)).
+  [Cookbook § Fork with a pack-setting override](https://docs.activegraph.ai/cookbook/common-patterns/#fork-with-a-pack-setting-override-v10-python-api)).
 - `inspect --memo` and `inspect --search` (CONTRACT v1.1 #1).
 - Type-completeness burndown — close the 16 dirty allowlist
   modules (CONTRACT v1.1 #3,
@@ -313,7 +313,7 @@ behaviors, tools, prompts, and policies for a specific domain.
   end-to-end demo at
   [`examples/diligence_real_run.py`](https://github.com/yoheinakajima/activegraph/blob/main/examples/diligence_real_run.py).
 - Pack authoring guide at
-  [Authoring packs](https://docs.activegraph.dev/guides/authoring-packs/).
+  [Authoring packs](https://docs.activegraph.ai/guides/authoring-packs/).
 
 ### Changed
 
@@ -327,7 +327,7 @@ behaviors, tools, prompts, and policies for a specific domain.
 ### Migration from v0.8
 
 Additive. See
-[Migration from v0.7 § 4](https://docs.activegraph.dev/cookbook/migration-from-v0-7/#4-adopt-the-pack-format-v08--v09).
+[Migration from v0.7 § 4](https://docs.activegraph.ai/cookbook/migration-from-v0-7/#4-adopt-the-pack-format-v08--v09).
 Global decorators (`@behavior`, `@tool`) keep working alongside
 loaded packs; the pack format is opt-in for new code.
 
@@ -357,12 +357,12 @@ the framework and the world it runs in.
   `export-trace`, `migrate`. CLI exit codes documented as
   contract.
 - Operator guide at
-  [Operating in production](https://docs.activegraph.dev/guides/operating-in-production/).
+  [Operating in production](https://docs.activegraph.ai/guides/operating-in-production/).
 
 ### Migration from v0.7
 
 Additive. See
-[Migration from v0.7 § 3, 7, 8](https://docs.activegraph.dev/cookbook/migration-from-v0-7/#3-adopt-connection-urls-v07--v08).
+[Migration from v0.7 § 3, 7, 8](https://docs.activegraph.ai/cookbook/migration-from-v0-7/#3-adopt-connection-urls-v07--v08).
 Old SQLite path arguments (`persist_to="/path/to.db"`) keep
 working; URLs are required for CLI and cross-store operations.
 

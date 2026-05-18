@@ -14,4 +14,4 @@ How to fix:
       activegraph inspect <store> --event <behavior.failed-id>
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/llm-behavior-error
+  https://docs.activegraph.ai/errors/llm-behavior-error

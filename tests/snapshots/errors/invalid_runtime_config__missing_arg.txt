@@ -17,4 +17,4 @@ How to fix:
   For ephemeral runs that should not persist, omit save_state() — the in-memory graph is the run's lifetime.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-runtime-configuration
+  https://docs.activegraph.ai/errors/invalid-runtime-configuration

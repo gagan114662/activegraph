@@ -16,4 +16,4 @@ How to fix:
     internal location:   activegraph/core/graph.py:evaluate_where
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/internal-evaluator-error
+  https://docs.activegraph.ai/errors/internal-evaluator-error

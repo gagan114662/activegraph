@@ -24,4 +24,4 @@ How to fix:
            if ot.name == 'claim').schema.model_json_schema()
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/pack-schema-violation
+  https://docs.activegraph.ai/errors/pack-schema-violation

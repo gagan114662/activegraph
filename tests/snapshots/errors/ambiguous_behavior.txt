@@ -13,4 +13,4 @@ How to fix:
   If you wanted both packs' behaviors to fire together under the same trigger, they are registered separately in the runtime — both will fire on a matching event regardless of which one your lookup names. The lookup is for explicit by-name access, not for trigger dispatch.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/ambiguous-behavior-error
+  https://docs.activegraph.ai/errors/ambiguous-behavior-error

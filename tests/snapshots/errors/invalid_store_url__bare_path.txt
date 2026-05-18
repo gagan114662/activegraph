@@ -14,4 +14,4 @@ How to fix:
       postgres://host/dbname
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-store-url-error
+  https://docs.activegraph.ai/errors/invalid-store-url-error

@@ -21,4 +21,4 @@ How to fix:
       activegraph inspect <parent-run> --event evt_042
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/replay-divergence-error
+  https://docs.activegraph.ai/errors/replay-divergence-error

@@ -18,4 +18,4 @@ How to fix:
   Schema version history is documented in CHANGELOG.md.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/schema-version-mismatch
+  https://docs.activegraph.ai/errors/schema-version-mismatch

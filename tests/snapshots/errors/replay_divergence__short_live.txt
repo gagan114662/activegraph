@@ -17,4 +17,4 @@ How to fix:
   divergence point to refresh the recording. If unintentional, revert.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/replay-divergence-error
+  https://docs.activegraph.ai/errors/replay-divergence-error

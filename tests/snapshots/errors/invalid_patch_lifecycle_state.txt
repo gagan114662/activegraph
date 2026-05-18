@@ -6,7 +6,7 @@ What failed:
 Why:
   Patches are one-shot: a 'proposed' patch becomes 'applied' (success) or 'rejected' (refusal) exactly once. Re-applying an already-applied patch would emit a duplicate `patch.applied` event, which would break the replay contract — replay would produce a different event stream than the original run. The framework refuses re-application rather than emit the duplicate.
 
-  See https://yoheinakajima.github.io/activegraph/concepts/failure-model for the patch-lifecycle invariants.
+  See https://docs.activegraph.ai/concepts/failure-model for the patch-lifecycle invariants.
 
 How to fix:
   Check the patch's current status before applying:
@@ -17,4 +17,4 @@ How to fix:
   If the patch is already applied and the caller wants a new mutation, propose a new patch — patches don't get re-used.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-patch-lifecycle-state
+  https://docs.activegraph.ai/errors/invalid-patch-lifecycle-state

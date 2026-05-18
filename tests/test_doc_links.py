@@ -41,17 +41,27 @@ CONTRACT_PATH = REPO_ROOT / "CONTRACT.md"
 README_PATH = REPO_ROOT / "README.md"
 
 
-# Either base URL (the github.io fallback or the eventual custom
-# domain) maps to the same docs/ source tree. CONTRACT v1.0 #C6
-# locks the cutover as a one-line edit; this checker tolerates both
-# during the transition.
+# Any of three base URLs maps to the same docs/ source tree:
+#   - DOCS_BASE_URL (the current primary, docs.activegraph.ai per
+#     CONTRACT v1.0 #C6 v1.0-rc3 amendment)
+#   - docs.activegraph.dev (the previous primary; user-owned redirect
+#     to .ai is a separate operational step, but historical CHANGELOG
+#     entries and old user-facing links still point here and must
+#     still pass the source-presence check)
+#   - github.io fallback (the pre-DNS fallback shape from the
+#     original CONTRACT v1.0 #C6, kept recognized so any legacy
+#     reference still resolves)
+# This checker is source-tree-scoped, not HTTP-scoped — the v1.1 #9
+# deploy-verification gate covers live URL reachability.
 _KNOWN_DOCS_BASES = (
     DOCS_BASE_URL,
+    "https://docs.activegraph.ai",
     "https://docs.activegraph.dev",
+    "https://yoheinakajima.github.io/activegraph",
 )
 
 _DOCS_URL_RE = re.compile(
-    r"https?://(?:docs\.activegraph\.dev|yoheinakajima\.github\.io/activegraph)"
+    r"https?://(?:docs\.activegraph\.(?:ai|dev)|yoheinakajima\.github\.io/activegraph)"
     r"(/[^\s)\"'>`]*)?"
 )
 
@@ -281,8 +291,8 @@ def test_docs_base_url_is_centralized() -> None:
             "\n" + (
                 f"{len(hardcoded)} hardcoded docs-site URL(s) in activegraph/. "
                 f"Use `from activegraph.errors import DOCS_BASE_URL` and "
-                f"interpolate via f-string so the cutover from github.io "
-                f"fallback to docs.activegraph.dev is a one-line change.\n"
+                f"interpolate via f-string so the cutover to "
+                f"docs.activegraph.ai is a one-line change.\n"
                 + report
             ),
             pytrace=False,

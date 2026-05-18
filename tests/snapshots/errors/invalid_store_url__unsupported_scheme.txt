@@ -14,4 +14,4 @@ How to fix:
   Other databases are not supported in v1.0; the EventStore protocol in activegraph/store/base.py is the path for adding new backends.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-store-url-error
+  https://docs.activegraph.ai/errors/invalid-store-url-error

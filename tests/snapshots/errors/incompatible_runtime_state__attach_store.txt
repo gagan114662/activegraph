@@ -13,4 +13,4 @@ How to fix:
   If the graph is fresh and the existing store is a placeholder (e.g., from a test fixture), construct a new Graph rather than re-attaching.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/incompatible-runtime-state
+  https://docs.activegraph.ai/errors/incompatible-runtime-state

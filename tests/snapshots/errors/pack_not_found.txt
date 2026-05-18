@@ -20,4 +20,4 @@ How to fix:
       your_pack = "your_pack_module:pack"
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/pack-not-found-error
+  https://docs.activegraph.ai/errors/pack-not-found-error

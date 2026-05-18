@@ -16,4 +16,4 @@ How to fix:
   If the type really should serialize, add an adapter clause to ``_default`` in activegraph/store/serde.py (Decimal and datetime are precedents).
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/non-serializable-event-error
+  https://docs.activegraph.ai/errors/non-serializable-event-error

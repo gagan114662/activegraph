@@ -11,4 +11,4 @@ How to fix:
   If the timeout is too aggressive for the expected work, raise the tool's `timeout_seconds`. If the timeout is hitting because the endpoint is slow under contention, the right answer is usually a narrower retry policy in the calling behavior rather than a higher ceiling.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/tool-error
+  https://docs.activegraph.ai/errors/tool-error

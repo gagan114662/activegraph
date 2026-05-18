@@ -13,4 +13,4 @@ How to fix:
   If you don't need PostgresEventStore, the bare `activegraph` install does not depend on 'psycopg' — the error only fires when the subsystem is actually used.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/missing-optional-dependency
+  https://docs.activegraph.ai/errors/missing-optional-dependency

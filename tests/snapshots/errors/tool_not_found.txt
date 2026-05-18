@@ -13,4 +13,4 @@ How to fix:
   For canonical lookups across packs, use `'pack_name.tool_name'`.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/tool-not-found-error
+  https://docs.activegraph.ai/errors/tool-not-found-error

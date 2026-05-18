@@ -13,4 +13,4 @@ How to fix:
   If you want the @llm_behavior to be able to choose either pack's version, list both canonical names in its `tools=[...]` argument.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/ambiguous-tool-error
+  https://docs.activegraph.ai/errors/ambiguous-tool-error

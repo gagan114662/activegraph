@@ -10,4 +10,4 @@ How to fix:
   Event ids in normal use come from the runtime's monotonic id generator (IDGen) and cannot collide. A duplicate almost always means a test fixture is hand-constructing events with fixed ids and a previous test left state behind. Use IDGen to generate ids, or call `clear_registry()` / construct a fresh Graph between tests.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/duplicate-event-error
+  https://docs.activegraph.ai/errors/duplicate-event-error
