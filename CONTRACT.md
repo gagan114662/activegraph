@@ -3956,15 +3956,71 @@ trust in the doc site instantly. The gate keeps the trust
 contract by making spec-vs-impl drift a CI-blocking finding,
 same shape as the broken-link gate did for URLs.
 
-## v1.1 #3 and beyond
+## v1.1 #3. Type-completeness on the public-surface allowlist
+
+CONTRACT v1.0 #C5's mypy --strict gate baselines at 22/38
+allowlist modules clean (57.9% of the public surface).
+``docs/reference/api/TYPE_REPORT.md`` enumerates the 16 dirty
+modules with their per-module error categories. The v1.1
+type-completeness follow-on closes that gap in one PR series.
+
+**The audit's converged classification.** Mypy's view of a module
+depends on which siblings are in scope: with ``follow_imports =
+"skip"`` and ``files = [N clean modules]``, every import outside
+``files`` is Any. Adding or removing a module from ``files`` can
+flip sibling modules between clean and dirty. The audit
+(``scripts/audit_types.py``) converges to the largest stable set
+by iteratively removing modules with findings until the set is
+fixed under one mypy invocation. The pyproject ``files`` and
+``[[tool.mypy.overrides]]`` lists are exactly that converged set.
+
+**The 16 dirty modules** (TYPE_REPORT categories shown for
+triage; full breakdown in the report):
+
+- The bulk are mechanical fixes — ``no-untyped-def`` (missing
+  annotations on internal helpers), ``type-arg`` (unparameterised
+  generics like bare ``dict``), ``no-any-return`` (returning a
+  value typed Any from a function whose return type is
+  concrete).
+- A smaller tail needs per-case judgment — ``attr-defined``
+  (genuine missing attribute, usually a Protocol gap),
+  ``arg-type`` (a real type mismatch that needs a Union or a
+  TypeGuard), ``misc`` (subclassing Any, etc.).
+
+The mechanical categories are most of the work. The v1.1 PR
+series closes them in 3-5 commits grouped by category: one
+commit for ``no-untyped-def``, one for ``type-arg``, one or
+two for ``no-any-return``, one for the tail.
+
+**Re-baseline discipline.** When a dirty module is fixed:
+
+1. Run ``python scripts/audit_types.py``. The converged clean
+   set updates; the report regenerates.
+2. Add the now-clean module to both ``files`` and the per-module
+   ``[[tool.mypy.overrides]]`` strict block in pyproject.toml.
+3. Run ``mypy`` to confirm the gate still passes with the
+   expanded set.
+
+The gate's purpose isn't to be strict everywhere — it's to
+prevent regression on the surface that's already clean. Each
+dirty module fixed and added to the gate is a one-way
+ratchet.
+
+**v1.1 milestone end state.** All 38 allowlist modules in the
+gate; mypy --strict at 100% across the public surface; the
+audit script retained as a regression check for future
+allowlist expansions (new pack ``__all__`` entries, new public
+re-exports).
+
+## v1.1 #4 and beyond
 
 The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series
 tally and the existing v1.1 error-completeness milestone notes
 above):
 
 - v1.0-rc1 documented gaps not yet itemized here — additional
-  gaps may surface during the remaining rc1 commits (mypy gate,
-  docstring gate, changelog).
+  gaps may surface during the remaining rc1 commits (docstring
+  gate, changelog).
 - The 22 partial Pack* migrations from CONTRACT v1.0 PR-E.
 - The 4 deferred DB-error wrappers from CONTRACT v1.0 PR-C.
 - The real-user-test gate findings (CONTRACT v1.0 #C4), once it

@@ -1,0 +1,45 @@
+# Type-check the public-surface allowlist with mypy --strict.
+# CONTRACT v1.0 #C5.
+#
+# The gate's scope is the converged set of allowlist modules whose
+# mypy --strict findings are zero today. New regressions on those
+# modules fail the gate; dirty modules (one or more findings) aren't
+# checked here — they're tracked in docs/reference/api/TYPE_REPORT.md
+# and closed in the v1.1 type-completeness follow-on.
+#
+# To regenerate the baseline locally:
+#   python scripts/audit_types.py
+# Then update pyproject's [tool.mypy] files and overrides if the
+# converged clean set has changed.
+
+name: types
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "activegraph/**"
+      - "pyproject.toml"
+      - ".github/workflows/types.yml"
+  pull_request:
+    paths:
+      - "activegraph/**"
+      - "pyproject.toml"
+      - ".github/workflows/types.yml"
+  workflow_dispatch:
+
+jobs:
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package and mypy
+        run: |
+          pip install -e ".[dev]"
+          pip install mypy
+      - name: Run mypy --strict on allowlist
+        run: mypy
