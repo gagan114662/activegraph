@@ -18,14 +18,63 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 Nothing yet. v1.1 scope is tracked in
 [CONTRACT.md § v1.1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md).
 
-## [v1.0] — TBD
+## [v1.0] — 2026-05-18
 
-Placeholder. v1.0 final ships after a lighter-weight verification
-pass against v1.0-rc3 (the same shape as the rc2 lighter pass,
-re-run against the rc3 PyPI artifact) confirms the rc3 fixes
-resolved the rc2 gate findings.
+v1.0 final. The lighter-weight verification pass against v1.0-rc3
+ran the same seven-check shape as the rc2 lighter pass and produced
+six clean passes plus one partial finding on Check 6 (the tutorial's
+step 7 fork-and-diff snippet undersold its own output). The B2
+fix's core promise — fork-and-diff runs without an API key against
+bundled fixtures — held intact. Scope = v1.0-rc3 + the Check 6
+tutorial fix + a README "Concepts at a glance" section bridging the
+README and the doc site for evaluators.
 
-Scope = v1.0-rc3 + any lighter-pass findings.
+No runtime capability changes; no public-API renames; no CONTRACT
+amendment.
+
+### Changed
+
+- **Tutorial step 7 fork-and-diff snippet** emits its own next-step
+  guidance instead of a bare `forked: <run-id>` line. The shipped
+  rc3 snippet ran cleanly end-to-end but its terminal output was
+  one anticlimactic line, leaving a first-time reader to scroll
+  past it and notice the "Then diff:" CLI block on their own. The
+  snippet now prints the exact `activegraph diff` command for the
+  fork it just created (parameterized from the same constants
+  defined at the top of the snippet), and the transition prose
+  before the CLI block names it explicitly. The diff itself
+  produces 61 divergent objects and 49 divergent relations — a
+  substantive output that the rc3 snippet was hiding behind a
+  prose-only handoff. The voice test: a first-time reader running
+  `python fork_and_diff.py` cold now sees both the fork creation
+  and the exact next command, with no ambiguity about whether they
+  need to do something else.
+- **README adds a "Concepts at a glance" section** between
+  "What you get" and "A small example." Twelve primitives — graph,
+  events, behaviors, relations, patches, views, frames, policies,
+  patterns, replay, forking, failure model — each with a one-line
+  "what + why" and a link to the concept page. The section is
+  evaluator-facing: it lets a reader scan the framework's
+  conceptual primitives from the GitHub repo page without first
+  clicking through to the doc site. Mirrors the
+  `docs/concepts/*.md` navigation 1:1; complements but does not
+  duplicate "What you get" (which is feature-oriented; the new
+  section is primitive-oriented).
+
+### Fixed
+
+- **Check 6 user-test finding** (rc3 lighter pass). See the
+  Tutorial step 7 entry above. The runtime artifact didn't change;
+  the tutorial prose and the snippet's terminal output changed.
+
+### Migration from v1.0-rc3
+
+Additive. No code changes required. Existing v1.0-rc3 installs
+should:
+
+```bash
+pip install --upgrade activegraph==1.0.0
+```
 
 ## [v1.0-rc3 amendment — docs-build fix] — 2026-05-18
 

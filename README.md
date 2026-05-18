@@ -141,17 +141,20 @@ in [`docs/concepts/relations.md`](https://docs.activegraph.ai/concepts/relations
 
 ## Status
 
-**v1.0-rc1** (2026-05). v1.0 final ships after the first-time-user
-gate per [CONTRACT v1.0 #C4](CONTRACT.md#v10-c4-v10-ships-as-v10-rc1-first-time-user-gate-is-owned-externally).
-See [CHANGELOG.md](CHANGELOG.md) for the full v0 → v1.0 history and
+**v1.0 (stable)** (2026-05). The first-time-user gate per
+[CONTRACT v1.0 #C4](CONTRACT.md#v10-c4-v10-ships-as-v10-rc1-first-time-user-gate-is-owned-externally)
+ran through three rcs; v1.0 final ships rc3 plus a tutorial-step-7
+output fix and a README "Concepts at a glance" index. See
+[CHANGELOG.md](CHANGELOG.md) for the full v0 → v1.0 history and
 per-version migration notes.
 
 Major shipped milestones:
 
-- **v1.0 (rc1)** — error hierarchy rewrite with per-error reference
+- **v1.0** — error hierarchy rewrite with per-error reference
   pages, doc site at [docs.activegraph.ai](https://docs.activegraph.ai/),
   `activegraph quickstart` command, mypy `--strict` and docstring
-  coverage CI gates.
+  coverage CI gates, wheel-completeness and deploy-verification CI
+  gates.
 - **v0.9** — pack format and the Diligence reference pack (8 object
   types, 7 behaviors, 3 tools, recorded fixtures).
 - **v0.8** — operator surface: structured logging, Prometheus
