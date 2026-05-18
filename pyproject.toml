@@ -41,6 +41,22 @@ dev = [
     "prometheus_client>=0.20",
     "psycopg[binary]>=3.1,<4",
 ]
+# Doc-site build deps. The docs workflow installs from this extra so
+# the install line and the mkdocs config can't drift the way they did
+# pre-rc3-amendment: mkdocs.yml declared the `mkdocstrings` plugin
+# from the doc-site phase onward but `.github/workflows/docs.yml`'s
+# hardcoded install line never pulled it in, so every docs build
+# silently failed with "plugin not installed." The v1.1 #9 deploy-
+# verification gate caught it on its first run post-merge to main.
+# Adding a new mkdocs plugin or theme dep? Add it here; the workflow
+# auto-syncs because it installs `.[docs]`. `mkdocs-material` brings
+# in `pymdown-extensions` transitively, covering every `pymdownx.*`
+# markdown extension in `mkdocs.yml`.
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.24",
+]
 
 [project.scripts]
 activegraph = "activegraph.cli.main:main"

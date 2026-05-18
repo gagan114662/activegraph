@@ -27,6 +27,77 @@ resolved the rc2 gate findings.
 
 Scope = v1.0-rc3 + any lighter-pass findings.
 
+## [v1.0-rc3 amendment — docs-build fix] — 2026-05-18
+
+Post-rc3-merge, pre-rc3-tag follow-on. The v1.1 #9 deploy-
+verification gate's first run on `main` after the rc3 merge caught
+a silent failure that had been dwelling since the doc-site phase:
+`mkdocs.yml` declared the `mkdocstrings` plugin for API-reference
+auto-generation (added in commit `b533dd4` during the doc-site
+phase), but `.github/workflows/docs.yml`'s hardcoded install step
+only pulled `mkdocs` + `mkdocs-material`. Every docs build through
+every doc-site PR failed with `Config value 'plugins': The
+"mkdocstrings" plugin is not installed`, the deploy job never had
+an artifact to upload, and the `has_pages: false` finding from the
+rc3 #2 investigation was an effect of this — not just the
+externally-owned Pages-enable step. No version bump; this is a
+follow-on to v1.0-rc3, not a new rc.
+
+### The gate did its job
+
+CONTRACT v1.1 #9 (deploy-verification) was designed to catch the
+class "internal CI ships green, the external artifact is broken,
+nobody notices for months." On its first real run, it caught the
+build failure that v1.0 had been carrying silently since the doc-
+site phase. The gate's red signal on `main` post-rc3-merge was
+correctly the discipline call to action, not noise.
+
+### Fixed
+
+- **`mkdocstrings[python]` now installed by the docs workflow.**
+  Root cause: hardcoded `pip install mkdocs mkdocs-material` in
+  `.github/workflows/docs.yml` drifted from `mkdocs.yml`'s
+  `plugins:` block. Audit-then-fix discipline (same shape as rc3's
+  wheel-completeness audit): enumerated every plugin and every
+  markdown extension in `mkdocs.yml`, cross-checked against the
+  workflow install. Single gap: `mkdocstrings` (+ its `[python]`
+  handler). The `pymdownx.*` extensions are covered transitively by
+  `mkdocs-material` (verified via fresh-venv install).
+
+### Changed
+
+- **`pyproject.toml` gains a `docs` optional-dependency extra.**
+  Lists `mkdocs`, `mkdocs-material`, `mkdocstrings[python]`. The
+  docs workflow now installs from this extra (`pip install -e
+  ".[docs]"`) instead of hardcoding the dep list. Adding a new
+  mkdocs plugin in the future updates one place — the same pattern
+  every other workflow already follows (`types.yml`,
+  `docstrings.yml`, `wheel-completeness.yml`, and
+  `deploy-verification.yml` all install from pyproject).
+
+### Audit-decision: no CONTRACT v1.1 #10
+
+Considered: a generalized "declared-but-not-installed" audit gate
+in the same shape as v1.1 #8 and v1.1 #9. Cross-checked all six
+workflows' install steps. `docs.yml` was the **only** workflow
+whose install step hardcoded deps that could drift from a separate
+config file (`mkdocs.yml`). Every other workflow installs from
+pyproject extras (auto-synced) or installs only its own tool, so
+the failure mode "config declares X, install doesn't include X" is
+structurally impossible for them. Joining `docs.yml` to that
+pattern institutes the prevention; an audit gate would be
+mechanism without a target. Filed as a one-off, not a class.
+
+### Externally owned (unchanged from rc3)
+
+The two operational steps named in the rc3 entry above still
+gate the v1.1 #9 deploy-verification check from passing: enable
+GitHub Pages on the repo, configure DNS for `docs.activegraph.ai`.
+With this build-fix landed, the docs workflow can now produce a
+deployable artifact for the first time since the doc-site phase
+shipped — the artifact is the precondition that the externally-
+owned Pages-enable step then publishes.
+
 ## [v1.0-rc3] — 2026-05-18
 
 The lighter-user-test-findings milestone. Two findings from the
