@@ -49,7 +49,15 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install mkdocs
-        run: pip install mkdocs mkdocs-material
+        # Pulls mkdocs + mkdocs-material + mkdocstrings[python] from
+        # the `docs` extra in pyproject.toml. Keeping the dep list in
+        # pyproject (not hardcoded here) means adding a new mkdocs
+        # plugin updates one place, not two — the same pattern every
+        # other workflow already follows. The pre-rc3-amendment shape
+        # ("pip install mkdocs mkdocs-material") drifted from
+        # mkdocs.yml's `plugins:` block since the doc-site phase and
+        # was the silent failure v1.1 #9 caught on its first run.
+        run: pip install -e ".[docs]"
       - name: Build site
         run: mkdocs build
       - name: Upload pages artifact
