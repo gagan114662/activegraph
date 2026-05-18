@@ -4218,6 +4218,116 @@ from recurring.
 - Multi-tag commits (rare) — sort by version and compare against
   the highest-version tag.
 
+## v1.1 #8. Package-data completeness CI gate (from user-test B3)
+
+The v1.0-rc2 user-test gate surfaced **B3**: the published wheel
+omitted `activegraph/packs/diligence/prompts/*.md`, so every fresh
+`pip install activegraph` crashed in the quickstart with
+`PackPromptLoadError: prompts directory does not exist`. The bug
+was structurally invisible to all existing CI gates — every test
+ran against the source tree (or an editable install), where the
+prompts directory is present by definition. Only a clean-environment
+install from the built wheel exposes the gap.
+
+The v1.1 gate closes the loop. Same shape as the version-sync
+gate, the broken-link gate, the CLI-flags gate, the v1.1 #2
+Python-snippets gate, the v1.1 #6 version-tag-correspondence gate:
+small, mechanical, prevents a class of finding from recurring.
+
+**Why this gate is in v1.1 and not v1.0:**
+
+v1.0's user-test gate (CONTRACT v1.0 #C4) was the layer that caught
+what internal CI couldn't, and B3 specifically required PyPI-
+installability — or at least clean-venv-wheel-installability — to
+surface. The rc1 user-test ran from a cloned repo because PyPI
+publication wasn't a prerequisite yet, so packaging bugs were
+structurally untestable by the rc1 gate, not just not caught by
+it. v1.1 #8 institutionalizes wheel-artifact verification inside
+CI, which moves the user-test boundary outward by one layer. After
+this gate lands, the lighter user-test verifies the PyPI artifact
+(CDN, upload, distribution) — not the wheel itself. The user-test
+gate doesn't disappear; its scope tightens to what only an external
+user can verify.
+
+This implicitly schedules a related-but-separate v1.x gate (not
+v1.1 — too late for that scope): the lighter user-test reframed as
+CI-augmented manual verification, with a structured checklist that
+distinguishes "what CI verified" from "what only a human can
+verify." Filed as a v1.x candidate; tracked when v1.x scope opens.
+
+**Implementation scope:**
+
+- New CI step that runs `python -m build --wheel`, creates a fresh
+  venv, installs the built wheel (NOT `pip install -e .` — the
+  gate's whole point is to test the wheel artifact, not the source
+  tree), and runs a smoke command that exercises every runtime
+  data path.
+- Smoke command shape: `activegraph quickstart` (the default,
+  non-interactive fixture-backed demo — no API key, no network).
+  The quickstart is the v1.0 spec (CONTRACT v1.0 #1) and exercises
+  the diligence pack end-to-end, which loads all 4 prompts. If
+  any runtime data file is missing from the wheel, the smoke run
+  fails with the same `PackPromptLoadError` (or analog) that the
+  user-test caught.
+- Test file: `tests/test_wheel_completeness.py`. Orchestrates the
+  build-and-install via subprocess; the smoke run lives in the
+  same test. Marked with `@pytest.mark.slow` so it runs in CI but
+  not in the default local `pytest` invocation.
+- New workflow file: `.github/workflows/wheel-completeness.yml`.
+  Runs on every PR to main AND on push to main, same trigger
+  shape as `types.yml` and `docstrings.yml`. **The CI invocation
+  must explicitly pass the slow marker** (`pytest -m slow
+  tests/test_wheel_completeness.py`) so the gate actually runs;
+  the marker is opt-in for local-dev ergonomics, opt-in by name
+  in CI.
+- **Required for merge.** The version-sync gate, broken-link gate,
+  mypy gate, and docstring gate are merge-blockers (configured as
+  required status checks on the `main` branch); v1.1 #8 needs the
+  same status. Otherwise a regression that fails the gate can still
+  merge if the reviewer doesn't notice the red check.
+
+**Why a runtime smoke test, not a wheel-RECORD assertion:**
+
+A static check ("the wheel's RECORD file contains
+`activegraph/packs/diligence/prompts/document_researcher.md`")
+would catch B3 specifically but not the next analog. Future packs,
+future runtime data files, future migrations — each one would
+need its own RECORD assertion added. The smoke-run shape
+generalizes: if the runtime exercises the data path successfully,
+the data is present, regardless of category. Same discipline as
+the broken-link gate (fetches every URL, doesn't enumerate URLs
+by hand).
+
+**Edge cases:**
+
+- Optional-dep features (LLM, postgres) are not gated — the smoke
+  run uses the fixture LLM provider and SQLite store, the default
+  quickstart shape.
+- Network-disabled CI: the smoke run must not require network
+  access (no live PyPI install, no LLM provider calls). The
+  fixture provider satisfies this.
+- Prompt files use TOML frontmatter inside `.md` containers per
+  CONTRACT v0.9 #2 (hash-as-replay-contract); the package-data
+  declaration is keyed on the file extension, not the frontmatter
+  format. Future packs adding alternate prompt formats (e.g.
+  plain-text, JSON-Schema, YAML) need separate globs in
+  `[tool.setuptools.package-data]` AND the smoke run must
+  exercise them — adding a glob without exercising it would let
+  the next analog of B3 slip through.
+- Pre-release vs. release wheels build identically; the gate runs
+  on both.
+
+**What this gate does NOT do:**
+
+- It does not verify the wheel matches PyPI's published artifact —
+  that's a separate (and rarer) class of bug (CDN cache, broken
+  upload). The gate verifies the *build* produces a runnable
+  wheel; the publish workflow is responsible for uploading what
+  was built.
+- It does not verify documentation or developer-tool data files
+  (e.g., snippets used only by the docs build). Those aren't
+  shipped in the wheel and are gated by other CI steps.
+
 ## v1.1 #7 and beyond
 
 The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series
