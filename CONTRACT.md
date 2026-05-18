@@ -4012,15 +4012,75 @@ audit script retained as a regression check for future
 allowlist expansions (new pack ``__all__`` entries, new public
 re-exports).
 
-## v1.1 #4 and beyond
+## v1.1 #4. Docstring-completeness on the public-surface allowlist
+
+CONTRACT v1.0 #C2's docstring gate baselines at 92/100 Ring 0
+symbols not-missing (92.0%) and 84.7% Ring 1 not-missing.
+``docs/reference/api/COVERAGE_REPORT.md`` is the audit; the
+gate's curated exemption list is ``docstring_gaps.toml``.
+
+**The gate's pass condition.** Ring 0: every symbol in
+``activegraph.__all__`` and pack-level ``__all__``s must have
+a docstring (one-line counts) OR be listed in
+``docstring_gaps.toml`` with a reason. Ring 1: aggregate
+not-missing coverage must stay at or above the floor (currently
+80%) set in the toml's ``[ring1]`` block. A regression on
+either gate fails CI.
+
+**Sibling burndown list.** The mypy gate's per-module overrides
+in ``pyproject.toml`` and the docstring gate's per-symbol
+exemptions in ``docstring_gaps.toml`` are the two halves of
+the public-surface completeness milestone. The same set of
+modules drives both audits (``activegraph.__all__`` plus pack
+``__all__``s); the same v1.1 PR series can close both gaps in
+parallel.
+
+**Two-stage v1.1 target.**
+
+- **Wave 1** — close every Ring 0 "missing" gap by adding a
+  docstring (at minimum a one-liner). Each closed gap removes
+  its entry from ``docstring_gaps.toml``. Wave 1 end state: the
+  exemption list is empty; the gate passes against 100% Ring 0
+  not-missing.
+- **Wave 2** — upgrade every one-line docstring on the public
+  surface to a "full" docstring (per the audit's classification:
+  ≥3 lines or has Args/Returns/Raises/Examples). Wave 2 end
+  state: COVERAGE_REPORT.md shows 100% Ring 0 fully-documented.
+  The gate doesn't enforce wave 2 directly — the audit is the
+  measure.
+
+Ring 1 burndown follows the same staging but the gate's
+threshold is the only CI-enforced floor; per-symbol upgrades
+are deliberate PR work, not gate exemptions.
+
+**Re-baseline discipline.** When a Ring 0 symbol gets a
+docstring:
+
+1. Run ``python scripts/audit_docstrings.py`` to refresh
+   ``COVERAGE_REPORT.md``.
+2. Remove the symbol's entry from ``docstring_gaps.toml``.
+3. Run ``python scripts/gate_docstrings.py`` to confirm the
+   gate still passes (and note the "stale exemption" warning
+   if you missed step 2).
+
+When a new public symbol is added without a docstring, the
+gate fails CI — same protection-against-regression shape as
+the mypy gate.
+
+**v1.1 milestone end state.** Wave 1 + Wave 2 + Ring 1
+upgrades + the mypy --strict allowlist all hit 100%. The
+public surface meets the CONTRACT v1.0 #C2 target end-to-end.
+The audit scripts stay in place as regression checks for
+future allowlist expansions.
+
+## v1.1 #5 and beyond
 
 The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series
 tally and the existing v1.1 error-completeness milestone notes
 above):
 
 - v1.0-rc1 documented gaps not yet itemized here — additional
-  gaps may surface during the remaining rc1 commits (docstring
-  gate, changelog).
+  gaps may surface during the remaining rc1 commit (changelog).
 - The 22 partial Pack* migrations from CONTRACT v1.0 PR-E.
 - The 4 deferred DB-error wrappers from CONTRACT v1.0 PR-C.
 - The real-user-test gate findings (CONTRACT v1.0 #C4), once it

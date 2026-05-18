@@ -1,0 +1,69 @@
+# Docstring gate — curated exemption list.
+# CONTRACT v1.0 #C2. v1.1 #4 burndown source-of-truth.
+#
+# Each entry pairs a Ring 0 symbol (in activegraph.__all__ or a pack's
+# __all__) with a reason. The gate (scripts/gate_docstrings.py) fails
+# CI on any Ring 0 symbol that has no docstring AND is not listed
+# here. Adding a docstring to a symbol means removing its entry; a
+# new public symbol introduced without a docstring fails the gate.
+#
+# Do NOT auto-regenerate this file from the audit. New gaps must be
+# acknowledged deliberately — auto-regenerating would silently
+# self-exempt every new gap, which defeats the gate. Same shape as
+# test snapshots: committed, reviewed, updated deliberately.
+#
+# Two-stage v1.1 target (CONTRACT v1.1 #4):
+#   Wave 1 — close every "missing" gap by adding a docstring (at
+#            minimum a one-liner). Each closed gap removes its
+#            entry from this file. End state: this list is empty.
+#   Wave 2 — upgrade every one-line docstring to a full docstring
+#            (per docs/reference/api/COVERAGE_REPORT.md's "full"
+#            classification). End state: 100% Ring 0 fully-documented
+#            in the audit.
+#
+# Ring 1 (importable but not in __all__) is gated by threshold
+# (>= 80% not-missing) rather than per-symbol. See [ring1] block at
+# the bottom of this file. Individual Ring 1 gaps are v1.1 burndown
+# targets, not gate exemptions.
+#
+# Current baseline (v1.0-rc1 #4/5):
+#   - Ring 0: 92/100 not-missing (92.0%); 8 exemptions below.
+#   - Ring 0: 57/100 fully-documented (57.0%); wave 2 closes the gap.
+#   - Ring 1: 97/114 not-missing (85.1%); above gate threshold.
+
+[[exemptions]]
+symbol = "activegraph.Budget"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[[exemptions]]
+symbol = "activegraph.InMemoryEventStore"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[[exemptions]]
+symbol = "activegraph.Runtime"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[[exemptions]]
+symbol = "activegraph.View"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[[exemptions]]
+symbol = "activegraph.clear_registry"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[[exemptions]]
+symbol = "activegraph.clear_tool_registry"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[[exemptions]]
+symbol = "activegraph.get_registry"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[[exemptions]]
+symbol = "activegraph.get_tool_registry"
+reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
+
+[ring1]
+# Threshold gate. The audit reports current Ring 1 not-missing
+# coverage; the gate fails if it drops below this floor.
+min_not_missing_pct = 80.0
