@@ -717,10 +717,16 @@ Memos for Stellar Logistics, Pinecone Bio were produced under the same contract.
      You did not write a workflow. The behaviors are pattern-matched
      against event types and object shapes.
 
-  3. Every LLM call was cached against a recorded fixture, so the run
-     is deterministic and runs offline. The trace above shows
-     `cache_hit=true` on every llm.responded — production runs would
-     hit a real provider instead.
+  3. Every LLM call was served by the bundled fixture provider
+     (RecordedDiligenceProvider), so the run is deterministic and runs
+     offline. The trace above shows cost and latency on each llm.responded
+     line — those are the fixture's recorded numbers. Production runs
+     against a real provider would show real costs and latencies.
+
+     (The framework also has a separate replay cache that records
+     llm.responded events and serves them back on fork or replay —
+     that's where `cache_hit=true` appears in the trace. Different
+     layer; you'll see it if you fork this run.)
 
   4. Each memo cites evidence for every claim, surfaces at least one
      risk, and either lists open contradictions or states explicitly

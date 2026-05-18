@@ -64,12 +64,23 @@ A few specific lines to find:
   immediately by `[object.created] company#1` — the planner behavior
   fired in response to the goal, and produced a `company` object on
   the graph.
-- `[llm.requested]` and `[llm.responded]` pairs with `cache_hit=true`
-  — each LLM call was served from the recorded fixture, not from a
-  network call.
+- `[llm.requested]` and `[llm.responded]` pairs — every LLM call
+  was served by the bundled fixture provider
+  (`RecordedDiligenceProvider`), so no network requests fired. The
+  trace shows `cost=$0.00X latency=0.Xs` on each `llm.responded`
+  line; in a production run against a real provider those numbers
+  would be real costs and real latencies.
 - `[runtime.idle] queue empty, budget remaining` at the end of each
   goal's events — the runtime finished all the work it could do and
   stopped.
+
+Two layers worth distinguishing now so the vocabulary lands cleanly
+later: the **provider** is what produces LLM responses (here, the
+fixture provider; in production, an `AnthropicProvider`). The
+runtime's **replay cache** is a separate layer that records
+`llm.responded` events and serves them back on fork or replay —
+that's where you'll see `cache_hit=true` in the trace. You'll meet
+that layer in step 7 when you fork this run.
 
 That trace is the framework's audit trail. The same artifact you
 just read for fun is what you'd read while debugging a production

@@ -20,6 +20,17 @@ than 15 minutes to reach the last beat in this transcript, the API is too
 rough or the tutorial is too long — fix one or the other before tagging
 v1.0 final.
 
+Drift note (v1.0-rc2): the original draft of this transcript showed
+`cache_hit=true` on every `llm.requested`/`llm.responded` line in BEATS 2
+and 3, treating fixture-provider responses as cache hits. The shipped
+implementation correctly distinguishes two layers — the provider (which
+produces responses, including the fixture provider) is separate from the
+runtime's replay cache (which records `llm.responded` events and serves
+them back on fork/replay). Initial fixture-mode runs show no cache hits
+because there's no recorded history yet; fork runs in BEAT 4 do show
+cache hits because the parent's `llm.responded` events populate the
+cache. The transcript below reflects the shipped two-layer reality.
+
 ----------------------------------------------------------------------------
  BEAT 1 — install
 ----------------------------------------------------------------------------
@@ -63,8 +74,8 @@ $ activegraph quickstart
 > [behavior.started]        diligence.company_planner
 > [object.created]          company#1 "Northwind Robotics"
 > [behavior.started]        diligence.question_generator  (matched ...)
-> [llm.requested]           evt_006  diligence.question_generator  model=claude-sonnet-4-5 cache_hit=true
-> [llm.responded]           evt_007  diligence.question_generator  cache_hit=true
+> [llm.requested]           evt_006  diligence.question_generator  model=claude-sonnet-4-5 prompt_normalized=true
+> [llm.responded]           evt_007  diligence.question_generator  tokens_in=110 tokens_out=22 cost=$0.001 latency=0.4s
 > [object.created]          question#2 "What drives unit economics in cobot deployments?"
 > ...
 > [object.created]          memo#41 (approved)
@@ -107,10 +118,16 @@ $ activegraph quickstart
 >      You did not write a workflow. The behaviors are pattern-matched
 >      against event types and object shapes.
 >
->   3. Every LLM call was cached against a recorded fixture, so the run
->      is deterministic and runs offline. The trace above shows
->      `cache_hit=true` on every llm.responded — production runs would
->      hit a real provider instead.
+>   3. Every LLM call was served by the bundled fixture provider
+>      (RecordedDiligenceProvider), so the run is deterministic and runs
+>      offline. The trace above shows cost and latency on each llm.responded
+>      line — those are the fixture's recorded numbers. Production runs
+>      against a real provider would show real costs and latencies.
+>
+>      (The framework also has a separate replay cache that records
+>      llm.responded events and serves them back on fork or replay —
+>      that's where `cache_hit=true` appears in the trace. Different
+>      layer; you'll see it if you fork this run.)
 >
 >   4. Each memo cites evidence for every claim, surfaces at least one
 >      risk, and either lists open contradictions or states explicitly
@@ -166,8 +183,8 @@ $ activegraph inspect /tmp/activegraph_quickstart/01J...
 > last:       evt_671  runtime.idle  4s ago
 >
 > Tail (20 events):
->   evt_652  llm.requested      diligence.memo_synthesizer  model=claude-sonnet-4-5 cache_hit=true
->   evt_653  llm.responded      diligence.memo_synthesizer  cache_hit=true
+>   evt_652  llm.requested      diligence.memo_synthesizer  model=claude-sonnet-4-5 prompt_normalized=true
+>   evt_653  llm.responded      diligence.memo_synthesizer  tokens_in=440 tokens_out=380 cost=$0.012 latency=1.8s
 >   evt_654  object.created     memo#41  "Pinecone Bio"
 >   ...
 >   evt_671  runtime.idle
