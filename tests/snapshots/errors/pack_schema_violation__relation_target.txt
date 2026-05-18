@@ -1,0 +1,16 @@
+PackSchemaViolation: relation_type 'supports': target type 'risk' not allowed
+
+What failed:
+  `graph.add_relation(source, target, 'supports')` was rejected because the target object has type 'risk', but the pack's declared relation type for 'supports' (declared by pack 'diligence') only allows target types: 'evidence'.
+
+Why:
+  Same rule as source-type validation: relation types constrain both endpoints so behaviors and pattern subscriptions that traverse the relation can rely on the endpoint shapes. An out-of-spec relation would corrupt pattern matches downstream.
+
+How to fix:
+  Either:
+    - Pass a target of an allowed type ('evidence'); or
+    - Add 'risk' to the relation type's `target_types=` list in the pack declaration; or
+    - Remove `target_types=` to accept any target type.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/pack-schema-violation

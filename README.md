@@ -29,7 +29,7 @@ memos = [o for o in rt.graph.all_objects() if o.type == "memo"]
 assert len(memos) == 3
 ```
 
-The full runnable demo is [`examples/diligence_real_run.py`](examples/diligence_real_run.py). It runs in under 30 seconds without an API key, byte-for-byte reproducible. The pack format itself is documented in [`docs/pack_authoring.md`](docs/pack_authoring.md); the locked design decisions are in [`CONTRACT.md`](CONTRACT.md) v0.9.
+The full runnable demo is [`examples/diligence_real_run.py`](examples/diligence_real_run.py). It runs in under 30 seconds without an API key, byte-for-byte reproducible. The pack format itself is documented in [`docs/guides/authoring-packs.md`](docs/guides/authoring-packs.md); the locked design decisions are in [`CONTRACT.md`](CONTRACT.md) v0.9.
 
 For the underlying primitives (everything below packs), the v0.7-style minimal example still works:
 
@@ -696,7 +696,7 @@ v0.8 adds the operator surface: structured logging, Prometheus
 metrics, a `runtime.status()` introspection primitive, an
 `activegraph` CLI for inspecting / forking / migrating runs, and
 `PostgresEventStore` for shared-state deployments. The operator guide
-([docs/operating.md](docs/operating.md)) is the document for people
+([docs/guides/operating-in-production.md](docs/guides/operating-in-production.md)) is the document for people
 running this as part of a system other people depend on; the
 [`examples/operate_a_run.py`](examples/operate_a_run.py) demo
 exercises the whole loop end-to-end.
@@ -1218,7 +1218,7 @@ talking to any provider. No other agent framework can do this.
 - `Metrics` protocol + `NoOpMetrics` + `PrometheusMetrics`
 - `runtime.status()` — frozen snapshot for introspection
 - `activegraph` CLI: `inspect`, `replay`, `fork`, `diff`, `export-trace`, `migrate`
-- Operator guide ([docs/operating.md](docs/operating.md))
+- Operator guide ([docs/guides/operating-in-production.md](docs/guides/operating-in-production.md))
 
 **v0.9 — Pack format + Diligence pack (current)**
 
@@ -1238,7 +1238,7 @@ talking to any provider. No other agent framework can do this.
 - `activegraph.packs.diligence` — production-quality reference pack:
   8 object types, 6 relation types, 7 behaviors, 3 tools, 2 policies,
   4 prompts, recorded fixtures for 3 companies, end-to-end demo
-- Pack authoring guide ([docs/pack_authoring.md](docs/pack_authoring.md))
+- Pack authoring guide ([docs/guides/authoring-packs.md](docs/guides/authoring-packs.md))
 - Python floor raised to 3.11 (tomllib in stdlib)
 
 **v1.0 — Additional packs and distribution**

@@ -2208,3 +2208,1575 @@ the Diligence pack must be polished enough that a developer who
 installs activegraph + activegraph.packs.diligence and follows the
 README can produce a useful memo on day one. If the pack feels like
 a toy, the milestone hasn't shipped. Polish over breadth.
+
+# v0.9.1 — pending follow-ups bundle
+
+A small follow-up release with two items the v1.0 plan flagged as
+worth landing before the adoption-surface work starts, so the v1.0
+PR series begins from a baseline with no carryover debt. Both are
+quality-of-life, not new capability.
+
+## v0.9.1 #1. Granular approval-demo console output
+
+`examples/diligence_real_run.py` previously printed
+`pending approvals: N` followed by detail rows that left the
+operator guessing what was queued. The new output names every
+pending item up front and walks the gate in rounds:
+
+```
+pending approvals (1, initial): risk_northwind_001
+  - risk_northwind_001           approval_001  reason='risk_approval policy: customer concentration'
+pending approvals (1, round 2): memo_northwind
+  - memo_northwind               approval_002  reason='memo_approval policy: company company#1'
+after approval: 0 pending
+```
+
+The slug shape is `<object_type>_<company_short>` (memo) or
+`<object_type>_<company_short>_<approval_seq>` (risk). Lookup is
+through `runtime.graph.get_object(company_id)` so the slug uses the
+human company name, not the auto-generated id. The drain loop runs
+until `pending_approvals()` is empty, so the demo terminates at
+zero — approving a risk surfaces the memo, approving the memo
+clears the queue.
+
+The slug helper is example-local. The runtime does not pick names
+for pending approvals — that's a pack/operator concern.
+
+## v0.9.1 #2. `prompt_normalized=true` trace flag rollup
+
+The per-line `prompt_normalized=true` suffix on every
+`llm.requested` event (added as the v0.6 follow-up bundled into
+v0.7, CONTRACT v0.7 #22) clutters traces in real packs where a
+single goal produces dozens of LLM calls. v0.9.1 rolls it up.
+
+The `Trace.lines()` facade now emits a single `[trace.flags]`
+header when every non-replayed `llm.requested` event in the trace
+carries `prompt_normalized=true`:
+
+```
+[trace.flags]             prompt_normalized=true (27 llm requests)
+[goal.created]            user: "Diligence: Northwind Robotics"
+...
+[llm.requested]           evt_006  extractor  model=claude-sonnet-4-5 ...
+```
+
+Per-line flags are suppressed in this mode. Mixed-state traces
+(some events normalized, some not — should not happen in practice
+since normalization is a pack-level invariant) keep the per-line
+flag and suppress the header, so the divergence stays visible.
+
+`format_event(event, *, hide_prompt_normalized=False)` gains the
+suppress kwarg; only `Trace.lines()` sets it, and only when the
+rollup applies. JSONL export still includes `prompt_normalized`
+verbatim in the event payload — the rollup is a render-time
+concern, not a data change.
+
+### Snapshot drift
+
+Two snapshot files updated in the same commit:
+
+- `tests/snapshots/llm_trace.txt`
+- `tests/snapshots/tool_trace.txt`
+
+Both gain a leading `[trace.flags]` line and lose the trailing
+`prompt_normalized=true` on each `llm.requested` line. No other
+event types change. The 384 v0–v0.9 tests pass unchanged after
+the snapshot update.
+
+The v0.7 #22 backward-compat clause is now superseded for the
+`llm.requested` line. v1.0+ tests that need to see the per-line
+flag (mixed-state cases) call `_compute_prompt_normalized_rollup`
+to confirm uniformity.
+
+## v0.9.1 #3. Out of scope (re-affirm)
+
+The v1.0 plan locked these as out for v0.9.1 and v1.0 both:
+
+- Richer fixture cardinality (post-1.0 polish, not framework
+  work; v0.9 ships three companies producing three memos that
+  meet the verifiable bar — that is the contract)
+- A `--live` quickstart mode (dropped from v1.0 per pushback;
+  ships post-1.0 only if quickstart usage shows demand)
+- Web UI, streaming, multi-model routing (per v0.9 #26)
+
+# v1.0 — adoption surface (PR series; not yet shipped)
+
+The framework runtime is done. v1.0 is the milestone that decides
+whether anyone uses it. Every prior milestone improved the artifact;
+v1.0 improves the path to the artifact — installation, first-run
+experience, error messages, documentation site. The least technically
+interesting milestone in the roadmap and probably the most
+commercially important one.
+
+Scope is a fixed list, not a moving target: a `quickstart` CLI command
+that produces a working diligence run with no configuration, an audit
+and rewrite of every error message in the framework against a
+documented standard, an `ActiveGraphError` hierarchy, a docs site at
+`docs.activegraph.dev` built with mkdocs-material, all examples
+rewritten to be copy-pasteable, a "first 10 minutes" tutorial, type
+stubs verified against `mypy --strict` for the public API, a
+`CHANGELOG.md` covering v0 through v1.0, and the two pending
+follow-ups that just landed in v0.9.1 above.
+
+Out-of-scope deferral list (post-1.0 or never): web UI, streaming LLM
+responses, multi-model routing, more reference packs (Memory pack,
+Research pack), a pack registry, error message i18n, video tutorials,
+adaptive question generation in Diligence, the contradiction
+resolver, richer fixture cardinality.
+
+## v1.0 contract diff vs. the v1.0 plan (seven revisions)
+
+The v1.0 plan as authored prompted seven pieces of pushback that
+changed the contract before the first line of code in the v1.0 PR
+series. Recording them here so the contract diff is visible from the
+start of the work, not buried in PR descriptions.
+
+### v1.0 #C1. Error message rewrite ships as a PR series, not one PR
+
+The error message audit covers 50+ sites. Format is uniform but
+every site needs a real "what failed / why / how to fix" with
+specific names — that's 50+ small design decisions, not find-replace.
+One PR is unreviewable; reviewers skim and miss the bad ones.
+
+The series:
+
+- **PR-A (foundation):** `ActiveGraphError` hierarchy, the format
+  spec, snapshot-test harness, one fully-converted category as the
+  reference (smallest category by error count). Lock the format
+  standard here so it cannot drift across the series.
+- **PR-B through PR-F:** one error category per PR
+  (`ConfigurationError`, `RegistrationError`, `ExecutionError`,
+  `ReplayError`, `StorageError`, `PatternError`, `PackError`).
+  Each PR includes a snapshot test of every error in its category
+  so review is mechanical — reviewer reads the "what failed / why /
+  how to fix" text, not the diff.
+
+If `RegistrationError` is genuinely the smallest category by error
+count, PR-A leads with it. Otherwise the smallest leads. Goal is to
+set reference quality before larger categories land.
+
+### v1.0 #C2. Docstring coverage is tiered, not a flat percentage
+
+Flat percentage gates breed performative docstrings (you've seen the
+codebases). v1.0 gates by ring:
+
+- **Ring 0 (public surface):** symbols in `activegraph.__all__` plus
+  each pack's top-level `__all__`. 100% docstring coverage. No
+  exceptions. This is a small, finite, hard-to-game list.
+- **Ring 1 (importable but not re-exported):** modules users import
+  directly (`activegraph.trace`, `activegraph.llm`, etc.) but
+  symbols not in a top-level `__all__`. 80% coverage.
+- **Internals:** no gate.
+
+CI enforces Ring 0 and Ring 1 thresholds via `interrogate`. The
+list of Ring 0 symbols lives in `pyproject.toml` and changing it
+requires a deliberate PR — adding a new public symbol forces a
+docstring decision.
+
+### v1.0 #C3. `--live` quickstart mode is dropped from v1.0
+
+Cost-prompted live calls on a brand-new install is a UX trap.
+Estimate accuracy depends on provider pricing we don't control; new
+user hits `y` by reflex; first experience is a surprise charge.
+
+`activegraph quickstart` ships in v1.0 with the fixture-backed
+demo only. `--interactive` (walk-through tutorial) stays in scope.
+`--live` ships post-1.0 only if quickstart usage shows real demand,
+and only after we agree on a hard cap (likely env-var-gated, $0.01
+default ceiling using the existing budget primitives).
+
+The v1.0 quickstart command therefore exposes two modes:
+
+```
+activegraph quickstart                # fixture-backed diligence demo
+activegraph quickstart --interactive  # tutorial walk-through
+```
+
+Both end with "here's what to read next" pointing at specific doc
+pages.
+
+### v1.0 #C4. v1.0 ships as `v1.0-rc1`; first-time-user gate is owned externally
+
+The "real first-time user runs through the tutorial" gate cannot be
+verified from inside the agent loop. Pretending it can produces a
+passing test for a failed experience.
+
+The v1.0 PR series therefore ships as `v1.0-rc1`. The CHANGELOG
+flags the first-time-user test as the sole blocker on `v1.0` final.
+The gate is run externally — a non-author developer runs through
+the tutorial blind, screen-recorded, the friction points are
+captured, fixes go in, then the version is cut to `v1.0`.
+
+The agent does not claim the gate passed.
+
+### v1.0 #C5. `mypy --strict` scope is allowlist-driven, in `pyproject.toml`
+
+"Public surface" is too vague to gate on. v1.0 makes the allowlist
+explicit:
+
+- The allowlist is a `[tool.mypy.strict_modules]`-equivalent block in
+  `pyproject.toml` enumerating every module that should pass `mypy
+  --strict`. The default is everything reachable from
+  `activegraph.__all__` and pack-level `__all__`.
+- Internal modules get normal `mypy`. The internal/public boundary
+  matches the docstring-coverage boundary (#C2), so "what we
+  document publicly" and "what we strictly type" are the same set
+  of symbols — satisfyingly self-consistent.
+- Adding a new symbol to a top-level `__all__` forces a PR-level
+  decision about typing strictness.
+
+### v1.0 #C6. Doc site DNS is externally owned; ship with fallback URL
+
+`docs.activegraph.dev` is a domain registration outside the agent's
+reach. v1.0:
+
+- Wires `mkdocs-material`, the GitHub Pages deploy workflow, and the
+  `CNAME` file pointing at `docs.activegraph.dev`.
+- Until DNS is live, error message doc URLs and the README point at
+  the github.io fallback (`https://yoheinakajima.github.io/activegraph/`).
+- When DNS resolves, the cutover is a search-replace in error
+  message URLs plus a one-line CNAME update. Documented in the
+  CHANGELOG so the swap is reproducible.
+
+### v1.0 #C7. v0.9.1 lands before v1.0 PR-A
+
+The two follow-ups (granular approval-demo output, prompt_normalized
+trace rollup) ship as v0.9.1 — not bundled into a v1.0 PR. Reasoning:
+v1.0 is an adoption-surface milestone, and milestone discipline says
+no milestone starts with carryover from the previous one. v0.9.1 is
+committed before any v1.0 work begins. **Done. See v0.9.1 sections
+above.**
+
+## v1.0 #1. The quickstart command is the spec
+
+The single most important deliverable in v1.0 is the
+`activegraph quickstart` command. End-to-end against bundled fixtures
+with no API key, no Postgres, no configuration. Output is a single
+memo to stdout, a trace summary, and a "what just happened" section
+explaining what the developer saw.
+
+The transcript at `examples/quickstart_session.txt` is the contract
+for the whole milestone. Every piece of v1.0 work either supports a
+line of this transcript or it doesn't belong in v1.0.
+
+The transcript explicitly includes the fork-and-diff beat: most
+evaluators won't read about that capability; they need to see it in
+the quickstart flow to understand what's structurally different
+about the framework. The transcript has an explicit beat for that
+moment of recognition.
+
+## v1.0 #2. Build order is fixed
+
+1. `examples/quickstart_session.txt` (the spec)
+2. `ActiveGraphError` hierarchy + format standard + PR-A reference category
+3. PR-B through PR-F (one error category per PR)
+4. `activegraph quickstart` CLI command (fixture + interactive modes)
+5. mkdocs-material site skeleton + GitHub Pages workflow
+6. Error reference pages (one per error class)
+7. API auto-generation via mkdocstrings
+8. 10-minute tutorial (`docs/quickstart.md`)
+9. Cookbook + migration pages
+10. `mypy --strict` allowlist + interrogate gates as CI requirements
+11. `CHANGELOG.md` covering v0 through v1.0-rc1
+12. `v1.0-rc1` tag
+13. (External) first-time-user test gate clears → `v1.0` tag
+
+Do not invert. Each step depends on the contract set by the prior
+step.
+
+## v1.0 #3. The error message format is locked
+
+Every framework error follows this exact shape:
+
+```
+<ErrorClass>: <one-line summary>
+
+What failed:
+  <specific thing that went wrong, with names>
+
+Why:
+  <explanation of the root cause, not just the symptom>
+
+How to fix:
+  <concrete action the developer can take>
+
+More:
+  https://docs.activegraph.dev/errors/<error-class-slug>
+```
+
+Snapshot-tested per-error-class. Doc URL must resolve to a real
+page; broken links fail CI. Until DNS for `docs.activegraph.dev` is
+live, the URL renders as the github.io fallback (#C6) and the swap
+is the documented cutover.
+
+### Voice principle: invariant-protection, not validation
+
+`Why:` is the section that decides how the framework feels to a
+developer in the moment of failure. Locked principle from PR-A's
+reference category, applies to every error in the v1.0 series:
+
+**Explain the framework's intent — the invariant being protected — not
+the mechanism of the check.** Developers reading an error want to know
+"why is this framework being strict with me right now," and the answer
+should almost always be "because it's protecting an invariant you
+care about."
+
+The reference instance, from `ReplayDivergenceError` (PR-A):
+
+> The replay cache keys on the full prompt hash, so any change to an
+> LLM behavior's code, a prompt template, a system message, or a tool's
+> input arguments produces a mismatch. The framework refuses to silently
+> substitute a stale cached response under a new prompt — that would
+> break the audit trail the cache is designed to preserve.
+
+Voice notes for PR-B through PR-G:
+
+- **Active, declarative.** "The framework refuses…" not "It is not
+  permitted to…" Passive voice erases who decided.
+- **No apology.** No "unfortunately," no "sorry," no "this is a
+  limitation." The framework made a decision; explain the decision.
+- **No clinical noun stacks.** "validation of the input prompt against
+  the cached hash failed" is clinical. "the prompt hash didn't match
+  what was recorded" is direct.
+- **Name the invariant.** "The audit trail," "the determinism
+  guarantee," "the budget cap," "the pack's schema contract." Errors
+  exist because invariants exist; name the one being protected so
+  developers can decide if they care about it.
+- **No internal jargon without expansion.** Terms like "behavior graph,"
+  "patch lifecycle," "frame stack" are valid in `Why:` if they appear
+  in the public concepts docs (CONTRACT v1.0 #5). Terms from the
+  implementation (e.g., `_pack_state`, `BehaviorScheduler`) are not.
+
+Snapshot review for PR-B through PR-G is partly a tone review against
+these notes. If a `Why:` paragraph drifts toward apologetic, passive,
+or implementation-detail voice, send the PR back.
+
+## v1.0 #4. The `ActiveGraphError` hierarchy is the root
+
+```
+ActiveGraphError
+├── ConfigurationError      # runtime construction problems
+├── RegistrationError       # behavior/tool/pack registration
+│   ├── PackConflictError
+│   ├── MissingProviderError
+│   └── MissingToolError
+├── ExecutionError          # runtime execution
+│   ├── BudgetExhaustedError
+│   └── BehaviorFailedError
+├── ReplayError             # replay/fork
+│   └── ReplayDivergenceError
+├── StorageError            # persistence
+├── PatternError            # pattern subscriptions
+│   └── UnsupportedPatternError
+└── PackError               # pack-specific
+```
+
+`ExecutionError`, not `RuntimeError` — Python has a builtin
+`RuntimeError` and shadowing it produces confusing stack traces.
+
+`ActiveGraphError` exposes structured fields:
+
+- `.what_failed: str`
+- `.why: str`
+- `.how_to_fix: str`
+- `.doc_url: str`
+- `.context: dict`  (error-class-specific data)
+
+`__str__` produces the format in #3.
+
+### v1.0 PR-A landed (foundation + ReplayError reference)
+
+Concrete artifact under `activegraph/errors.py`:
+
+```python
+class ActiveGraphError(Exception): ...
+class ConfigurationError(ActiveGraphError): ...
+class RegistrationError(ActiveGraphError): ...
+class ExecutionError(ActiveGraphError): ...
+class ReplayError(ActiveGraphError): ...
+class StorageError(ActiveGraphError): ...
+class PatternError(ActiveGraphError): ...
+class PackError(ActiveGraphError): ...
+```
+
+Re-exported from `activegraph.__all__`. `activegraph.packs.PackError` is
+re-homed to point at `activegraph.errors.PackError` (same class object) so
+the existing pack leaves (PackValidationError, PackConflictError, etc.)
+inherit the new base without changing their import paths.
+
+`ActiveGraphError.__init__` has two construction modes during the v1.0
+transition:
+
+- **Structured** (the v1.0 target): pass ``summary`` plus the three named
+  fields. `__str__` produces the locked format.
+- **Legacy**: pass a single positional message. `__str__` returns that
+  message verbatim. Format-noncompliant but valid Python, so existing
+  raises in unmigrated leaves keep working through PR-B → PR-F.
+
+`ActiveGraphError.is_structured()` returns True for the first mode, False
+for the second. Snapshot tests in `tests/test_errors_format.py` only run
+on classes that are explicitly enumerated; legacy raises don't fail
+format compliance until their category's PR migrates them.
+
+Reference category in PR-A: **ReplayError**. The chosen reference
+because:
+
+- Single class (smallest by class count, tied with PatternError and
+  PackError; broke the tie by stakes)
+- Highest-stakes error in the framework — fires in the fork-and-diff
+  flow that BEAT 4 of the v1.0 transcript depends on
+- Three distinct call sites discriminated at `__init__` time
+  (prompt_hash_mismatch, type_mismatch, length_mismatch), each producing
+  a different "what failed / why / how to fix" — exercises the format's
+  full expressive range so PR-B+ can model against a real reference
+
+`ReplayDivergenceError` migrated from `RuntimeError` to `ReplayError`.
+Constructor signature (`event_id`, `expected`, `actual`) preserved so
+the 384 v0–v0.9 tests still pass unchanged.
+
+Snapshot files under `tests/snapshots/errors/`:
+
+- `replay_divergence__prompt_hash_mismatch.txt`
+- `replay_divergence__type_mismatch.txt`
+- `replay_divergence__short_live.txt`
+- `replay_divergence__extra_live.txt`
+
+Each snapshot is byte-identical; `UPDATE_SNAPSHOTS=1` regenerates them
+and the doc-site reference page at `docs/reference/errors/<slug>.md`
+(landing in a later v1.0 PR) must be updated in the same commit.
+
+Tests added: 18 in `tests/test_errors_format.py`. Format check is
+structural (section headers in order, 2-space body indent, doc URL in
+`More:`), not regex — multi-line bodies with internal blank lines (as in
+the `How to fix:` of a real ReplayDivergenceError) pass.
+
+### Format spec amendments noted during PR-A
+
+The `How to fix:` section in real errors often runs to multiple
+paragraphs separated by blank lines (a "Identify the behavior… / Then
+diff against current source…" structure). The format spec's "2-space
+indent for the body" applies to every non-blank line; blank lines stay
+blank. Code blocks inside the body are indented further (4 additional
+spaces) for visual separation. The format snapshot tests are structural,
+not regex, to accommodate this.
+
+PR-B through PR-F will encounter similar prose conventions in their
+categories. The convention: 2-space indent for body lines, 4-extra-space
+indent for code blocks, blank line for paragraph breaks. Cosmetic, but
+locking it now means the 50+ error pages on the doc site look uniform.
+
+### v1.0 CLI follow-ons landed (between PR-A and PR-B)
+
+PR-A's reference error messages point at operator flags that did not
+yet exist (`activegraph fork --record`, `activegraph inspect --event`,
+`activegraph inspect --pack-version`, `activegraph inspect --behaviors`).
+Per the v1.0 plan review, the right tradeoff is to build the flags so
+the recovery prose stays useful, rather than dumb the error messages
+down to reference only what existed before PR-A.
+
+The four flags are CLI surface over existing APIs — no new runtime
+capability, in line with the v1.0 ban:
+
+- **`activegraph inspect <run> --event <id>`** prints one event's full
+  payload (text or JSON). The event lookup is `next(e for e in
+  rt.graph.events if e.id == event_id)` — no new runtime API.
+- **`activegraph inspect <run> --behaviors`** prints only the
+  registered-behaviors section. Reuses `rt.status(recent=0)` and
+  filters output.
+- **`activegraph inspect <run> --pack-version`** prints every
+  `pack.loaded` event in the run with the pack name, version, and
+  every prompt's version + truncated content hash (the same hash that
+  `ReplayDivergenceError` compares against). Filters events for
+  `e.type == "pack.loaded"`.
+- **`activegraph fork --record`** appends `-recording` to the fork's
+  label (or sets it to `recording` if none was given) and prints
+  follow-on guidance: "load this run without `replay_strict=True` to
+  accept new LLM/tool cache entries." The actual recording semantics
+  emerge from how the new run is later loaded — the flag is operator
+  UX over the existing fork primitive, not a new runtime mode.
+
+The three `inspect` selectors are mutually exclusive (selectors, not
+filters). Combining them is a usage error.
+
+Tests added: 10 in `tests/test_cli.py` (one happy path per flag,
+JSON variants, mutual-exclusion check, not-found for unknown event id).
+
+PR-B through PR-G can now write recovery prose pointing at flags that
+exist.
+
+### v1.0 PR-B landed (PatternError, second-smallest category)
+
+`UnsupportedPatternError` (the sole leaf under `PatternError`) migrated
+to the v1.0 structured format. Re-parented from `SyntaxError` to
+`PatternError(ActiveGraphError)` with `SyntaxError` kept via multi-
+inheritance so user code that catches `SyntaxError` around pattern
+compilation continues to work.
+
+16 raise sites in `activegraph/runtime/patterns.py` converted, grouped
+into two factory class methods that produce the canonical voice for the
+two failure modes:
+
+- **`UnsupportedPatternError.refused_feature(feature=, workaround=, at=)`**
+  for the case where a recognized Cypher feature is deliberately refused
+  by the v0.7 subset. The factory provides a uniform "Why:" explaining
+  the testability and audit-trail rationale; the caller passes the
+  per-feature workaround.
+
+- **`UnsupportedPatternError.syntax_error(what=, expected=, got=, at=)`**
+  for parser-level failures (unexpected character, expected X got Y,
+  missing relationship type, unexpected trailing tokens). Uniform
+  "Why:" and "How to fix:" pointing the developer at the offending
+  position and the docs reference.
+
+Per-keyword workaround prose lives in `_KEYWORD_WORKAROUNDS` (17 keys —
+every keyword in `_FORBIDDEN_KEYWORDS` has a specific "do this in the
+behavior body instead" answer). Avoids the generic "use the supported
+subset" failure that v0.9's messages produced.
+
+Internal evaluator errors (`unknown operator`, `unrecognized WHERE AST
+node`) use direct structured construction with prose framing them as
+internal inconsistencies — the recovery is "file an issue with the
+offending pattern."
+
+Snapshot files under `tests/snapshots/errors/`:
+
+- `unsupported_pattern__or_in_where.txt`
+- `unsupported_pattern__variable_length_path.txt`
+- `unsupported_pattern__undirected_relationship.txt`
+- `unsupported_pattern__optional_keyword.txt`
+- `unsupported_pattern__unexpected_character.txt`
+- `unsupported_pattern__relationship_type_required.txt`
+
+Tests added: 10 in `tests/test_errors_format.py`. Snapshot review
+doubles as voice review per CONTRACT v1.0 #3 voice-principle clause.
+
+Backward-compat preserved: all 38 pre-existing pattern tests pass
+unchanged. Their `pytest.raises(..., match="...")` substring patterns
+still match because every existing test substring (`"OR is not
+supported"`, `"variable-length"`, `"undirected"`, `"unexpected
+character"`, `"type required"`, the dynamic-keyword substrings) appears
+in the new summary or body verbatim. Feature labels in
+`refused_feature` calls were chosen to preserve these substrings.
+
+The `at` attribute on every raise is preserved on the new class for
+back-compat with user code that reads it.
+
+422 tests pass (412 + 10 new). All v0–v0.9 tests pass unchanged.
+
+### v1.0 PR-C landed (StorageError, audit-driven)
+
+Audit of `activegraph/store/` surfaced **4 new concrete leaves** beyond
+the 2 pre-existing storage errors. The audit-as-side-effect rationale
+for the PR series (CONTRACT v1.0 #C1) paid off here: a mechanical
+find-replace would have migrated only the named classes and left the
+bare-`RuntimeError`/`KeyError`/`ValueError` raises as hidden surface.
+
+**Migrated (re-parented to StorageError):**
+
+- `NonSerializableEventError(StorageError, TypeError)` — emit-time
+  failure to JSON-encode. Multi-inherits TypeError for back-compat.
+  Now walks the payload to identify the offending field path and
+  reports it in the structured "What failed:".
+- `InvalidStoreURL(StorageError, ValueError)` — 7 raise sites with
+  per-shape recovery prose (bare-path → exact corrected URL, missing
+  path, missing host, unsupported scheme).
+
+**New leaves under `activegraph/store/errors.py`:**
+
+- `SchemaVersionMismatch` — was bare `RuntimeError` in `sqlite.py:112`
+  and `postgres.py:211`. Recovery enumerates the three concrete
+  actions (upgrade activegraph, migrate runs, drop expendable store).
+  Includes framework version + recorded version in context for
+  triage.
+- `EventNotFoundError(StorageError, KeyError)` — was bare `KeyError`
+  at 7 sites across `memory.py` / `sqlite.py` / `postgres.py`. Two
+  shapes of recovery: lookup misses point at `inspect --tail`, fork
+  misses point at `inspect --tail` against the parent run.
+  Multi-inherits `KeyError` for back-compat with user code catching
+  the builtin.
+- `DuplicateEventError(StorageError, ValueError)` — was bare
+  `ValueError` at `memory.py:22`. Frames the failure as a programmer
+  error (the runtime's id generator is monotonic; duplicates in
+  production usage are bugs in fixtures/tests).
+- `CorruptedEventPayloadError` — new ground. `decode_payload` was
+  previously bubbling `json.JSONDecodeError` from corrupted stored
+  rows; now wraps it with structured prose pointing at how to inspect
+  surrounding events, how to manually repair via sqlite3/psql, and
+  the unrecoverable-fallback. The recovery prose deliberately does
+  NOT reference unimplemented CLI surface (the discipline note from
+  the PR-C review).
+
+**Flagged-not-migrated (insufficient context — discipline note):**
+
+- **SQLite `sqlite3.OperationalError`** under WAL contention. Multiple
+  distinct failure modes (lock timeout, journal corruption, disk full,
+  file-system permissions); each needs its own recovery prose. Bubbles
+  unwrapped today.
+- **Postgres `psycopg.OperationalError`** variants (auth, host
+  unreachable, db missing, conn dropped). Same shape as above —
+  per-mode recovery diverges enough that a single wrapper would lie.
+  Bubbles unwrapped today.
+- **`postgres.py:107` `TypeError`** (bad target type). This is
+  configuration shape, not storage. Defers to **PR-F**
+  (`ConfigurationError`).
+- **`postgres.py:73` `ImportError`** (missing psycopg). This is
+  "missing optional dependency at registration time." Defers to
+  **PR-E** (`RegistrationError`).
+
+These four are tracked as v1.0-rc1 follow-ons (dedicated DB-error PR
+post-rc1, but pre-1.0-final if a contributor with hands-on experience
+in the failure modes is available). If no contributor surfaces, they
+ship as-is for v1.0 — bubbling the underlying driver error is honest
+in the absence of correct recovery prose; making up prose would be
+worse.
+
+**Snapshot files:**
+
+- `invalid_store_url__bare_path.txt`
+- `invalid_store_url__unsupported_scheme.txt`
+- `non_serializable_event.txt`
+- `corrupted_event_payload.txt`
+- `schema_version_mismatch.txt`
+- `event_not_found.txt`
+- `duplicate_event.txt`
+
+Tests added: 11 in `tests/test_errors_format.py` (6 snapshots + 5
+back-compat assertions on multi-inheritance + 2 cross-checks that
+`except KeyError` / `except ValueError` still catch the new leaves).
+
+433 tests pass (422 + 11). Backward-compat absolute: all 384 v0-v0.9
+tests pass unchanged. The diligence demo (the v0.9 killer demo)
+still runs end-to-end against the migrated store layer with byte-
+identical trace output.
+
+**Hidden-surface count so far (audit value tracking):**
+
+- PR-A (ReplayError): 0 new leaves (single class)
+- PR-B (PatternError): 0 new leaves (single class, but 17 keyword
+  workaround branches that didn't exist as concrete prose)
+- PR-C (StorageError): **4 new leaves** + 4 flagged for follow-on
+
+Useful data for v1.1 planning. The PatternError keyword table and the
+PR-C new leaves both came from audit-as-side-effect work that a
+mechanical rewrite would have missed.
+
+### v1.0 CLI follow-ons landed (between PR-C and PR-D)
+
+Two follow-ons triggered by PR-C review:
+
+**`activegraph migrate --skip-corrupted`** — the operator-facing recovery
+tool that `CorruptedEventPayloadError`'s prose pointed at. Without this
+flag, the prose was honest but the floor was too high (manual sqlite3/psql
+repair). The principle: every error message that points at "manual repair"
+is a finding that the framework owes the operator a tool.
+
+Implementation (no new runtime capability):
+
+- New optional `skip_corrupted: bool` parameter on
+  `activegraph.observability.migration.migrate()` and on
+  `_migrate_one_run`.
+- New driver-specific helpers `_iter_sqlite_skip_corrupted` and
+  `_iter_postgres_skip_corrupted`. These iterate raw rows and decode
+  each one individually so a single `CorruptedEventPayloadError` is
+  recorded-and-skipped rather than killing the whole iterator (Python
+  generators die after raising — that's why the existing `iter_events`
+  can't be wrapped in a per-row try/except).
+- New `skipped_events: tuple[str, ...]` field on `MigrationRunReport`.
+  Lists the event ids that were skipped. Empty on a clean migration.
+- `--skip-corrupted` flag on the CLI command. Text mode prints
+  `skipped (corrupted): <event_id>` per skipped row; JSON mode adds
+  `skipped_events: [...]` to each run's report shape.
+- `CorruptedEventPayloadError`'s recovery prose updated to reference
+  the flag as the first option. Manual sqlite3/psql repair remains in
+  the prose as the second option (for operators with a backup of the
+  original payload) — preferable to skip-and-lose when possible.
+
+The skip-corrupted path is a **partial recovery**: the destination run
+is missing the corrupt event. The operator is on notice via both the
+flag's help text and the per-run report. Idempotency keys on
+`(id, run_id)` mean re-running the migration after a manual repair
+won't duplicate.
+
+**Version-sync CI gate** — new `tests/test_version_sync.py` asserts that
+`activegraph.__version__` matches `pyproject.toml`'s `[project] version`.
+Caught the stale `__version__ = "0.9.0"` constant during PR-B (pyproject
+was already `0.9.1`); the gate prevents the next drift. Every error
+message that embeds the version (PR-B internal-error contexts, PR-C
+SchemaVersionMismatch) reads `activegraph.__version__`, so a drift
+would produce wrong-version error reports — exactly the confusing
+GitHub Issue we want to avoid.
+
+Tests added: 3 for `--skip-corrupted` (JSON shape with skipped_events,
+text-mode output naming skipped ids, default-strict behavior preserved)
+plus 1 for the version-sync gate.
+
+437 tests pass (433 + 4). All v0–v0.9 tests pass unchanged.
+
+### v1.0 PR-D landed (ExecutionError, smallest scope of the series)
+
+The pre-series intuition was that PR-D would have a "probable cluster
+of bare-RuntimeError raises around behavior dispatch and budget
+enforcement." The audit found that intuition mostly wrong: behavior
+failures and budget exhaustion both use the **event-driven, not
+exception-driven** pattern, so there's no exception class to migrate
+for either. The bare-RuntimeError sites that exist around runtime
+dispatch are about runtime configuration constraints (fork on
+non-SQLite, etc.) and defer to PR-F (`ConfigurationError`).
+
+PR-D ends up the smallest in the series — exactly the kind of finding
+that makes audit-as-side-effect worthwhile. We confirm what's there,
+confirm what isn't there, and move on without making up scope.
+
+**Migrated (3 classes):**
+
+- `LLMBehaviorError(ExecutionError, Exception)` — the LLM-side carrier.
+  The ``(reason, message, payload_extras)`` constructor signature is
+  preserved (~8 internal raise sites in providers do not change).
+  Structured fields auto-derive from ``reason`` via the per-reason
+  prose table `_LLM_REASON_PROSE` — same pattern as PR-B's
+  `_KEYWORD_WORKAROUNDS`. Five reason codes have dedicated prose
+  (`llm.parse_error`, `llm.schema_violation`, `llm.fixture_missing`,
+  `llm.rate_limited`, `llm.network_error`); unknown reasons fall
+  through to a generic-but-format-compliant fallback.
+
+- `ToolError(ExecutionError, Exception)` — the tool-side carrier.
+  Same shape as LLMBehaviorError. Six reason codes with dedicated
+  prose (`tool.timeout`, `tool.network_error`, `tool.invalid_input`,
+  `tool.invalid_output`, `tool.execution_error`, `tool.fixture_missing`).
+
+- `UnknownToolError(ExecutionError, RuntimeError)` — direct
+  structured construction. Multi-inherits `RuntimeError` for back-compat.
+  Updated the one runtime call site to pass `tool_name`, `behavior_name`,
+  and `declared_tools` so the error names the mismatch concretely
+  instead of just the offending tool.
+
+**New leaf (1 class):**
+
+- `ApprovalNotFoundError(ExecutionError, LookupError)` — was bare
+  `LookupError` at 2 sites in `runtime.approve()`. Multi-inherits
+  `LookupError` for back-compat. Context includes `pending_count` so
+  the message can say "There are currently 2 pending approvals;
+  none match" — useful when the user has typo'd an approval id while
+  approvals do exist.
+
+**Considered-not-created (worth documenting):**
+
+The v1.0 plan listed `BehaviorFailedError` and `BudgetExhaustedError`
+as expected ExecutionError leaves. Neither exists today, and PR-D
+deliberately doesn't create them. The framework's design uses
+events (not exceptions) for non-fatal stops:
+
+- Behavior failures emit ``behavior.failed`` events with the
+  original exception preserved in the payload (CONTRACT v0.6 #13).
+  Downstream code reads the event; there's no exception class
+  escaping to user code.
+- Budget exhaustion emits ``runtime.budget_exhausted`` and the
+  runtime stops gracefully. No exception.
+
+Adding exception classes here would change the design pattern, not
+just rename existing surface. Out of scope for the rewrite series.
+
+**Flag-not-migrate (deferred to other PRs):**
+
+- `MissingProviderError` (RuntimeError) — registration-time → PR-E
+- `MissingToolError` (RuntimeError) — registration-time → PR-E
+- Bare ValueError / LookupError around behavior/tool/pack lookups in
+  `runtime.py` — registration-time → PR-E
+- Bare ValueError / TypeError around config args — PR-F
+- Bare RuntimeError at `runtime.py:1928` (fork requires SQLite-backed
+  runtime) — runtime configuration constraint → PR-F
+- Scheduler ValueError around `activate_after` parsing — behavior
+  registration → PR-E
+
+**Snapshot files:**
+
+- `llm_behavior_error__parse_error.txt`
+- `llm_behavior_error__schema_violation.txt`
+- `llm_behavior_error__fixture_missing.txt`
+- `tool_error__timeout.txt`
+- `tool_error__execution_error.txt`
+- `unknown_tool_error.txt`
+- `approval_not_found.txt`
+
+Tests added: 13 in `tests/test_errors_format.py`.
+
+450 tests pass (437 + 13). All v0–v0.9 tests pass unchanged. The
+diligence demo still runs end-to-end with byte-identical trace.
+
+**Hidden-surface count update:**
+
+- PR-A (ReplayError): 0 new leaves
+- PR-B (PatternError): 0 new + 17 keyword-workaround branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): **1 new** + 6 flagged (most flagged-to-other-PR
+  of any PR so far; the audit confirmed the existing scope is small
+  and the runtime/dispatch raise cluster is properly registration- or
+  configuration-flavored, not execution-flavored)
+
+Running total: 5 new leaves + ~17 in-message prose-table branches +
+10 flagged-for-other-PRs. Audit value remains positive but trending
+toward "the existing scope already covers most of the framework";
+PR-E and PR-F should see the bulk of remaining migration since
+they're where the bare-builtin clusters live.
+
+### v1.0 PR-E landed (RegistrationError, largest by class count)
+
+PR-E audit produced **8 new leaves + 7 re-parented + 22 partial
+migrations + 7 flagged-not-migrated**, organized below by sub-category
+as a structured audit report. Every raise in scope was confirmed
+caller-actionable per CONTRACT v1.0 #4b; no events created.
+
+#### Sub-category 1: LLM / Tool registration (2 re-parented)
+
+- **`MissingProviderError(RegistrationError, RuntimeError)`** — was
+  bare RuntimeError. Now constructed with optional `behavior_name=`;
+  recovery shows both `AnthropicProvider()` and
+  `RecordedLLMProvider(...)` construction.
+- **`MissingToolError(RegistrationError, RuntimeError)`** — was bare
+  RuntimeError. New signature `(tool_name, *, behavior_name=,
+  registered=)`. The two call sites pass `registered=tuple(
+  tool_registry.keys())` so the rendered message enumerates the
+  available tools.
+
+#### Sub-category 2: Pack registration (5 re-parented, 1 new)
+
+The five Pack* registration leaves multi-inherit
+`(RegistrationError, PackError)` so `except PackError` and
+`except RegistrationError` both catch them. `PackSchemaViolation`
+stays PackError-only — it fires at add_object, not load_pack — and
+migrates to structured format in PR-G.
+
+- `PackValidationError(RegistrationError, PackError)` — re-parented
+- `PackConflictError(RegistrationError, PackError)` — re-parented;
+  two high-traffic call sites in `loader.py` migrated to structured
+  format (behavior + tool name conflict). Recovery enumerates the
+  three concrete actions (pick one, rename, separate runtime).
+- `PackVersionConflictError(RegistrationError, PackError)` —
+  re-parented; the `loader.py` site migrated.
+- `PackSettingsMissingError(RegistrationError, PackError)` — re-parented
+- `PackPromptLoadError(RegistrationError, PackError)` — re-parented
+- `PackNotFoundError(RegistrationError, LookupError)` — **new**.
+  Replaces bare LookupError at `packs/__init__.py:782`. Recovery
+  shows `pip show`, `discover()`, and the exact pyproject.toml
+  entry-point declaration.
+
+Each Pack* class also gained its own `_doc_slug` so the
+`More:` URL points at a class-specific doc page
+(`pack-conflict-error`, `pack-version-conflict-error`, etc.) instead
+of the generic `registration-error`.
+
+**Partial migration note:** 22 of the 28 Pack* registration-error
+raise sites are unmigrated — they continue using the legacy
+single-message ActiveGraphError __init__ branch (format-noncompliant
+but valid). PR-E migrated only the 2 high-value loader.py sites where
+the rich pack-conflict context was worth the prose. The classes are
+in the v1.0 hierarchy; messages catch up incrementally as a
+v1.0-rc1 follow-on.
+
+#### Sub-category 3: Runtime lookup (4 new)
+
+- **`BehaviorNotFoundError(RegistrationError, LookupError)`** — was
+  bare LookupError at 3 sites in `runtime.get_behavior()`. New
+  signature `(name, *, registered=, pack_state=)` carries the
+  candidate list so "What failed:" names actual registered behaviors.
+- **`AmbiguousBehaviorError(RegistrationError, ValueError)`** — was
+  bare ValueError at 1 site. Names which packs collide. Recovery
+  shows the canonical form using one conflicting pack as a copy-paste
+  example.
+- **`ToolNotFoundError(RegistrationError, LookupError)`** — was bare
+  LookupError at 3 sites. Symmetric with `BehaviorNotFoundError`.
+- **`AmbiguousToolError(RegistrationError, ValueError)`** — was bare
+  ValueError at 1 site. Symmetric with `AmbiguousBehaviorError`.
+
+#### Sub-category 4: Scheduler + Runtime construction (2 new)
+
+- **`InvalidActivateAfter(RegistrationError, ValueError)`** — was
+  bare ValueError at 5 sites in `scheduler.parse_activate_after`.
+  Single class with a `kind` discriminator (bool-not-int, wall-clock,
+  unparseable, wrong-type, out-of-range). Each variant has its own
+  recovery prose; the "Why:" is uniform (event-count not wall-clock,
+  CONTRACT v0.7 #13).
+- **`InvalidToolRegistration(RegistrationError, TypeError)`** — was
+  bare TypeError at `runtime.py:381`. Constructor takes the offending
+  value; "What failed:" shows the value and its type. Recovery shows
+  the @tool decorator pattern.
+
+#### Sub-category 5: Optional-dependency import-time (1 new, shared)
+
+- **`MissingOptionalDependency(RegistrationError, ImportError)`** —
+  was 3 bare `raise ImportError(...)` sites:
+  - `activegraph/packs/__init__.py:52` (pydantic missing)
+  - `activegraph/store/postgres.py:73` (psycopg missing)
+  - `activegraph/observability/prometheus.py:95` (prometheus_client
+    missing)
+
+  Single shared class; construct with `package=`, `feature=`,
+  `extras=`. Recovery prose builds the install line from `extras`
+  (`pip install 'activegraph[<extras>]'`). Lives in
+  `activegraph/errors.py` rather than a topic module since it's
+  cross-cutting — the only registration leaf at the base-module
+  level.
+
+#### Audit findings — flagged-not-migrated (deferred to other PRs)
+
+- `postgres.py:107` TypeError (bad target type) → **PR-F**
+- `runtime.py:166` RuntimeError (`ctx.propose_object` outside
+  context) → **PR-F**
+- `runtime.py:1938` RuntimeError (fork requires SQLite) → **PR-F**
+- `runtime.py:257, 1464, 1790, 1803` ValueError (argument validation)
+  → **PR-F**
+- `graph.py:240` RuntimeError ("graph already has a store") → **PR-F**
+- `graph.py:544` ValueError (patch not proposed) → **PR-G** or
+  v1.0-rc1 follow-on (patch lifecycle, post-PR-D territory)
+- `graph.py:766` ValueError (unknown where operator) — internal
+  evaluator → v1.0-rc1 follow-on (warrants framework-version context)
+
+#### Snapshot files (13, reverse-audit-order)
+
+Written hardest-first per the PR-E discipline note: the multi-pack
+interaction leaves were written first so the standard becomes the
+floor for the mechanical ones, not the ceiling.
+
+1. `pack_version_conflict.txt` — multi-pack version interaction
+2. `pack_conflict__behavior.txt` — multi-pack canonical-name conflict
+3. `ambiguous_behavior.txt` — short-name resolution
+4. `ambiguous_tool.txt` — same, tool side
+5. `pack_not_found.txt` — entry-point discovery
+6. `missing_optional_dependency__postgres.txt` — cross-cutting
+7. `missing_provider.txt`
+8. `missing_tool.txt`
+9. `behavior_not_found.txt`
+10. `tool_not_found.txt`
+11. `invalid_activate_after__wall_clock.txt`
+12. `invalid_activate_after__unparseable.txt`
+13. `invalid_tool_registration.txt`
+
+#### Tests, suite total, smoke
+
+Tests added: 16 in `tests/test_errors_format.py` (13 snapshots + 3
+hierarchy / back-compat assertions, including a check that
+`PackConflictError` and `PackVersionConflictError` retain `except
+PackError` lineage).
+
+466 tests pass (450 + 16). All v0–v0.9 tests pass unchanged. The
+diligence demo runs end-to-end with byte-identical trace output.
+
+#### Hidden-surface count update
+
+- PR-A (ReplayError): 0 new leaves
+- PR-B (PatternError): 0 new + 17 keyword-workaround branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): 1 new + 6 flagged
+- **PR-E (RegistrationError): 8 new + 22 partial-migration + 7 flagged**
+
+Running total: **13 new leaves** + ~17 prose-table branches + 22
+partial-format Pack* sites + ~17 flagged for other PRs / follow-ons.
+
+**v1.1 planning signal:** at 13 new leaves with 22 partial migrations
+still pending, this is the data the running count was designed to
+surface. **v1.1 should have an explicit "error-completeness"
+milestone**: finish the 22 partial Pack* migrations, address the
+4 deferred DB-error wrappers from PR-C, write recovery prose for the
+2 internal-evaluator cases that warrant framework-version context, and
+consolidate any PR-F / PR-G flagged items still pending after rc1.
+
+The 13 new leaves alone vindicates the audit-as-series approach: a
+mechanical find-replace across the 50+ pre-PR-A error sites would
+have produced 0 new leaves and 0 flagged-for-follow-on findings.
+
+### v1.0 PR-F landed (ConfigurationError + cross-category audit)
+
+PR-F audit looked at 9 candidate raise sites that were flagged as
+ConfigurationError on the PR-E hand-off list. Per the PR-F review
+discipline note ("Don't force fit. If a raise site looks like a
+configuration problem but is actually an execution-time invariant
+violation, classify it correctly"), the audit produced a
+**cross-category finding**:
+
+- **6 sites** → genuinely `ConfigurationError` (construction-time
+  argument validation, runtime backend constraints)
+- **2 sites** → reclassified to `ExecutionError` (execution-time
+  invariant violations that surfaced during the PR-F audit)
+- **1 site** → deferred to v1.0-rc1 follow-on (internal evaluator
+  inconsistency that warrants framework-version context, similar to
+  PR-B's two internal cases)
+
+This is the cleanest validation of the events-not-exceptions
+principle yet — the audit's first classification was wrong, and the
+principle's "exceptions interrupt control flow, events extend the
+audit trail" framing surfaced the right one on second reading.
+
+#### ConfigurationError leaves (3 new)
+
+- **`InvalidRuntimeConfiguration(ConfigurationError, ValueError)`** —
+  catch-all for argument-shape problems at construction or method-call
+  time. Used by 4 sites:
+  - `runtime.py:257` — conflicting `persist_to=` and `store=`
+  - `runtime.py:1460` — `recent < 0` in `status()`
+  - `runtime.py:1812` — `save_state(path=X)` when already attached to Y
+  - `runtime.py:1825` — `save_state()` with no store and no path
+  Construct with summary + structured fields; recovery prose is
+  per-site, not table-driven (each misconfiguration has a different
+  fix).
+- **`InvalidArgumentType(ConfigurationError, TypeError)`** — wrong
+  type at construction. Used by 1 site:
+  - `postgres.py:107` — PostgresEventStore target not URL / Connection
+    / ConnectionPool
+  Multi-inherits TypeError.
+- **`IncompatibleRuntimeState(ConfigurationError, RuntimeError)`** —
+  operation requires a runtime state that's not satisfied. Used by
+  2 sites:
+  - `runtime.py:1960` — fork() requires SQLite-backed runtime
+  - `graph.py:240` — attach_store when one is already attached
+  Recovery prose for the fork case flags the Postgres-native-fork
+  gap as a v1.1 follow-on (the primitive shape is known but needs
+  Postgres operational experience to land).
+
+#### Cross-category ExecutionError leaves (2 new)
+
+These were flagged to PR-F by PR-E's audit, but PR-F's closer reading
+reclassified them. They live in `activegraph/runtime/exec_errors.py`
+alongside PR-D's `ApprovalNotFoundError`.
+
+- **`RuntimeContextRequiredError(ExecutionError, RuntimeError)`** —
+  `ctx.propose_object` (or another ctx method requiring the runtime)
+  was called from a behavior whose context isn't runtime-bound.
+  Fires inside a running behavior — execution-time, not
+  construction-time. Recovery prose explains the "test fixture
+  mocked the ctx but not the runtime" pattern that produces it.
+- **`InvalidPatchLifecycleState(ExecutionError, ValueError)`** —
+  `graph.apply_patch(patch_id)` called on a patch that isn't in
+  `'proposed'` state. Fires during the patch lifecycle, mid-execution.
+  Recovery prose explains that re-applying an applied patch would
+  break the replay contract (duplicate `patch.applied` event).
+
+Both leaves' recovery prose cross-references
+`/concepts/failure-model` — the new doc page from CONTRACT v1.0 #4b
+addendum. Snapshot tests verify the URL appears.
+
+#### Deferred to v1.0-rc1 follow-on
+
+- `graph.py:766` `ValueError("unknown where operator: X")` —
+  internal evaluator inconsistency. Same shape as PR-B's two
+  internal-evaluator cases that got framework-version context. Defers
+  to a v1.0-rc1 follow-on commit that adds framework-version context
+  to internal-bug raises across the framework (PR-B's two,
+  graph.py's one, possibly more found during the doc-site phase).
+
+#### Snapshot files (8, reverse-audit-order)
+
+Hardest first: the two cross-category ExecutionError leaves were
+written first because their classification was the substantive
+finding of PR-F's audit. The mechanical ConfigurationError leaves
+inherited the standard.
+
+1. `runtime_context_required.txt` (cross-category, ExecutionError)
+2. `invalid_patch_lifecycle_state.txt` (cross-category, ExecutionError)
+3. `incompatible_runtime_state__fork.txt`
+4. `incompatible_runtime_state__attach_store.txt`
+5. `invalid_argument_type__postgres_target.txt`
+6. `invalid_runtime_config__conflicting_args.txt`
+7. `invalid_runtime_config__missing_arg.txt`
+8. `invalid_runtime_config__out_of_range.txt`
+
+#### Tests, suite total, smoke
+
+Tests added: 14 in `tests/test_errors_format.py` (8 snapshots + 3
+hierarchy assertions + 1 cross-category classification check + 2
+back-compat builtin-base assertions). Plus a check that the two
+cross-category leaves' recovery prose references
+`/concepts/failure-model` per the contract addendum.
+
+480 tests pass (466 + 14). All v0–v0.9 tests pass unchanged. The
+diligence demo runs end-to-end with byte-identical trace.
+
+#### Hidden-surface count update
+
+- PR-A (ReplayError): 0 new
+- PR-B (PatternError): 0 new + 17 prose branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): 1 new + 6 flagged
+- PR-E (RegistrationError): 8 new + 22 partial + 7 flagged
+- **PR-F (ConfigurationError + cross-category): 5 new (3 Config, 2 ExecutionError) + 1 flagged**
+
+Running total: **18 new leaves** + 17 prose branches + 22 partial +
+~18 flagged-for-follow-on.
+
+**v1.1 error-completeness milestone scope (now firmly real):**
+
+1. The 22 partial Pack* migrations (PR-E)
+2. The 4 deferred DB-error wrappers (PR-C)
+3. The internal-evaluator framework-version follow-on (3 sites:
+   PR-B's two + PR-F's one in graph.py:766)
+4. Any PR-G flagged items not done by rc1
+5. Real-user-test gate output (item 1 in the rc1 → v1.0 transition)
+
+#### Discipline win
+
+The discipline note that the audit's job is to surface what raise
+sites should have been classified as, not to force them into the
+target category, produced 2 reclassifications in 9 sites — a 22%
+correction rate. Both reclassifications happened because the
+events-not-exceptions principle (CONTRACT v1.0 #4b) gave the audit a
+sharper question than "is this Configuration?": it asks "is this
+caller-actionable at static configuration time, or is the caller
+already executing when it fires?" The Configuration vs. Execution
+distinction collapses to that single question.
+
+### v1.0 PR-G landed (PackError + internal-bug consistency pass)
+
+The last error-rewrite PR. Two subsections per the PR-G discipline
+note — the bundled scope covers two different question types ("what
+should this raise become?" vs. "are these three already-migrated
+messages consistent?") and the description keeps them separate so
+reviewers know which finding belongs to which.
+
+#### Subsection 1: PackError category — PackSchemaViolation migration
+
+`PackSchemaViolation` is the lone runtime-shape leaf in the
+PackError category (every other Pack* class is registration-time and
+migrated in PR-E). It fires from `graph.add_object` and
+`graph.add_relation` when data doesn't match the pack's declared
+schema, after the pack has loaded.
+
+Migrated to structured format with three factory class methods —
+same shape as PR-B's `UnsupportedPatternError.refused_feature` /
+`syntax_error`:
+
+- `PackSchemaViolation.for_object(object_type, validation_error, pack_name)`
+  — Pydantic ValidationError from a declared object schema
+- `PackSchemaViolation.for_relation_source(relation_type, source_type, allowed, pack_name)`
+  — relation source type not in declared allowed list
+- `PackSchemaViolation.for_relation_target(...)` — symmetric
+
+All three call sites in `activegraph/packs/loader.py` migrated. The
+factory methods carry `pack_name` so the message names which pack
+declared the schema — useful in multi-pack runtimes for triage.
+
+Recovery prose includes a concrete code example showing how to
+inspect the declared schema (`p.object_types`-style introspection),
+which is the operator's fastest path from "my add_object failed" to
+"oh, the field type is wrong."
+
+#### Subsection 2: Internal-bug consistency pass
+
+Three pre-existing internal-bug raise sites had drifted into three
+slightly different prose shapes — written across PR-B (two in
+`patterns.py`) and PR-F (one in `graph.py`, deferred at the time).
+PR-G normalizes them.
+
+**Shared helper:** `activegraph.errors.internal_bug_fields(...)`
+produces uniform structured fields for any internal-bug raise.
+Context dict shape locked at:
+
+- `internal: True`
+- `framework_version: activegraph.__version__`
+- `internal_error_location: <module>:<function> (<discriminator>)`
+- `report_url: <GitHub new-issue URL constant>`
+- plus per-site keys from `extra_context`
+
+Recovery prose locked at:
+
+> This is a framework bug, not a problem with your code.
+> Please file an issue and include the framework version, the
+> internal error location, and the full message above:
+>     https://github.com/yoheinakajima/activegraph/issues/new
+>
+>   framework version:   activegraph X.Y.Z
+>   internal location:   <module>:<function> (<discriminator>)
+
+**Three sites normalized:**
+
+- `activegraph/runtime/patterns.py:_eval_where` (unknown comparison
+  operator) — was an UnsupportedPatternError raise; now uses the
+  helper, prose is uniform with the other two.
+- `activegraph/runtime/patterns.py:_eval_where` (unrecognized AST
+  node) — same.
+- `activegraph/core/graph.py:evaluate_where` (unknown where
+  operator) — was a bare ValueError; now an
+  `InternalEvaluatorError(ExecutionError, ValueError)` (new class)
+  using the helper.
+
+**`GITHUB_NEW_ISSUE_URL` constant** in `activegraph/errors.py` is
+the single source of truth for the issue-filing URL across all
+internal-bug raises. Changes (if we ever migrate hosts) update one
+place.
+
+**New leaf:** `InternalEvaluatorError(ExecutionError, ValueError)`.
+The pattern-evaluator's two internal-bug raises keep using
+`UnsupportedPatternError` (natural PatternError category) since
+that's where the user would look. The graph view-filter case gets
+its own class since the natural category is ExecutionError.
+Different classes, identical prose via the shared helper.
+
+**Snapshot tests:** three for PackSchemaViolation (object, relation
+source, relation target), two for the internal-bug pattern + graph
+sites, plus uniformity assertions verifying all three internal-bug
+sites use the same context-dict shape, same recovery prose
+substrings, and the same GitHub URL constant. The uniformity
+assertion is the load-bearing test for this subsection — it catches
+prose drift before it ships.
+
+#### Snapshot files (5)
+
+PackError subsection:
+
+- `pack_schema_violation__object.txt`
+- `pack_schema_violation__relation_source.txt`
+- `pack_schema_violation__relation_target.txt`
+
+Internal-bug subsection:
+
+- `internal_bug__pattern_unknown_op.txt`
+- `internal_bug__graph_view_unknown_op.txt`
+
+(The second pattern internal-bug case — unrecognized AST node — is
+covered by the uniformity assertion rather than its own snapshot;
+the prose is structurally identical to the unknown-op case, so a
+third snapshot adds noise without adding signal.)
+
+#### Tests, suite total, smoke
+
+Tests added: 9 in `tests/test_errors_format.py` (5 snapshots + 1
+uniformity assertion across the three internal-bug sites + 1
+helper-shape assertion + 1 PackSchemaViolation lineage assertion +
+1 InternalEvaluatorError hierarchy assertion).
+
+489 tests pass (480 + 9). All v0–v0.9 tests pass unchanged. The
+diligence demo runs end-to-end with byte-identical trace.
+
+#### Hidden-surface count — series final tally
+
+- PR-A (ReplayError): 0 new
+- PR-B (PatternError): 0 new + 17 prose branches
+- PR-C (StorageError): 4 new + 4 flagged
+- PR-D (ExecutionError): 1 new + 6 flagged
+- PR-E (RegistrationError): 8 new + 22 partial + 7 flagged
+- PR-F (Config + cross-category Exec): 5 new + 1 flagged
+- **PR-G (PackError + internal-bug): 1 new + 3 normalized**
+
+**Series final: 19 new leaves migrated to structured v1.0 format.**
+
+The internal-bug consistency pass closed v1.1 follow-on item #3
+(the 3 internal-bug sites needing framework-version context) before
+v1.0-rc1 ships — every internal-bug site now uses the shared
+helper and produces uniform GitHub-Issue-ready output.
+
+#### v1.1 error-completeness milestone scope (after PR-G)
+
+1. The 22 partial Pack* migrations (still partial; v1.1 picks up
+   with fresh attention)
+2. The 4 deferred DB-error wrappers (PR-C)
+3. ~~The internal-evaluator framework-version follow-on~~ —
+   **closed by PR-G**
+4. Real-user-test gate output (from the rc1 → v1.0 transition)
+
+Net v1.1 scope: ~30 items remaining (down from the projected 41+
+after PR-F).
+
+#### What the PR series produced overall
+
+Seven PRs (PR-A through PR-G), three CLI follow-ons (the inspect
+flags + fork --record + migrate --skip-corrupted + version-sync gate),
+two CONTRACT amendments (#4b events-not-exceptions, #5 failure-model.md):
+
+- 19 new exception classes under the v1.0 hierarchy
+- 17 keyword/reason workaround tables (PR-B + PR-D)
+- 7 category bases + 1 cross-cutting MissingOptionalDependency
+- 1 shared internal-bug helper closing 3 sites uniformly
+- All 384 v0–v0.9 tests pass unchanged
+- 105 new tests in tests/test_errors_format.py
+- 33 snapshot files
+
+Next: doc-site phase. Build mkdocs-material setup, then write
+`failure-model.md` as the canonical reference for the principle that
+shaped the audit, then the per-error reference pages (one per leaf;
+the slug URLs from every snapshot resolve to a real page), then the
+auto-generated API reference. After that: quickstart command, 10-min
+tutorial, mypy gate, docstring gate, changelog, rc1.
+
+### Series-completion note: the principle as audit instrument
+
+CONTRACT v1.0 #4b (events-not-exceptions) was locked before PR-E to
+give the audit a rule to apply. It turned out to be more than
+documentation — it was the **audit instrument** that produced PR-F's
+22% reclassification rate and PR-D's "considered-then-rejected
+BehaviorFailedError / BudgetExhaustedError" finding. Both were
+caught because the principle gave the audit a sharper question than
+"is this the right category?": it asks "does this fire when the
+caller can reasonably catch and act on it at construction time, or
+is the caller already executing when it fires?"
+
+Without the principle, those classifications would have been made
+case-by-case across PRs, drifting silently. With it, the audit had
+a single rule to point at — and the rule did work.
+
+**Preserve the principle as audit instrument for v1.1.** The 22
+partial Pack* migrations from PR-E will be re-audited under the
+same principle when v1.1's error-completeness milestone runs. Some
+of them may turn out to be event-shaped (a `PackPromptLoadError`
+that fires during pack reload after the runtime is up may be a
+candidate for emit-event-instead, for instance). Re-apply the
+principle as the framing question, not just as the category map.
+
+### v1.0 #4c. Voice consistency across error messages and doc pages
+
+The per-error doc pages (one per leaf at `docs/reference/errors/<slug>.md`)
+are the long form of the error message. A reader hitting the page
+from an error message's `More:` link should feel like they're
+reading the same author — same active, declarative, invariant-naming
+voice locked in CONTRACT v1.0 #3.
+
+**Voice ceiling extends from error messages to doc pages.** If a
+per-error page drifts toward clinical reference-manual voice ("This
+error is raised when..."), the error message starts to feel like
+marketing for documentation that doesn't deliver. The doc page
+should answer:
+
+- **When does this fire?** Names the runtime condition concretely.
+- **What causes it?** The invariant being protected, not the
+  mechanism of the check (same as the error's `Why:`).
+- **How do I diagnose?** Pointer to `activegraph inspect`-style
+  commands, log fields to look at, surrounding events to check.
+- **How do I fix it?** The same recovery as the error's
+  `How to fix:`, expanded with examples and edge cases.
+- **What's related?** Cross-references to sibling errors in the
+  same category and to `/concepts/failure-model`.
+
+Per-error pages snapshot-review the same way error snapshots do:
+read the page, ask whether the voice is the same as the error
+message it's the long form of. If not, send it back.
+
+### v1.0 #4d. Broken-link CI gate (doc-site phase burndown)
+
+`tests/test_doc_links.py` is the broken-link CI precursor. It
+extracts every URL appearing in error message snapshots, CONTRACT
+cross-references, README links, and inter-page doc references, then
+maps each to its expected `docs/<section>/<page>.md` source path.
+Missing pages fail the test loud with a per-URL report.
+
+Initial state when the precursor landed: **33 missing pages**.
+That's the doc-site phase's burndown target. Each PR that adds doc
+pages turns red checks green. When the test passes, the doc site is
+complete enough to deploy.
+
+Plus a centralization check (`test_docs_base_url_is_centralized`)
+that catches hardcoded `https://...` URLs in the package — every
+doc-site URL must be constructed from `activegraph.errors.DOCS_BASE_URL`
+so the github.io→docs.activegraph.dev cutover is a one-line edit.
+
+Plus an orphan-page warning (`test_docs_orphans_are_reported_as_warnings`)
+that lists doc pages no error message, CONTRACT section, README, or
+other doc page references. Orphans are warnings, not failures —
+some are landing pages — but the maintainer sees the report and
+decides whether each orphan is intentional or doc-rot.
+
+**Doc-site phase build order.** With the broken-link gate failing
+loud, the order becomes a measurable burndown:
+
+1. `tests/test_doc_links.py` lands first (the gate). **Done.**
+2. mkdocs-material setup + GitHub Pages workflow + `CNAME` for
+   docs.activegraph.dev (with github.io fallback).
+3. `docs/concepts/failure-model.md` — the most-referenced page;
+   resolves multiple cross-references in one PR.
+4. Per-error reference pages in PR order:
+   - `docs/reference/errors/replay-divergence-error.md` (PR-A
+     reference, written first to lock the per-error voice)
+   - PR-B's pages (UnsupportedPatternError)
+   - PR-C's pages (5 leaves)
+   - PR-D's pages (4 leaves)
+   - PR-E's pages (12 leaves)
+   - PR-F's pages (5 leaves)
+   - PR-G's pages (PackSchemaViolation + InternalEvaluatorError)
+5. The remaining concepts/ + guides/ + cookbook/ + about/ pages.
+6. `mkdocstrings`-driven API reference under `docs/reference/api/`.
+
+After the burndown reaches zero (and the orphan warnings are
+resolved or accepted), the doc site is ready for v1.0-rc1.
+
+## v1.0 #4b. Events-not-exceptions principle (framework-wide)
+
+Surfaced by PR-D's audit and worth locking explicitly before PR-E
+runs. This is a framework-wide design rule, not just a v1.0 cleanup:
+
+> **Exceptions are for caller-facing failures the caller can
+> reasonably catch and act on. Non-fatal stops — budget exhaustion,
+> behavior failures, tool failures, approval denials — are events in
+> the log. The distinction: exceptions interrupt control flow; events
+> extend the audit trail. When in doubt, an event.**
+
+PR-D nearly added two exception classes (`BehaviorFailedError`,
+`BudgetExhaustedError`) that would have undermined this principle.
+The framework has used the events-not-exceptions pattern since v0.5
+but never wrote it down — load-bearing across nine milestones,
+discovered via audit. Locking it now means PR-E onward applies the
+rule explicitly:
+
+- **A raise site that should migrate but the right answer is
+  "delete this raise, emit an event instead":** delete and emit.
+  This is its own kind of audit finding, distinct from "migrate to
+  a new exception class." Count it in the hidden-surface tally as a
+  "removed-raise" instead of a "new-leaf."
+
+- **A new failure mode discovered during audit:** apply the
+  when-in-doubt-an-event rule. If the caller can't reasonably catch
+  and act on the failure (it's a side effect of the runtime loop,
+  a budget tick, a policy decision), it's an event. If the caller
+  is making a direct API call that fails (a lookup miss, a
+  schema-validation rejection, a typo in a CLI flag), it's an
+  exception.
+
+- **Existing exception classes that turn out to be event-shaped:**
+  PR-D considered then rejected creating `BehaviorFailedError` /
+  `BudgetExhaustedError`. The negative finding stands. If a future
+  PR thinks a similar class is missing, the burden is to demonstrate
+  it's caller-actionable, not just to point at the absence.
+
+This principle is downstream from CONTRACT v0.5 (the event log is the
+source of truth, replay reconstructs state) and CONTRACT v0.6 #13
+(behavior.failed is the canonical structured failure surface). It
+unifies their implications into one rule that's easier to apply.
+
+The doc site's `docs/concepts/events.md` (per #5 structure) gets a
+paragraph derived from this principle when the doc phase runs. The
+text writes itself from the rule.
+
+### v1.0 #4b addendum: canonical doc page is `failure-model.md`
+
+PR-F review confirmed: the principle is cross-cutting (applies to
+behaviors, tools, budgets, approvals, replay) so it gets its own page
+at `docs/concepts/failure-model.md` rather than being buried under
+`events.md` or `behaviors.md`. A reader who hits it on
+`behaviors.md` would assume it's a behavior thing; on `events.md`
+they'd assume it's an event-log thing. It is neither — it's the
+framework's stance on what counts as a recoverable failure.
+
+Snapshot recovery prose in PR-F and PR-G references the URL
+`/concepts/failure-model` as the canonical cross-reference target.
+The URL is stable from PR-F onward; the page is written during the
+doc-site phase. The cross-references work the moment the doc site
+builds.
+
+The page covers (~400-600 words):
+
+- The events-not-exceptions principle from #4b
+- The exception hierarchy and when to catch what
+- The `behavior.failed` / `tool.failed` event types and their
+  `reason` fields
+- The `runtime.budget_exhausted` event flow
+- The `approval.granted` / `approval.denied` event flow
+
+## v1.0 #5. Doc site structure is the contract
+
+```
+docs/
+  index.md                    # landing page
+  quickstart.md               # 10-minute tutorial
+  concepts/
+    graph.md
+    events.md
+    behaviors.md
+    relations.md
+    patches.md
+    views.md
+    frames.md
+    policies.md
+    replay.md
+    forking.md
+    patterns.md                 # v1.0 doc-site (PR-B batch): pattern
+                                # subscriptions as a first-class primitive.
+                                # Added to #5 because the cross-reference
+                                # from UnsupportedPatternError.syntax_error
+                                # recovery prose surfaced the structural
+                                # gap — pattern subscriptions have their
+                                # own decorator argument, their own CONTRACT
+                                # v0.7 #8 subset decisions, their own error
+                                # class. Burying them in behaviors.md
+                                # undersold a first-class primitive.
+    failure-model.md            # v1.0 PR-F: events-not-exceptions principle,
+                                # exception hierarchy, behavior.failed /
+                                # tool.failed flows, budget / approval events
+  guides/
+    writing-behaviors.md
+    writing-llm-behaviors.md
+    writing-tools.md
+    pattern-subscriptions.md
+    operating-in-production.md
+    authoring-packs.md
+  reference/
+    api/                      # auto-generated from docstrings
+    cli/
+    errors/                   # one page per error class
+    metrics/
+    events/
+  packs/
+    diligence.md
+  cookbook/
+    common-patterns.md
+    debugging.md
+    migration-from-v0-7.md
+  about/
+    architecture.md
+    roadmap.md
+    contributing.md
+    changelog.md
+```
+
+Build to this structure. Adding pages is fine; removing or
+restructuring is a contract change.
+
+## v1.0 #6. Every code block in docs is a snippet inclusion
+
+No inline code blocks in docs. Every example is a runnable file in
+`examples/` that is tested in CI, and the doc page embeds the file
+via mkdocs snippet inclusion. This prevents doc rot. Convention is
+documented in `CONTRIBUTING.md`.
+
+## v1.0 #7. Errors name names
+
+Every error includes the specific names of the things involved —
+behavior name, pack name, object id, event id, file path. Generic
+errors are bugs.
+
+Wrong: "Pack conflict detected"
+Right: "Pack conflict: 'diligence' and 'research' both declare object type 'Claim'"
+
+Snapshot tests lock specific instances of each error to enforce
+this.
+
+## v1.0 #8. No telemetry, no phone-home
+
+The framework runs offline; that's a feature. No analytics in the
+quickstart. No version-check pinging. Deployments that want
+telemetry add it through the metrics protocol.
+
+## v1.0 #9. Backward compatibility is absolute
+
+All 384 v0–v0.9 tests pass unchanged through every v1.0 PR. The two
+trace snapshot files updated in v0.9.1 are the new baseline; no
+further drift in v1.0.
+
+## v1.0 #10. What v1.0 deliberately does NOT add
+
+Locked deferral list (post-1.0 or never):
+
+- Web UI (never, per prior decisions)
+- Streaming LLM responses (post-1.0)
+- Multi-model routing (post-1.0)
+- More packs beyond Diligence — Memory pack, Research pack (post-1.0)
+- Pack registry or marketplace (post-1.0)
+- Error message internationalization (never; English only)
+- Video tutorials (separate project)
+- Adaptive question generation in Diligence pack (post-1.0 if at all)
+- Contradiction resolver in Diligence pack (post-1.0 if at all)
+- Richer fixture cardinality (re-affirm: v0.9 contract is 3 companies)
+- `--live` quickstart mode (post-1.0; see #C3)
+
+If a v1.0 PR finds itself building toward any of these, stop.
+
+v1.0 is about making the framework discoverable, learnable, and
+forgiving. The developer who tries this on a Friday afternoon is
+going to decide in the first 10 minutes whether they come back
+Monday. Slow down on implementation choices, speed up on user-facing
+polish, and remember that adoption-surface work is a different skill
+from runtime engineering.

@@ -1,0 +1,16 @@
+AmbiguousToolError: tool name 'fetch_docs' is ambiguous across loaded packs
+
+What failed:
+  The short tool name 'fetch_docs' resolves to tools in more than one loaded pack: 'diligence', 'research'. The runtime cannot pick one without an explicit choice.
+
+Why:
+  Same rule as behavior names (CONTRACT v0.9 #9): pack-prefixed names are canonical, short names are a convenience for the single-pack case. Multi-pack ambiguity is refused because picking one would silently swap which tool's schema validates the LLM's call.
+
+How to fix:
+  Use the canonical form:
+      rt.get_tool('diligence.fetch_docs')
+
+  If you want the @llm_behavior to be able to choose either pack's version, list both canonical names in its `tools=[...]` argument.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/ambiguous-tool-error

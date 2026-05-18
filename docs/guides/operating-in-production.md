@@ -10,7 +10,7 @@ a behavior that doesn't run on your machine, the README will help. If
 you have a behavior that runs fine on your machine but you need to put
 it somewhere a team can rely on it, you are in the right place.
 
-The companion example is [`examples/operate_a_run.py`](../examples/operate_a_run.py).
+The companion example is [`examples/operate_a_run.py`](https://github.com/yoheinakajima/activegraph/blob/main/examples/operate_a_run.py).
 Read it alongside this guide — every CLI command and library call shown
 here appears there. If the two ever disagree, the example is right.
 

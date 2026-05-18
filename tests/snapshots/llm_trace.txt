@@ -1,9 +1,10 @@
+[trace.flags]             prompt_normalized=true (1 llm request)
 [goal.created]            user: "Audit Q3"
 [behavior.started]        planner
 [object.created]          document#1 "Doc"
 [behavior.completed]      planner
 [behavior.started]        extractor  (matched object.created: document#1)
-[llm.requested]           evt_006  extractor  model=claude-sonnet-4-5 tokens_in~120 budget_remaining=$1.000 prompt_normalized=true
+[llm.requested]           evt_006  extractor  model=claude-sonnet-4-5 tokens_in~120 budget_remaining=$1.000
 [llm.responded]           evt_007  extractor  tokens_in=120 tokens_out=24 cost=$0.001 latency=0.5s
 [object.created]          claim#2 "Sample claim."
 [behavior.completed]      extractor

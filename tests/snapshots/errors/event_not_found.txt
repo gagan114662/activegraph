@@ -1,0 +1,19 @@
+EventNotFoundError: event 'evt_does_not_exist' not found in run 'run_test'
+
+What failed:
+  The in-memory store was asked for event 'evt_does_not_exist' (in iter_events(after=)) but no event with that id exists in run 'run_test'.
+
+Why:
+  Event ids are the addressing primitive for the entire framework — the replay cache, the causal-chain walk, and the fork primitive all reference events by id. A lookup against an unknown id is a bug in the caller; returning a default would silently corrupt the audit trail.
+
+How to fix:
+  Check the event id against the events that actually exist in this run. Common causes:
+    - typo in a hand-typed event id (evt_42 vs evt_042)
+    - referencing an id from a different run
+    - the run was truncated by an earlier fork or replay
+
+  Inspect the run's event log to see the valid ids:
+      activegraph inspect <store-url> --run-id run_test
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/event-not-found-error

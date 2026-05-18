@@ -64,9 +64,35 @@ def load_pack_into_runtime(
         if existing.version == pack.version:
             return False  # idempotent no-op
         raise PackVersionConflictError(
-            f"pack {pack.name!r} already loaded as version {existing.version!r}; "
-            f"cannot load version {pack.version!r}. A runtime cannot hold two "
-            f"versions of the same pack."
+            f"pack {pack.name!r}: already loaded version {existing.version!r}, attempted to load version {pack.version!r}",
+            what_failed=(
+                f"runtime.load_pack({pack.name!r}, version={pack.version!r}) "
+                f"was rejected because the runtime already holds "
+                f"{pack.name!r} version {existing.version!r}."
+            ),
+            why=(
+                "A runtime can hold at most one version of any pack. "
+                "Two versions would compete for the same canonical names "
+                "in the registry — `pack.behavior_name` would resolve "
+                "differently depending on dispatch order, which would "
+                "silently corrupt the audit trail."
+            ),
+            how_to_fix=(
+                f"Pick one version. If you need both behaviors, the older "
+                f"version's namespace can be retained under a renamed pack: "
+                f"copy the pack, change its `name=` declaration, and load "
+                f"both. The two versions then have distinct canonical "
+                f"namespaces.\n"
+                f"\n"
+                f"To unload the current version and load the new one, "
+                f"construct a fresh Runtime — load_pack does not support "
+                f"version swapping in place."
+            ),
+            context={
+                "pack": pack.name,
+                "loaded_version": existing.version,
+                "attempted_version": pack.version,
+            },
         )
 
     # ---- 2. settings ------------------------------------------------------
@@ -88,15 +114,68 @@ def load_pack_into_runtime(
         if canonical in state.behavior_owners:
             owner = state.behavior_owners[canonical]
             raise PackConflictError(
-                f"behavior name conflict: {canonical!r} is already provided by "
-                f"pack {owner!r}; pack {pack.name!r} also declares it"
+                f"behavior name conflict: {canonical!r} declared by both pack {owner!r} and pack {pack.name!r}",
+                what_failed=(
+                    f"runtime.load_pack({pack.name!r}) was rejected: the "
+                    f"behavior name {canonical!r} is already registered by "
+                    f"pack {owner!r}."
+                ),
+                why=(
+                    "Canonical names in the runtime registry are unique "
+                    "across loaded packs. Two packs claiming the same "
+                    "canonical name would silently route dispatch one way "
+                    "or the other depending on pack-load order; the runtime "
+                    "refuses the load instead so the conflict is visible "
+                    "and the operator decides which pack to keep."
+                ),
+                how_to_fix=(
+                    f"One of three actions:\n"
+                    f"  1. Don't load both packs in the same runtime — pick one.\n"
+                    f"  2. Rename one pack: copy its source, change the\n"
+                    f"     `Pack(name=...)` declaration, re-install, and load\n"
+                    f"     under the new name. The behaviors are then under\n"
+                    f"     a different canonical prefix.\n"
+                    f"  3. If both behaviors should run, the second pack's\n"
+                    f"     pyproject can re-export the behavior under a\n"
+                    f"     different name within its declaration."
+                ),
+                context={
+                    "kind": "behavior",
+                    "canonical": canonical,
+                    "owner_pack": owner,
+                    "conflicting_pack": pack.name,
+                },
             )
     for canonical in new_canonical_tools:
         if canonical in state.tool_owners:
             owner = state.tool_owners[canonical]
             raise PackConflictError(
-                f"tool name conflict: {canonical!r} is already provided by "
-                f"pack {owner!r}; pack {pack.name!r} also declares it"
+                f"tool name conflict: {canonical!r} declared by both pack {owner!r} and pack {pack.name!r}",
+                what_failed=(
+                    f"runtime.load_pack({pack.name!r}) was rejected: the "
+                    f"tool name {canonical!r} is already registered by pack "
+                    f"{owner!r}."
+                ),
+                why=(
+                    "Tool canonical names are unique across loaded packs "
+                    "for the same reason behavior names are: silent "
+                    "dispatch routing would let an @llm_behavior call the "
+                    "wrong pack's tool, with a potentially-different "
+                    "input/output schema. Refusing the load surfaces the "
+                    "conflict at registration time."
+                ),
+                how_to_fix=(
+                    f"Same as behavior conflicts (above):\n"
+                    f"  1. Pick one pack.\n"
+                    f"  2. Rename one pack to namespace its tools.\n"
+                    f"  3. Use a separate runtime per pack if both must run."
+                ),
+                context={
+                    "kind": "tool",
+                    "canonical": canonical,
+                    "owner_pack": owner,
+                    "conflicting_pack": pack.name,
+                },
             )
     for type_name in pack_object_type_names:
         if type_name in state.object_type_owners:
@@ -571,8 +650,11 @@ def _make_object_validator(state: PackRuntimeState):
         try:
             validated = schema(**data)
         except ValidationError as e:
-            raise PackSchemaViolation(
-                f"object_type {object_type!r}: {e}"
+            pack_name = state.object_type_owners.get(object_type)
+            raise PackSchemaViolation.for_object(
+                object_type=object_type,
+                validation_error=e,
+                pack_name=pack_name,
             ) from e
         return validated.model_dump()
     return _validate
@@ -583,15 +665,20 @@ def _make_relation_validator(state: PackRuntimeState):
         spec = state.relation_type_specs.get(relation_type)
         if spec is None:
             return
+        pack_name = state.relation_type_owners.get(relation_type)
         if spec.source_types and source_type is not None and source_type not in spec.source_types:
-            raise PackSchemaViolation(
-                f"relation_type {relation_type!r}: source object type {source_type!r} "
-                f"is not in allowed source types {list(spec.source_types)}"
+            raise PackSchemaViolation.for_relation_source(
+                relation_type=relation_type,
+                source_type=source_type,
+                allowed=list(spec.source_types),
+                pack_name=pack_name,
             )
         if spec.target_types and target_type is not None and target_type not in spec.target_types:
-            raise PackSchemaViolation(
-                f"relation_type {relation_type!r}: target object type {target_type!r} "
-                f"is not in allowed target types {list(spec.target_types)}"
+            raise PackSchemaViolation.for_relation_target(
+                relation_type=relation_type,
+                target_type=target_type,
+                allowed=list(spec.target_types),
+                pack_name=pack_name,
             )
     return _validate
 

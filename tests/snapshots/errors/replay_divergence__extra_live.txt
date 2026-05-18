@@ -1,0 +1,22 @@
+ReplayDivergenceError: replay diverged at evt_201: live re-run produced an unrecorded event
+
+What failed:
+  At the position pinned to event evt_201, the live re-run produced an event of type 'event.emitted', but the recorded log had no event here.
+    recorded:  <no event recorded>
+    live:      'event.emitted'
+
+Why:
+  Strict replay requires the live re-run's event stream to match the recording position-for-position. An extra live event means a behavior fires now that did not fire in the recorded run — usually because a new behavior was added, or a pattern subscription was loosened.
+
+How to fix:
+  List the behaviors currently registered and compare against the recorded
+  pack version:
+      activegraph inspect <parent-run> --behaviors
+
+  If the new behavior is intentional, re-record from this position:
+      activegraph fork <parent-run> --at-event evt_201 --record
+
+  If the behavior shouldn't fire here, tighten its trigger conditions.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/replay-divergence-error

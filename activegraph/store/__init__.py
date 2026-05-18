@@ -12,18 +12,28 @@ connection URL (sqlite:///... or postgres://...).
 """
 
 from activegraph.store.base import EventStore, RunRecord, replay_into
+from activegraph.store.errors import (
+    CorruptedEventPayloadError,
+    DuplicateEventError,
+    EventNotFoundError,
+    SchemaVersionMismatch,
+)
 from activegraph.store.memory import InMemoryEventStore
 from activegraph.store.serde import NonSerializableEventError
 from activegraph.store.sqlite import SQLiteEventStore
 from activegraph.store.url import InvalidStoreURL, StoreURL, open_store, parse_store_url
 
 __all__ = [
+    "CorruptedEventPayloadError",
+    "DuplicateEventError",
+    "EventNotFoundError",
     "EventStore",
     "InMemoryEventStore",
     "InvalidStoreURL",
     "NonSerializableEventError",
     "RunRecord",
     "SQLiteEventStore",
+    "SchemaVersionMismatch",
     "StoreURL",
     "open_store",
     "parse_store_url",

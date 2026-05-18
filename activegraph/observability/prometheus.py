@@ -92,8 +92,10 @@ def _require_client() -> Any:
     try:
         import prometheus_client  # type: ignore
     except ImportError as e:
-        raise ImportError(
-            "PrometheusMetrics requires prometheus_client. Install with "
-            "`pip install 'activegraph[prometheus]'`."
+        from activegraph.errors import MissingOptionalDependency
+        raise MissingOptionalDependency(
+            package="prometheus_client",
+            feature="PrometheusMetrics",
+            extras="prometheus",
         ) from e
     return prometheus_client

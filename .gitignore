@@ -14,3 +14,6 @@ dist/
 .ruff_cache/
 .DS_Store
 *.activegraph
+
+# mkdocs build output
+site/

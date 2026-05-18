@@ -1,0 +1,185 @@
+# Active Graph documentation site. CONTRACT v1.0 #5 / #4d.
+#
+# The nav block declares only pages that exist; PRs that add doc
+# pages add their nav entries in the same commit. The broken-link
+# checker (tests/test_doc_links.py) is the burndown meter for the
+# doc-site phase.
+#
+# Custom domain: docs.activegraph.dev (CONTRACT v1.0 #C6). Until
+# DNS is live, the site serves on the github.io fallback. The
+# `docs/CNAME` file is the trigger for the custom-domain swap.
+
+site_name: Active Graph
+site_url: https://docs.activegraph.dev/
+site_description: An event-sourced reactive graph runtime for long-running, auditable, agentic systems.
+site_author: Active Graph contributors
+
+repo_name: yoheinakajima/activegraph
+repo_url: https://github.com/yoheinakajima/activegraph
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      # API reference rendering. CONTRACT v1.0 #C2 (tiered docstring
+      # coverage) + #5 (doc-site structure). The audit script at
+      # scripts/audit_docstrings.py produces the coverage report
+      # consumed by the docstring-gate CI commit.
+      handlers:
+        python:
+          options:
+            # The framework's docstrings are mostly free-form Markdown
+            # rather than structured (Google/NumPy/Sphinx). The Google
+            # parser is the most tolerant default and falls back to
+            # raw rendering for unstructured prose.
+            docstring_style: google
+            # Render methods in source order — matches reading order
+            # in the .py file. Alphabetic order would scramble
+            # related-method groupings.
+            members_order: source
+            # The API reference renders the API contract, not the
+            # implementation. Readers who want source go to GitHub.
+            show_source: false
+            # Show base classes for class members so the v1.0
+            # category hierarchy is visible.
+            show_bases: true
+            # Show the inheritance hierarchy so multi-inherit pairs
+            # like NonSerializableEventError(StorageError, TypeError)
+            # render with both base classes.
+            show_inheritance_diagram: false
+            # Group by category (attributes, methods, etc.) for
+            # readability on long classes like Runtime.
+            group_by_category: true
+            # Heading levels: page title is h1, top-level symbols are
+            # h2 (one per ::: directive).
+            heading_level: 2
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+  - pymdownx.tabbed:
+      alternate_style: true
+
+# Strict mode is OFF during the doc-site phase. The broken-link CI
+# gate (tests/test_doc_links.py) is the canonical burndown meter —
+# enabling strict here would duplicate the signal at build time and
+# block deploys until every page exists. Flip to `strict: true` in
+# the final doc-site phase commit (after the burndown reaches zero)
+# so subsequent typos in cross-references fail the build.
+strict: false
+
+# Nav: only pages that exist today. Grows with the doc-site phase.
+nav:
+  - Home: index.md
+  - Concepts:
+      - Graph: concepts/graph.md
+      - Events: concepts/events.md
+      - Behaviors: concepts/behaviors.md
+      - Relations: concepts/relations.md
+      - Patches: concepts/patches.md
+      - Views: concepts/views.md
+      - Frames: concepts/frames.md
+      - Pattern subscriptions: concepts/patterns.md
+      - Policies: concepts/policies.md
+      - Replay: concepts/replay.md
+      - Forking: concepts/forking.md
+      - Failure model: concepts/failure-model.md
+  - Guides:
+      - Operating in production: guides/operating-in-production.md
+      - Authoring packs: guides/authoring-packs.md
+  - Cookbook:
+      - Common patterns: cookbook/common-patterns.md
+      - Debugging: cookbook/debugging.md
+      - Migration from v0.7: cookbook/migration-from-v0-7.md
+  - Reference:
+      - CLI: reference/cli.md
+      - API reference:
+          - Overview: reference/api/index.md
+          - Runtime: reference/api/runtime.md
+          - Graph: reference/api/graph.md
+          - Behaviors: reference/api/behaviors.md
+          - Tools: reference/api/tools.md
+          - Store: reference/api/store.md
+          - Packs: reference/api/packs.md
+          - Errors: reference/api/errors.md
+          - Observability: reference/api/observability.md
+          - Diligence pack: reference/api/packs/diligence.md
+      - Errors:
+          - ReplayDivergenceError: reference/errors/replay-divergence-error.md
+          - UnsupportedPatternError: reference/errors/unsupported-pattern-error.md
+          - CorruptedEventPayloadError: reference/errors/corrupted-event-payload-error.md
+          - DuplicateEventError: reference/errors/duplicate-event-error.md
+          - EventNotFoundError: reference/errors/event-not-found-error.md
+          - InvalidStoreURL: reference/errors/invalid-store-url-error.md
+          - NonSerializableEventError: reference/errors/non-serializable-event-error.md
+          - SchemaVersionMismatch: reference/errors/schema-version-mismatch.md
+          - LLMBehaviorError: reference/errors/llm-behavior-error.md
+          - ToolError: reference/errors/tool-error.md
+          - UnknownToolError: reference/errors/unknown-tool-error.md
+          - ApprovalNotFoundError: reference/errors/approval-not-found-error.md
+          - MissingProviderError: reference/errors/missing-provider-error.md
+          - MissingToolError: reference/errors/missing-tool-error.md
+          - MissingOptionalDependency: reference/errors/missing-optional-dependency.md
+          - BehaviorNotFoundError: reference/errors/behavior-not-found-error.md
+          - AmbiguousBehaviorError: reference/errors/ambiguous-behavior-error.md
+          - ToolNotFoundError: reference/errors/tool-not-found-error.md
+          - AmbiguousToolError: reference/errors/ambiguous-tool-error.md
+          - PackNotFoundError: reference/errors/pack-not-found-error.md
+          - PackConflictError: reference/errors/pack-conflict-error.md
+          - PackVersionConflictError: reference/errors/pack-version-conflict-error.md
+          - InvalidActivateAfter: reference/errors/invalid-activate-after.md
+          - InvalidToolRegistration: reference/errors/invalid-tool-registration.md
+          - InvalidRuntimeConfiguration: reference/errors/invalid-runtime-configuration.md
+          - InvalidArgumentType: reference/errors/invalid-argument-type.md
+          - IncompatibleRuntimeState: reference/errors/incompatible-runtime-state.md
+          - RuntimeContextRequiredError: reference/errors/runtime-context-required-error.md
+          - InvalidPatchLifecycleState: reference/errors/invalid-patch-lifecycle-state.md
+          - PackSchemaViolation: reference/errors/pack-schema-violation.md
+          - InternalEvaluatorError: reference/errors/internal-evaluator-error.md

@@ -1,0 +1,14 @@
+LLMBehaviorError: llm.schema_violation: ClaimList: claims.0.confidence: Input should be a valid number
+
+What failed:
+  The LLM provider returned valid JSON, but the JSON did not match the behavior's declared `output_schema`:
+    ClaimList: claims.0.confidence: Input should be a valid number
+
+Why:
+  Pydantic validates every LLM response against the schema declared on `@llm_behavior(output_schema=...)`. Schema-violating responses are refused at the boundary so downstream behaviors receive only objects that obey the schema — replay determinism depends on this.
+
+How to fix:
+  Check whether the schema's required fields match what the model actually produces. Common causes: a required field is missing in the response, an enum value is out-of-range, or a list field contains items of the wrong type. Add the missing fields to the prompt's example output, or relax the schema (e.g. `Optional[X]`) if the field genuinely can be absent.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/llm-behavior-error

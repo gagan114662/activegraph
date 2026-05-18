@@ -156,13 +156,26 @@ def step_2_approval_demo(rt: Runtime) -> None:
     )
     rt2.run_goal(company_goal(company))
 
-    pending = list(rt2.pending_approvals())
-    print(f"pending approvals: {len(pending)}")
-    for p in pending:
-        print(f"  - {p.kind:8s} {p.object_type:14s} reason={p.reason!r}")
-        rt2.approve(p.id, approved_by="demo-user")
-    rt2.run_until_idle()
-    print(f"after approval: {len(rt2.pending_approvals())} pending")
+    # Drain in rounds: approving a risk surfaces the memo (memo_synthesizer
+    # fires on risk creation, hits memo_approval policy). One round per
+    # gate so the operator sees each one named explicitly.
+    round_n = 0
+    while True:
+        pending = list(rt2.pending_approvals())
+        if not pending:
+            print(f"after approval: 0 pending")
+            break
+        round_n += 1
+        labels = [_pending_label(p, rt2) for p in pending]
+        round_label = f"round {round_n}" if round_n > 1 else "initial"
+        print(
+            f"pending approvals ({len(pending)}, {round_label}): "
+            f"{', '.join(labels)}"
+        )
+        for p, label in zip(pending, labels):
+            print(f"  - {label:28s} {p.id}  reason={p.reason!r}")
+            rt2.approve(p.id, approved_by="demo-user")
+        rt2.run_until_idle()
 
 
 def step_3_fork_alt_thesis(rt: Runtime) -> None:
@@ -232,6 +245,34 @@ def step_6_verify_memos(rt: Runtime) -> None:
 
 
 # ---------- helpers --------------------------------------------------------
+
+
+def _pending_label(pa, rt: Runtime) -> str:
+    """Friendly slug for a pending approval — operator sees it at a glance.
+
+    Resolves the gated object's company (via ``data.company_id``) to a
+    short, lowercased company name pulled from the graph, so the slug
+    is ``memo_northwind`` rather than ``memo_company#1``. Falls back to
+    the approval id suffix when no company is in scope.
+    """
+    data = pa.data or {}
+    company_id = data.get("company_id") or ""
+    company_short = ""
+    if company_id:
+        co = rt.graph.get_object(company_id)
+        if co is not None:
+            raw_name = (co.data or {}).get("name") or company_id
+            company_short = raw_name.lower().split()[0]
+    suffix = pa.id.removeprefix("approval_")
+    if pa.object_type == "memo":
+        return f"memo_{company_short}" if company_short else f"memo_{suffix}"
+    if pa.object_type == "risk":
+        return (
+            f"risk_{company_short}_{suffix}"
+            if company_short
+            else f"risk_{suffix}"
+        )
+    return f"{pa.object_type}_{suffix}"
 
 
 def _fresh_runtime(provider, db_path: str = DB) -> Runtime:

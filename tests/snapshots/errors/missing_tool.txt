@@ -1,0 +1,19 @@
+MissingToolError: no tool named 'web_search' is registered
+
+What failed:
+  @llm_behavior declares the tool 'web_search' on @llm_behavior 'diligence.researcher', but the Runtime's tool registry has no tool by that name.
+    registered tools: 'diligence.fetch_company_docs', 'diligence.fetch_filings'
+
+Why:
+  @llm_behavior validates its declared tools at startup so a misconfiguration fails before any LLM call burns budget. A missing tool at LLM-call time would either produce UnknownToolError on every invocation (cost without progress) or silently drop the call (which would corrupt the audit trail). Validation at registration prevents both.
+
+How to fix:
+  Either register the tool with the runtime:
+      rt = Runtime(graph, tools=[my_tool, ...])
+  or, if the tool comes from a pack, load the pack:
+      rt.load_pack(my_pack)
+
+  For pack-scoped tools, use the canonical name `'pack_name.tool_name'` in the @llm_behavior's `tools=[...]` argument.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/missing-tool-error

@@ -1,0 +1,16 @@
+IncompatibleRuntimeState: graph already has a store attached
+
+What failed:
+  Graph.attach_store() was called, but this graph already has a store. Stores attach at most once per graph lifetime.
+
+Why:
+  A graph's store is the durability target for every event it emits. Re-attaching a second store would either (a) split the event log across two stores, with subsequent events going to the new one and earlier events stuck in the old, or (b) try to copy the old log to the new store, which is a migration, not an attach. The framework refuses re-attach so neither failure mode is reachable silently.
+
+How to fix:
+  If you want to copy the graph's run to a new store, use the migration primitive on the existing store's URL after the run completes:
+      activegraph migrate --from <old-url> --to <new-url>
+
+  If the graph is fresh and the existing store is a placeholder (e.g., from a test fixture), construct a new Graph rather than re-attaching.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/incompatible-runtime-state

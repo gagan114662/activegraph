@@ -1,0 +1,484 @@
+============================================================================
+ activegraph quickstart — first-time user session
+ v1.0 spec for the entire adoption-surface milestone
+============================================================================
+
+This file is the contract for v1.0. Every piece of v1.0 work either supports
+a line in this transcript or it doesn't belong in v1.0.
+
+Conventions:
+  $ ...           command the developer types in their shell
+  > ...           expected stdout from the framework
+  # [PAUSE]       a moment where the developer reads / thinks before typing
+  # [AHA]         a moment of recognition — what makes this framework
+                  different from "an LLM in a for-loop" should land here
+  # [NOTE]        annotation for the v1.0 implementers; not user-facing
+
+Target wall-clock: 10 minutes from `pip install` to "I wrote a custom
+behavior that runs in the framework." If a real first-time user takes more
+than 15 minutes to reach the last beat in this transcript, the API is too
+rough or the tutorial is too long — fix one or the other before tagging
+v1.0 final.
+
+----------------------------------------------------------------------------
+ BEAT 1 — install
+----------------------------------------------------------------------------
+
+# [NOTE] Developer found us via the docs site or a GitHub link. Their
+# expectation: this is going to be three commands and 200 lines of YAML
+# before anything runs. We have ~30 seconds to refute that.
+
+$ pip install activegraph
+> Collecting activegraph
+>   ...
+> Successfully installed activegraph-1.0.0 click-8.x pydantic-2.x
+
+# [NOTE] No `[llm]` extra needed for quickstart. The fixture-backed demo
+# does NOT require the anthropic SDK. v1.0 #C3: --live is dropped, so
+# `pip install activegraph` is the only install needed for the demo path.
+
+$ activegraph --version
+> activegraph 1.0.0
+
+----------------------------------------------------------------------------
+ BEAT 2 — the quickstart command
+----------------------------------------------------------------------------
+
+# [NOTE] This is the single most important command in v1.0. Three constraints
+# from the contract (v1.0 #1):
+#   1. No API key required (fixture-backed)
+#   2. No Postgres required (in-memory + tmpdir SQLite)
+#   3. Total runtime under 30 seconds, deterministic, byte-reproducible
+
+$ activegraph quickstart
+> activegraph quickstart — running the bundled Diligence pack on fixtures.
+>
+> This will take about 20 seconds. No API key required.
+>   pack:       diligence v0.1.0  (no external network calls)
+>   companies:  Northwind Robotics, Stellar Logistics, Pinecone Bio
+>   provider:   RecordedDiligenceProvider (fixture-backed)
+>
+> [trace.flags]             prompt_normalized=true (24 llm requests)
+> [goal.created]            user: "Diligence: Northwind Robotics"
+> [behavior.started]        diligence.company_planner
+> [object.created]          company#1 "Northwind Robotics"
+> [behavior.started]        diligence.question_generator  (matched ...)
+> [llm.requested]           evt_006  diligence.question_generator  model=claude-sonnet-4-5 cache_hit=true
+> [llm.responded]           evt_007  diligence.question_generator  cache_hit=true
+> [object.created]          question#2 "What drives unit economics in cobot deployments?"
+> ...
+> [object.created]          memo#41 (approved)
+> [runtime.idle]            queue empty, budget remaining
+>
+> ----------------------------------------------------------------------------
+>  Memo: Northwind Robotics
+> ----------------------------------------------------------------------------
+>
+> Summary:
+>   Northwind Robotics is a Series B industrial-automation company building
+>   collaborative robots for SMB manufacturers...
+>
+> Key claims:
+>   - Q3 revenue grew 28% YoY to $42M (evidence: doc#3, doc#4)
+>   - Gross margin held at 41% through the quarter (evidence: doc#3)
+>   - Top three customers represent 52% of annual revenue (evidence: doc#5)
+>   ...
+>
+> Open contradictions:
+>   (none surfaced for this company)
+>
+> Risks:
+>   - Customer concentration: top three customers = 52% of revenue
+>     (related claims: claim#11, claim#14; severity: medium)
+>
+> Memos for Stellar Logistics and Pinecone Bio were produced under the
+> same contract. Output written to /tmp/activegraph_quickstart/<run-id>/.
+>
+> ----------------------------------------------------------------------------
+>  What just happened
+> ----------------------------------------------------------------------------
+>
+>   1. You loaded a pack. A pack is a Python package that registers
+>      object types, behaviors, tools, and prompts. The Diligence pack
+>      ships with activegraph.
+>
+>   2. The runtime received three goals (one per company) and reactive
+>      behaviors fired automatically as objects appeared on the graph.
+>      You did not write a workflow. The behaviors are pattern-matched
+>      against event types and object shapes.
+>
+>   3. Every LLM call was cached against a recorded fixture, so the run
+>      is deterministic and runs offline. The trace above shows
+>      `cache_hit=true` on every llm.responded — production runs would
+>      hit a real provider instead.
+>
+>   4. Each memo cites evidence for every claim, surfaces at least one
+>      risk, and either lists open contradictions or states explicitly
+>      that none were found. This is the pack's "verifiable memo bar" —
+>      a memo without these properties is a bug in the pack.
+>
+>   5. Every event is on disk. The full causal chain from goal to memo
+>      is reconstructable from the event log alone.
+>
+> ----------------------------------------------------------------------------
+>  Try next
+> ----------------------------------------------------------------------------
+>
+>   See your run:           activegraph inspect /tmp/activegraph_quickstart/<run-id>/
+>   Fork it and diff:       see https://docs.activegraph.dev/quickstart#fork
+>   Write a behavior:       activegraph quickstart --interactive
+>   Read the tutorial:      https://docs.activegraph.dev/quickstart
+
+# [PAUSE] Developer reads the trace and the "What just happened" section.
+# 60-90 seconds. The trace is dense; some of it they understand on the first
+# read (object.created, behavior.started), some they don't (the trace.flags
+# header, prompt_normalized, the matched-against clause). The "What just
+# happened" section is the bridge that turns confusion into questions
+# instead of frustration.
+
+# [NOTE] v1.0 implementer constraints for BEAT 2:
+#   - Output is byte-identical across runs. Snapshot-tested.
+#   - The run-id placeholder above is a ULID; the snapshot strips it.
+#   - The `<run-id>` token in the "Try next" section is the real id from
+#     this run, NOT a placeholder string. Replacing it must work for the
+#     copy-paste developer.
+#   - The trace block in the output is the FULL trace, not a summary. We
+#     learned in v0.9 that operators copy-paste the trace into bug reports;
+#     truncating it costs more than the screen real estate saves.
+#   - Memo output uses the same renderer the operator CLI uses
+#     (`activegraph inspect --memo`). Two renderers diverge; one renderer
+#     stays consistent.
+
+----------------------------------------------------------------------------
+ BEAT 3 — inspect the run (60 seconds)
+----------------------------------------------------------------------------
+
+# [NOTE] The output of BEAT 2 told them about `activegraph inspect`. This is
+# the moment they realize "wait, the framework wrote a file I can re-open."
+
+$ activegraph inspect /tmp/activegraph_quickstart/01J...
+> run:        01J...  (parent: none)
+> pack:       diligence v0.1.0
+> events:     671  (671 in this run, 0 replayed)
+> budget:     $0.024 / $5.00  (24 llm requests, 31 tool requests)
+> objects:    3 companies, 27 documents, 24 questions, 47 claims,
+>             8 evidence, 3 risks, 3 memos
+> last:       evt_671  runtime.idle  4s ago
+>
+> Tail (20 events):
+>   evt_652  llm.requested      diligence.memo_synthesizer  model=claude-sonnet-4-5 cache_hit=true
+>   evt_653  llm.responded      diligence.memo_synthesizer  cache_hit=true
+>   evt_654  object.created     memo#41  "Pinecone Bio"
+>   ...
+>   evt_671  runtime.idle
+
+# [PAUSE] 30 seconds. The line that lands is "events: 671 (671 in this run,
+# 0 replayed)". They understand the trace is a log. They probably don't yet
+# understand that the log IS the state. That's the next beat.
+
+----------------------------------------------------------------------------
+ BEAT 4 — the aha moment: fork from any event id (90 seconds)
+----------------------------------------------------------------------------
+
+# [NOTE] This is the beat the v1.0 plan called out explicitly: "the moment
+# the developer realizes the fork-and-diff capability is real." Every other
+# adoption-surface beat in this transcript is table stakes. THIS is the beat
+# that separates this framework from "an LLM with retries."
+#
+# The quickstart command suggested this in its "Try next" section. Now they
+# try it. The transcript here is the exact ergonomics the implementation
+# needs to deliver.
+
+$ activegraph inspect /tmp/activegraph_quickstart/01J... --search "risk"
+> evt_640  object.created    risk#38  "Customer concentration"  (company#1)
+> evt_645  object.created    risk#39  "Regulatory exposure"     (company#2)
+> evt_648  object.created    risk#40  "Clinical trial timing"   (company#3)
+
+# [PAUSE] 15 seconds. They pick one. The question forming: "what if the
+# pack had been more conservative — would the risks have looked different?"
+
+$ activegraph fork /tmp/activegraph_quickstart/01J... \
+>     --at-event evt_620 \
+>     --label cautious \
+>     --set diligence.confidence_threshold_for_review=0.9
+
+> forked: 01K...  (parent: 01J..., from evt_620, label: cautious)
+> replaying 619 events...
+> [replay.event]  evt_001 goal.created "Diligence: Northwind Robotics"
+> ...
+> [replay.complete]         619 events replayed, graph reconstructed
+> [runtime.idle]            ready to resume
+> [trace.flags]             prompt_normalized=true (3 llm requests)
+> [behavior.started]        diligence.risk_identifier  (replayed cache available)
+> [llm.requested]           evt_620  diligence.risk_identifier  model=claude-sonnet-4-5 cache_hit=true
+> ...
+> [object.created]          memo#41 (approved)
+> [runtime.idle]            queue empty, budget remaining
+>
+> forked run complete: 01K...
+
+# [PAUSE] 30 seconds. The line that lands: "replaying 619 events..." They
+# now understand the framework reconstructed the entire prior state from
+# the log. The fork didn't re-call the LLM — it replayed the cache. They
+# changed ONE setting and only the events downstream of evt_620 actually
+# re-ran. This is when they realize what fork-and-diff actually means.
+
+# [NOTE] v1.0 implementer constraints for `--set`:
+#   - Syntax is `--set <dotted_key>=<value>`. Multiple --set flags compose
+#     (later wins on collision). Familiar to anyone who has used helm,
+#     terraform, or kubectl, so we don't have to teach the ergonomics.
+#   - <dotted_key> is `<pack_name>.<settings_field>` — a path INTO pack
+#     settings ONLY. `diligence.confidence_threshold_for_review=0.9` is in
+#     scope. `runtime.budget.max_cost_usd=10` is OUT of scope: forks are
+#     for testing alternative hypotheses against pack-level decisions,
+#     not for re-configuring the runtime. The CLI help text and the fork
+#     doc page must state this constraint explicitly.
+#   - Type coercion is Pydantic's job. The settings schema decides
+#     whether "0.9" becomes a float, a Decimal, or a string. The CLI
+#     never tries to parse — it hands the string to the settings model
+#     and lets validation produce the typed value.
+#   - Unknown keys fail loud at fork-time, NOT at run-time. If
+#     `diligence.confidnece_threshold_for_review` (typo) is passed,
+#     the fork errors before any replay starts, with a
+#     `RegistrationError` naming the typo and listing the valid keys on
+#     the settings model. The framework knows the schema; the user
+#     shouldn't discover the typo three minutes into replay.
+
+$ activegraph diff 01J... 01K...
+> shared events:        619
+> parent-only events:    52  (memo#41 with 5 claims kept at conf>=0.7)
+> fork-only events:      48  (memo#41 with 3 claims kept at conf>=0.9)
+> divergent objects:     12
+>
+> Divergent objects (showing 5 of 12):
+>   claim#22  parent: status=approved        fork: status=below_threshold
+>   claim#28  parent: status=approved        fork: status=below_threshold
+>   claim#31  parent: status=approved        fork: status=below_threshold
+>   memo#41   parent: 5 key_claims           fork: 3 key_claims
+>   ...
+
+# [AHA] The aha moment. They forked an event log, changed one parameter,
+# and the framework re-ran only the affected subtree, then told them
+# precisely what changed downstream. Most evaluators reach this point on
+# autopilot — clicking through the docs — and then SEE the diff and
+# realize what the framework is for. Cache replay + structural diff is
+# the load-bearing beat of v1.0.
+
+# [NOTE] v1.0 implementer constraint: the diff output above is the spec.
+# `parent-only events / fork-only events / divergent objects` is the trio.
+# If the diff implementation hides one of these it has missed the point.
+
+----------------------------------------------------------------------------
+ BEAT 5 — write a custom behavior (3-4 minutes)
+----------------------------------------------------------------------------
+
+# [NOTE] At this point they understand the model. The remaining question is
+# whether the API is something they can write into without a 200-page guide.
+# We answer with `activegraph quickstart --interactive`, which walks them
+# through writing one custom behavior with prompts and explanations.
+#
+# v1.0 LOCK: zero new runtime capability in this beat. No file-watching,
+# no auto-reload, no inotify/FSEvents integration. The interactive command
+# is a CLI shell that prompts, scaffolds files, and runs the goal —
+# nothing it does requires a runtime change. Auto-reload of behavior
+# modules is genuinely cursed in Python (state in closures, decorators
+# registered at import time, the __pack_meta__ model we locked
+# specifically to avoid this, plus unobvious interactions with the event
+# log — does a reloaded behavior re-fire against historical events?
+# in-flight ones? in replay?) and v1.0 is the wrong milestone to answer
+# those questions. If auto-reload turns out to be a real adoption blocker
+# post-1.0, it's a v1.2 or v1.3 feature with its own design pass.
+
+$ activegraph quickstart --interactive
+> activegraph quickstart --interactive — write your first behavior.
+>
+> We'll add a behavior to the Diligence pack that flags claims about
+> revenue growth above 25%. The behavior will fire whenever a claim is
+> created and emit a `growth.flagged` event with the claim id.
+>
+> Step 1 of 4 — create a file.
+>
+> Press enter to create examples/my_first_behavior.py with the scaffold:
+
+> [enter]
+
+> Created examples/my_first_behavior.py:
+>
+>   from activegraph import behavior
+>
+>   @behavior(name="growth_flagger", on=["object.created"],
+>             where={"object.type": "claim"})
+>   def growth_flagger(event, graph, ctx):
+>       """Flag claims that mention revenue growth above 25%."""
+>       text = event.payload["object"]["data"].get("text", "")
+>       # TODO: parse the text for a growth figure and emit if > 25%.
+>       pass
+>
+> Step 2 of 4 — fill in the TODO.
+>
+> Open examples/my_first_behavior.py in your editor and replace the TODO
+> with the parsing logic. When you've saved the file, come back here and
+> type `continue` to test it. (We don't watch your filesystem — explicit
+> over magic.)
+
+# [PAUSE] 2-3 minutes. They open the file in their editor, replace the
+# TODO with a regex, save. Some hit syntax errors when they come back
+# and type `continue`; the framework's error message tells them what's
+# wrong and where (v1.0 #7 — errors name names).
+
+> continue
+
+> Step 3 of 4 — run your behavior against the fixture data.
+> Importing examples/my_first_behavior.py...   ok (1 behavior registered)
+> Running diligence on Northwind Robotics with your behavior registered...
+>
+> [trace.flags]             prompt_normalized=true (8 llm requests)
+> [goal.created]            user: "Diligence: Northwind Robotics"
+> ...
+> [object.created]          claim#11 "Q3 revenue grew 28% YoY to $42M."
+> [behavior.started]        growth_flagger  (matched object.created: claim#11)
+> [event.emitted]           growth.flagged claim_id=claim#11 growth=28
+> [behavior.completed]      growth_flagger
+> ...
+> [runtime.idle]            queue empty, budget remaining
+>
+> Your behavior fired 3 times across the run:
+>   - claim#11 (Northwind, 28% growth)
+>   - claim#27 (Stellar, 31% growth)
+>   - claim#34 (Pinecone, 42% growth — preclinical metric, false positive)
+>
+> Want to iterate? Edit the file again, then type `continue`. Type
+> `quit` to end the tutorial.
+
+# [NOTE] The "edit, then type continue" rhythm is the v1.0 contract. Each
+# `continue` re-imports the module fresh (a child subprocess; not
+# importlib.reload) and runs the goal. Each iteration is a clean run with
+# a fresh event log. This is mechanically the same as if the user ran
+# `python examples/my_first_behavior.py` twice — no new runtime concepts.
+
+> continue
+
+> Importing examples/my_first_behavior.py...   ok (1 behavior registered)
+> Running diligence on Northwind Robotics with your behavior registered...
+> ...
+> Your behavior fired 5 times across the run.
+
+> quit
+
+> Step 4 of 4 — read about pattern subscriptions.
+>
+> Your behavior fired on every object.created with object.type=claim.
+> For richer patterns (e.g., "only on claims with confidence above a
+> threshold"), see https://docs.activegraph.dev/guides/pattern-subscriptions
+>
+> You're done with the tutorial. What you wrote runs in the same runtime
+> the Diligence pack uses. There's no separate "user behavior" path.
+
+# [AHA] (second one) The line that lands: "There's no separate 'user
+# behavior' path." They wrote 8 lines of Python and got first-class
+# integration with the pack's behaviors, the trace, the cache, the fork
+# capability, everything. This is when they decide they're coming back
+# Monday.
+
+# [NOTE] The interactive command is conversational, not a wizard. Each
+# step pauses for the user to type `continue` (or `quit`); errors fall
+# through with clear messages; the file scaffolded is real Python that
+# runs without modification. No filesystem watching — explicit `continue`
+# every time, so the rhythm is predictable and the runtime stays clean.
+
+----------------------------------------------------------------------------
+ BEAT 6 — point them at the docs (15 seconds)
+----------------------------------------------------------------------------
+
+# [NOTE] The final beat is short. The interactive command already linked
+# them to the docs site. We don't try to teach concepts here. We trust the
+# docs site to do its job, and we trust the developer to bookmark it.
+
+$ activegraph --help | tail -10
+> Commands:
+>   quickstart    Run the bundled demo / interactive tutorial
+>   inspect       Inspect a saved run
+>   replay        Replay a run from its event log
+>   fork          Fork from any event id
+>   diff          Diff two runs by event and object set
+>   pack          Manage installed packs
+>   export-trace  Export a run's trace as JSONL
+>
+> Docs: https://docs.activegraph.dev
+> Issues: https://github.com/yoheinakajima/activegraph/issues
+
+# [PAUSE] 5 seconds. They close the terminal. They open the docs site in a
+# browser tab and bookmark it. We have 10 minutes of their attention
+# remaining or 4 days; both outcomes are acceptable. The framework is now
+# in their head.
+
+============================================================================
+ BACKED-OUT BEATS — explicitly NOT in v1.0
+============================================================================
+
+These were in the v1.0 plan and got dropped during pushback. Listed here
+so they don't sneak back in via "well, the transcript would be clearer
+if..." additions:
+
+- Live LLM call ("Want to see this against the real API? Press y / N").
+  Dropped. First-experience surprise charge risk. See CONTRACT v1.0 #C3.
+- Telemetry / phone-home ("Help us improve activegraph by sharing
+  anonymous usage data?"). Never. CONTRACT v1.0 #8.
+- A web UI beat ("Open http://localhost:8000 to see the graph
+  visually"). Never. CONTRACT v0.7 #23 and CONTRACT v1.0 #10.
+- A "deploy to Postgres in production" beat. Operator concern; lives in
+  docs/guides/operating-in-production.md, not the quickstart.
+- Multi-model routing ("Try with claude-haiku for cheaper runs"). Out;
+  v1.0 #10.
+- Auto-reload of behavior modules in `--interactive` mode (file-watch via
+  inotify/FSEvents, importlib.reload, hot-reload of decorator
+  registrations). Dropped — zero new runtime in v1.0. Reasons: module
+  reload semantics in Python are genuinely cursed (state in closures,
+  decorators registered at import time, the __pack_meta__ model we
+  locked specifically to avoid this), and the interaction with the event
+  log is unobvious (does a reloaded behavior re-fire against historical
+  events? against in-flight ones? in replay?). Those questions deserve
+  real answers and v1.0 is the wrong milestone to answer them. Manual
+  re-run via `continue` is the v1.0 contract. If auto-reload turns out
+  to be an actual adoption blocker post-1.0, it's a v1.2 or v1.3 feature
+  with its own design pass.
+
+If a v1.0 PR proposes any of these, link to this section and decline.
+
+============================================================================
+ IMPLEMENTER NOTES — mapping transcript beats to deliverables
+============================================================================
+
+BEAT 1  -> pip distribution + activegraph --version (already work in v0.9.0;
+           version bump is part of v1.0)
+BEAT 2  -> `activegraph quickstart` subcommand
+           -> "What just happened" prose block
+           -> Memo renderer shared with `activegraph inspect`
+           -> Snapshot test of byte-identical output
+BEAT 3  -> `activegraph inspect --search` flag (new in v1.0)
+           -> Tail rendering already exists in v0.8 CLI
+BEAT 4  -> `activegraph fork --set <pack>.<key>=<value>` flag (new in v1.0;
+           v0.8 fork only took --label and --at-event)
+           -> `activegraph diff` output format above (existing in v0.9; the
+              divergent-objects section may need polish to match spec)
+           -> Replay cache hit behavior (existing since v0.7)
+BEAT 5  -> `activegraph quickstart --interactive` mode (CLI shell only;
+              no new runtime capability)
+           -> Each `continue` re-imports the user's behavior module in a
+              fresh subprocess and runs the goal. No file-watching, no
+              importlib.reload, no auto-reload of any kind. The rhythm
+              is explicit: edit → save → type `continue` → see trace.
+              Auto-reload was considered and dropped — see the BACKED-OUT
+              BEATS section above for the rationale.
+           -> Scaffold file written to examples/ (new in v1.0)
+BEAT 6  -> `activegraph --help` polish + final URL pointer
+
+Snapshot-testable beats: 1, 2, 3, 4, 6.
+Non-snapshottable beats (real user input, real wall clock): 5.
+
+----------------------------------------------------------------------------
+ The transcript is the contract. Disagree with the design? Edit this file
+ in the same PR that changes the implementation, so the contract diff is
+ visible in review. Do not let the implementation drift from the spec
+ silently.
+----------------------------------------------------------------------------

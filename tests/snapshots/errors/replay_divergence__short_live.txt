@@ -1,0 +1,20 @@
+ReplayDivergenceError: replay diverged at evt_200: live re-run finished early
+
+What failed:
+  The recorded log contained event evt_200 (type 'behavior.completed') at this position, but the live re-run terminated before producing it.
+    recorded:  'behavior.completed'
+    live:      <no event produced>
+
+Why:
+  Strict replay requires the live re-run to produce the same number and shape of non-lifecycle events as the recording. A short live re-run means a behavior that fired in the recorded run no longer fires, or short-circuits earlier — usually because a pattern subscription, a `where` filter, or a guard condition was tightened since the recording.
+
+How to fix:
+  Identify the behavior that produced evt_200 in the recorded log:
+      activegraph inspect <parent-run> --event evt_200
+
+  Compare that behavior's current trigger conditions against the recorded
+  run's. If the change was intentional, fork with --record from the
+  divergence point to refresh the recording. If unintentional, revert.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/replay-divergence-error

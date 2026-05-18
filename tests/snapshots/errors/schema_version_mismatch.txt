@@ -1,0 +1,21 @@
+SchemaVersionMismatch: sqlite store schema_version '99' does not match this build's expected '1'
+
+What failed:
+  The SQLite store records schema_version='99' in its meta table, but activegraph 0.9.1 expects schema_version='1'.
+
+Why:
+  The store file format evolves with the framework. The runtime refuses to read a store with a different schema_version rather than risk silent data loss — a newer framework might interpret columns differently than the writer did, and an older framework might drop fields it doesn't recognize. Either direction would corrupt the audit trail.
+
+How to fix:
+  One of three actions:
+    1. Install the activegraph version that wrote this store
+       (whichever shipped schema_version='99').
+    2. Migrate the run to a store written by this build:
+       activegraph migrate <src-url> <new-dst-url>
+       The destination is written with the current schema.
+    3. If the store is empty or expendable, delete and re-run.
+
+  Schema version history is documented in CHANGELOG.md.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/schema-version-mismatch

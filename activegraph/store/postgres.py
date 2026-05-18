@@ -70,9 +70,11 @@ def _require_psycopg() -> Any:
     try:
         import psycopg  # type: ignore
     except ImportError as e:  # pragma: no cover — exercised only without dep
-        raise ImportError(
-            "PostgresEventStore requires psycopg>=3.1. Install with "
-            "`pip install 'activegraph[postgres]'`."
+        from activegraph.errors import MissingOptionalDependency
+        raise MissingOptionalDependency(
+            package="psycopg",
+            feature="PostgresEventStore",
+            extras="postgres",
         ) from e
     return psycopg
 
@@ -104,9 +106,40 @@ class _ConnectionSource:
             # Looks like a Connection. Don't take ownership.
             self._conn = target
         else:
-            raise TypeError(
-                f"PostgresEventStore target {target!r} is not a URL string, "
-                f"psycopg.Connection, or psycopg_pool.ConnectionPool"
+            from activegraph.runtime.config_errors import InvalidArgumentType
+            type_name = type(target).__name__
+            target_repr = repr(target)
+            if len(target_repr) > 80:
+                target_repr = target_repr[:77] + "..."
+            raise InvalidArgumentType(
+                f"PostgresEventStore target has wrong type (got {type_name})",
+                what_failed=(
+                    f"PostgresEventStore was constructed with a target of "
+                    f"type {type_name}:\n  value: {target_repr}\n"
+                    f"  type:  {type_name}\n"
+                    f"Accepted types are: a `postgres://...` URL string, a "
+                    f"`psycopg.Connection`, or a `psycopg_pool.ConnectionPool`."
+                ),
+                why=(
+                    "PostgresEventStore's constructor branches on the "
+                    "target's type — strings open a fresh connection, "
+                    "Connections are borrowed without ownership, and "
+                    "ConnectionPools are checked out per operation. An "
+                    "unknown type has no defined connection lifecycle, and "
+                    "a fuzzy match would silently leak connections or "
+                    "double-close them."
+                ),
+                how_to_fix=(
+                    "Pass one of:\n"
+                    "    PostgresEventStore('postgres://host/dbname', run_id=...)\n"
+                    "    PostgresEventStore(my_psycopg_connection, run_id=...)\n"
+                    "    PostgresEventStore(my_connection_pool, run_id=...)\n"
+                    "\n"
+                    "If you already have a SQLAlchemy engine or another "
+                    "abstraction, extract a raw psycopg.Connection from it "
+                    "and pass that."
+                ),
+                context={"type": type_name, "repr": target_repr},
             )
 
     # ---- ctx mgrs ----
@@ -208,9 +241,37 @@ def _ensure_schema(source: _ConnectionSource) -> None:
                 (SCHEMA_VERSION,),
             )
         elif row[0] != SCHEMA_VERSION:
-            raise RuntimeError(
-                f"unsupported postgres schema_version {row[0]!r}; this build "
-                f"expects {SCHEMA_VERSION!r}"
+            from activegraph import __version__ as _aw_version
+            from activegraph.store.errors import SchemaVersionMismatch
+            raise SchemaVersionMismatch(
+                f"postgres store schema_version {row[0]!r} does not match this build's expected {SCHEMA_VERSION!r}",
+                what_failed=(
+                    f"The Postgres store records schema_version={row[0]!r} in its meta "
+                    f"table, but activegraph {_aw_version} expects "
+                    f"schema_version={SCHEMA_VERSION!r}."
+                ),
+                why=(
+                    "The store schema evolves with the framework. The runtime "
+                    "refuses to read a store with a different schema_version rather "
+                    "than risk silent data loss — a newer framework might interpret "
+                    "columns differently than the writer did, and an older framework "
+                    "might drop fields it doesn't recognize."
+                ),
+                how_to_fix=(
+                    f"One of three actions:\n"
+                    f"  1. Install the activegraph version that wrote this store.\n"
+                    f"  2. Migrate runs to a fresh database written by this build:\n"
+                    f"     activegraph migrate <src-url> <new-dst-url>\n"
+                    f"  3. If the database is expendable, drop and re-create.\n"
+                    f"\n"
+                    f"Schema version history is documented in CHANGELOG.md."
+                ),
+                context={
+                    "found_version": row[0],
+                    "expected_version": SCHEMA_VERSION,
+                    "activegraph_version": _aw_version,
+                    "driver": "postgres",
+                },
             )
 
 
@@ -344,7 +405,32 @@ class PostgresEventStore:
             )
             row = cur.fetchone()
         if row is None:
-            raise KeyError(f"unknown event id: {event_id} in run {self.run_id}")
+            from activegraph.store.errors import EventNotFoundError
+            raise EventNotFoundError(
+                f"event {event_id!r} not found in run {self.run_id!r}",
+                what_failed=(
+                    f"The Postgres store has no event with id {event_id!r} in "
+                    f"run {self.run_id!r}."
+                ),
+                why=(
+                    "Event ids are the framework's addressing primitive. The "
+                    "store refuses to return a default for an unknown id — that "
+                    "would silently corrupt the audit trail and any downstream "
+                    "fork or replay."
+                ),
+                how_to_fix=(
+                    f"Check the event id against what's actually in the run:\n"
+                    f"    activegraph inspect <store-url> --run-id {self.run_id} --tail 100\n"
+                    "\n"
+                    "Common causes: typo in a hand-typed id, referencing an id "
+                    "from a different run, or a run truncated by an earlier fork."
+                ),
+                context={
+                    "event_id": event_id,
+                    "run_id": self.run_id,
+                    "driver": "postgres",
+                },
+            )
         return int(row[0])
 
     # ---------- v0.5 helpers (per-run) ----------
@@ -457,9 +543,33 @@ class PostgresEventStore:
                     )
                     cut = cur.fetchone()
                     if cut is None:
-                        raise KeyError(
-                            f"event {at_event_id!r} not found in run "
-                            f"{parent_run_id!r}"
+                        from activegraph.store.errors import EventNotFoundError
+                        raise EventNotFoundError(
+                            f"event {at_event_id!r} not found in run {parent_run_id!r}",
+                            what_failed=(
+                                f"Cannot fork run {parent_run_id!r} at event "
+                                f"{at_event_id!r}: that event does not exist in the run."
+                            ),
+                            why=(
+                                "Forking takes a parent run and copies events up to and "
+                                "including --at-event into a new run. The framework "
+                                "refuses to fork at an unknown event id rather than "
+                                "guess where the user meant — that would produce a "
+                                "fork that doesn't share lineage with its claimed parent."
+                            ),
+                            how_to_fix=(
+                                f"List the events in the parent run to find a valid "
+                                f"fork point:\n"
+                                f"    activegraph inspect <store-url> --run-id {parent_run_id} --tail 100\n"
+                                f"\n"
+                                f"Then re-issue the fork with a valid event id."
+                            ),
+                            context={
+                                "event_id": at_event_id,
+                                "run_id": parent_run_id,
+                                "operation": "fork",
+                                "driver": "postgres",
+                            },
                         )
                     cur.execute(
                         "SELECT goal, frame_id FROM runs WHERE run_id = %s",

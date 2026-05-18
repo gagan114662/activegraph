@@ -1,0 +1,19 @@
+InternalEvaluatorError: unknown where operator: 'NOT_A_REAL_OP'
+
+What failed:
+  The view-filter evaluator in graph.py received comparison operator 'NOT_A_REAL_OP', but the operator table (_OPS in this module) has no handler for it.
+
+Why:
+  The operator table is the source of truth for which comparison operators view filters accept. An unknown operator means either the filter was constructed by code that bypassed the parser, or the operator table drifted from the parser. Either way, evaluating the filter would silently produce wrong results — refuse instead.
+
+How to fix:
+  This is a framework bug, not a problem with your code.
+  Please file an issue and include the framework version, the
+  internal error location, and the full message above:
+      https://github.com/yoheinakajima/activegraph/issues/new
+
+    framework version:   activegraph 0.9.1
+    internal location:   activegraph/core/graph.py:evaluate_where
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/internal-evaluator-error

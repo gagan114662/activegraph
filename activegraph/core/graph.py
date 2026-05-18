@@ -237,7 +237,35 @@ class Graph:
         if self._store is store:
             return
         if self._store is not None:
-            raise RuntimeError("graph already has a store attached")
+            from activegraph.runtime.config_errors import IncompatibleRuntimeState
+            raise IncompatibleRuntimeState(
+                "graph already has a store attached",
+                what_failed=(
+                    "Graph.attach_store() was called, but this graph already "
+                    "has a store. Stores attach at most once per graph "
+                    "lifetime."
+                ),
+                why=(
+                    "A graph's store is the durability target for every "
+                    "event it emits. Re-attaching a second store would "
+                    "either (a) split the event log across two stores, "
+                    "with subsequent events going to the new one and "
+                    "earlier events stuck in the old, or (b) try to copy "
+                    "the old log to the new store, which is a migration, "
+                    "not an attach. The framework refuses re-attach so "
+                    "neither failure mode is reachable silently."
+                ),
+                how_to_fix=(
+                    "If you want to copy the graph's run to a new store, "
+                    "use the migration primitive on the existing store's "
+                    "URL after the run completes:\n"
+                    "    activegraph migrate --from <old-url> --to <new-url>\n"
+                    "\n"
+                    "If the graph is fresh and the existing store is a "
+                    "placeholder (e.g., from a test fixture), construct a "
+                    "new Graph rather than re-attaching."
+                ),
+            )
         self._store = store
 
     @property
@@ -541,7 +569,10 @@ class Graph:
         if patch is None:
             raise KeyError(f"unknown patch: {patch_id}")
         if patch.status != "proposed":
-            raise ValueError(f"patch {patch_id} is {patch.status}, not proposed")
+            from activegraph.runtime.exec_errors import InvalidPatchLifecycleState
+            raise InvalidPatchLifecycleState(
+                patch_id=patch_id, current_status=patch.status,
+            )
         target_obj = self._objects.get(patch.target)
         current_version = target_obj.version if target_obj else 0
         if current_version != patch.expected_version:
@@ -763,7 +794,36 @@ def evaluate_where(where: dict[str, Any], root: Any) -> bool:
             for op, value in expected.items():
                 fn = _OPS.get(op)
                 if fn is None:
-                    raise ValueError(f"unknown where operator: {op}")
+                    from activegraph.errors import internal_bug_fields
+                    from activegraph.runtime.exec_errors import (
+                        InternalEvaluatorError,
+                    )
+                    _fields = internal_bug_fields(
+                        summary=f"unknown where operator: {op!r}",
+                        what_happened=(
+                            f"The view-filter evaluator in graph.py received "
+                            f"comparison operator {op!r}, but the operator "
+                            f"table (_OPS in this module) has no handler for it."
+                        ),
+                        why_invariant=(
+                            "The operator table is the source of truth for "
+                            "which comparison operators view filters accept. "
+                            "An unknown operator means either the filter was "
+                            "constructed by code that bypassed the parser, or "
+                            "the operator table drifted from the parser. "
+                            "Either way, evaluating the filter would silently "
+                            "produce wrong results — refuse instead."
+                        ),
+                        location="activegraph/core/graph.py:evaluate_where",
+                        extra_context={"operator": op},
+                    )
+                    raise InternalEvaluatorError(
+                        _fields["summary"],
+                        what_failed=_fields["what_failed"],
+                        why=_fields["why"],
+                        how_to_fix=_fields["how_to_fix"],
+                        context=_fields["context"],
+                    )
                 if not fn(actual, value):
                     return False
         else:

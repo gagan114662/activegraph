@@ -1,0 +1,23 @@
+PackNotFoundError: no installed pack named 'diligence'
+
+What failed:
+  activegraph.packs.load_by_name('diligence') searched the `activegraph.packs` entry-point group and found no pack with that name.
+    installed: 'research', 'memory'
+
+Why:
+  Packs register via Python entry points so the framework can discover them without import-side-effect cost. A missing pack means either the pack isn't installed (pip install hasn't run), or the installed pack's entry-point group is wrong, or the name is a typo.
+
+How to fix:
+  Confirm the pack is installed:
+      pip show <pack-distribution-name>
+
+  List currently-discovered packs:
+      from activegraph.packs import discover
+      [p.name for p in discover()]
+
+  If the pack is present but not discovered, its pyproject.toml should declare:
+      [project.entry-points."activegraph.packs"]
+      your_pack = "your_pack_module:pack"
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/pack-not-found-error

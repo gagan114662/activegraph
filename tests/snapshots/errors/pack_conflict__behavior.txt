@@ -1,0 +1,21 @@
+PackConflictError: behavior name conflict: 'diligence.researcher' declared by both pack 'diligence' and pack 'research'
+
+What failed:
+  runtime.load_pack('research') was rejected: the behavior name 'diligence.researcher' is already registered by pack 'diligence'.
+
+Why:
+  Canonical names in the runtime registry are unique across loaded packs. Two packs claiming the same canonical name would silently route dispatch one way or the other depending on pack-load order; the runtime refuses the load instead so the conflict is visible and the operator decides which pack to keep.
+
+How to fix:
+  One of three actions:
+    1. Don't load both packs in the same runtime — pick one.
+    2. Rename one pack: copy its source, change the
+       `Pack(name=...)` declaration, re-install, and load
+       under the new name. The behaviors are then under
+       a different canonical prefix.
+    3. If both behaviors should run, the second pack's
+       pyproject can re-export the behavior under a
+       different name within its declaration.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/pack-conflict-error

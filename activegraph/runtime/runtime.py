@@ -163,7 +163,8 @@ class Context:
         explicit path when gating is enabled.
         """
         if self._runtime is None:
-            raise RuntimeError("ctx.propose_object requires a runtime-bound context")
+            from activegraph.runtime.exec_errors import RuntimeContextRequiredError
+            raise RuntimeContextRequiredError(method="ctx.propose_object")
         return self._runtime._add_pending_approval(
             object_type=object_type, data=data, reason=reason
         )
@@ -254,7 +255,34 @@ class Runtime:
 
         # ---- v0.5: persistence wiring ----
         if persist_to is not None and store is not None:
-            raise ValueError("pass either persist_to or store, not both")
+            from activegraph.runtime.config_errors import InvalidRuntimeConfiguration
+            raise InvalidRuntimeConfiguration(
+                "Runtime(...) was passed both `persist_to=` and `store=`",
+                what_failed=(
+                    "Runtime construction received both a `persist_to=` path "
+                    "and an explicit `store=` instance. The two kwargs are "
+                    "alternative ways to attach storage — only one can be "
+                    "used per Runtime."
+                ),
+                why=(
+                    "`persist_to=` is shorthand for 'open a SQLite store at "
+                    "this path and attach it.' `store=` is the explicit form "
+                    "for any EventStore implementation. If both were "
+                    "accepted, the runtime would have to pick one or merge "
+                    "them, and silent precedence rules would surface as bugs "
+                    "the first time an operator switched stores."
+                ),
+                how_to_fix=(
+                    "Pass exactly one:\n"
+                    "    Runtime(graph, persist_to='/path/to/run.db')\n"
+                    "or:\n"
+                    "    Runtime(graph, store=SQLiteEventStore('/path/to/run.db'))\n"
+                    "\n"
+                    "The two forms produce equivalent runtimes for SQLite. "
+                    "Use `store=` when you need a non-SQLite backend or want "
+                    "to share an open store across runtimes."
+                ),
+            )
         if persist_to is not None:
             store = _open_sqlite_store(persist_to, graph.run_id)
             store.upsert_run(
@@ -347,11 +375,7 @@ class Runtime:
         if self.llm_provider is None:
             for b in source:
                 if isinstance(b, LLMBehavior):
-                    raise MissingProviderError(
-                        f"behavior {b.name!r} is an @llm_behavior but the "
-                        f"runtime has no llm_provider. Pass "
-                        f"`Runtime(graph, llm_provider=...)`."
-                    )
+                    raise MissingProviderError(behavior_name=b.name)
         self.registry = Registry(source)
 
         # v0.7: assemble the tool registry. Explicit tools= override the
@@ -378,10 +402,10 @@ class Runtime:
         self.tool_registry = {}
         for t in tools_source:
             if not isinstance(t, Tool):
-                raise TypeError(
-                    f"tool {t!r} is not a Tool instance "
-                    f"(decorate with @tool or pass a Tool object)"
+                from activegraph.runtime.registration_errors import (
+                    InvalidToolRegistration,
                 )
+                raise InvalidToolRegistration(t)
             self.tool_registry[t.name] = t
             # v0.9: globally-exported pack tools are also registered
             # under their short name.
@@ -396,9 +420,9 @@ class Runtime:
                 name = t.name if isinstance(t, Tool) else str(t)
                 if name not in self.tool_registry:
                     raise MissingToolError(
-                        f"behavior {b.name!r} declares tool {name!r} but it "
-                        f"is not registered (register with @tool or pass via "
-                        f"Runtime(tools=[...]))"
+                        name,
+                        behavior_name=b.name,
+                        registered=tuple(self.tool_registry.keys()),
                     )
 
     def run_goal(self, goal: str, *, actor: str = "user") -> None:
@@ -722,7 +746,7 @@ class Runtime:
                 self._emit_behavior_failed(
                     b.name,
                     event.id,
-                    MissingToolError(f"unregistered tool: {name}"),
+                    MissingToolError(name, registered=tuple(self.tool_registry.keys())),
                     reason="tool.unknown_tool",
                     extras={"tool": name},
                 )
@@ -965,11 +989,18 @@ class Runtime:
                     or (isinstance(t, str) and t == call.name)
                     for t in b.tools
                 ):
+                    declared = tuple(
+                        t if isinstance(t, str) else getattr(t, "name", repr(t))
+                        for t in (b.tools or [])
+                    )
                     self._emit_behavior_failed(
                         b.name, event.id,
                         UnknownToolError(
                             f"LLM called tool {call.name!r} which is not "
-                            f"declared on @llm_behavior(tools=[...])"
+                            f"declared on @llm_behavior(tools=[...])",
+                            tool_name=call.name,
+                            behavior_name=b.name,
+                            declared_tools=declared,
                         ),
                         reason="tool.unknown_tool",
                         extras={"tool": call.name},
@@ -1454,7 +1485,36 @@ class Runtime:
         The CLI's ``inspect --tail N`` passes through.
         """
         if recent < 0:
-            raise ValueError("recent must be >= 0")
+            from activegraph.runtime.config_errors import InvalidRuntimeConfiguration
+            raise InvalidRuntimeConfiguration(
+                f"runtime.status(recent={recent}) — recent must be >= 0",
+                what_failed=(
+                    f"runtime.status(recent={recent}) was called with a "
+                    f"negative count. The `recent` argument controls the "
+                    f"length of the `recent_events` tail in the status "
+                    f"snapshot."
+                ),
+                why=(
+                    "A negative recent count has no defined semantics — "
+                    "the tail length is a non-negative integer by "
+                    "construction. The framework refuses the call rather "
+                    "than silently coerce to zero, because the caller's "
+                    "intent is ambiguous (did they mean zero? did they "
+                    "compute the value and end up with a negative? did "
+                    "they want 'all events' and pass -1 from another "
+                    "API's convention?)."
+                ),
+                how_to_fix=(
+                    "Pass a non-negative integer:\n"
+                    "    rt.status(recent=20)    # last 20 events\n"
+                    "    rt.status(recent=0)     # no recent events in the\n"
+                    "                            # snapshot (just totals)\n"
+                    "\n"
+                    "To get every event, read `rt.graph.events` directly "
+                    "rather than passing a large `recent`."
+                ),
+                context={"recent": recent},
+            )
         snap = self.budget.snapshot()
         budget_snap = BudgetSnapshot(
             used=dict(snap.get("used") or {}),
@@ -1588,24 +1648,39 @@ class Runtime:
         guarantees this invariant). Raises `LookupError` if not found
         or `ValueError` if ambiguous. CONTRACT v0.9 #8.
         """
+        from activegraph.runtime.registration_errors import (
+            AmbiguousBehaviorError,
+            BehaviorNotFoundError,
+        )
         # Canonical lookup first
         if "." in name:
             for b in self._pack_behaviors:
                 if b.name == name:
                     return b
-            raise LookupError(f"no behavior named {name!r} is loaded")
+            raise BehaviorNotFoundError(
+                name, registered=tuple(b.name for b in self._pack_behaviors),
+            )
         # Short name
         if self._pack_state is None:
-            raise LookupError(f"no behavior named {name!r} is loaded")
+            raise BehaviorNotFoundError(
+                name, registered=tuple(b.name for b in self._pack_behaviors),
+                pack_state=False,
+            )
         from activegraph.packs.loader import AMBIGUOUS
         canonical = self._pack_state.behavior_short_to_canonical.get(name)
         if canonical is None:
-            raise LookupError(f"no behavior named {name!r} is loaded")
-        if canonical == AMBIGUOUS:
-            raise ValueError(
-                f"behavior name {name!r} is ambiguous across loaded packs; "
-                f"use the fully-qualified form (e.g. 'pack_name.{name}')"
+            raise BehaviorNotFoundError(
+                name,
+                registered=tuple(b.name for b in self._pack_behaviors),
+                pack_state=True,
             )
+        if canonical == AMBIGUOUS:
+            # Find which packs collide on this short name.
+            owners = tuple(
+                p for c, p in self._pack_state.behavior_owners.items()
+                if c.endswith(f".{name}")
+            )
+            raise AmbiguousBehaviorError(name, packs=owners)
         return self.get_behavior(canonical)
 
     def get_tool(self, name: str):
@@ -1613,16 +1688,24 @@ class Runtime:
 
         Same resolution rule as `get_behavior`. CONTRACT v0.9 #8 / #9.
         """
+        from activegraph.runtime.registration_errors import (
+            AmbiguousToolError,
+            ToolNotFoundError,
+        )
         if "." in name:
             t = self.tool_registry.get(name)
             if t is None:
-                raise LookupError(f"no tool named {name!r} is loaded")
+                raise ToolNotFoundError(
+                    name, registered=tuple(self.tool_registry.keys()),
+                )
             return t
         # Short name
         if self._pack_state is None:
             t = self.tool_registry.get(name)
             if t is None:
-                raise LookupError(f"no tool named {name!r} is loaded")
+                raise ToolNotFoundError(
+                    name, registered=tuple(self.tool_registry.keys()),
+                )
             return t
         from activegraph.packs.loader import AMBIGUOUS
         canonical = self._pack_state.tool_short_to_canonical.get(name)
@@ -1630,13 +1713,16 @@ class Runtime:
             # Maybe a globally-exported tool registered under its short name
             t = self.tool_registry.get(name)
             if t is None:
-                raise LookupError(f"no tool named {name!r} is loaded")
+                raise ToolNotFoundError(
+                    name, registered=tuple(self.tool_registry.keys()),
+                )
             return t
         if canonical == AMBIGUOUS:
-            raise ValueError(
-                f"tool name {name!r} is ambiguous across loaded packs; "
-                f"use the fully-qualified form (e.g. 'pack_name.{name}')"
+            owners = tuple(
+                p for c, p in self._pack_state.tool_owners.items()
+                if c.endswith(f".{name}")
             )
+            raise AmbiguousToolError(name, packs=owners)
         return self.tool_registry[canonical]
 
     def _pack_settings_for_behavior(self, b) -> Any:
@@ -1710,8 +1796,9 @@ class Runtime:
         Raises `LookupError` if `approval_id` is not pending. Emits an
         `approval.granted` event followed by the deferred `object.created`.
         """
+        from activegraph.runtime.exec_errors import ApprovalNotFoundError
         if self._pack_state is None:
-            raise LookupError(f"no pending approval named {approval_id!r}")
+            raise ApprovalNotFoundError(approval_id, pending_count=0)
         for i, pa in enumerate(self._pack_state.pending_approvals):
             if pa.id != approval_id:
                 continue
@@ -1733,7 +1820,9 @@ class Runtime:
             )
             obj = self.graph.add_object(pa.object_type, pa.data, actor=approved_by or "user")
             return obj.id
-        raise LookupError(f"no pending approval named {approval_id!r}")
+        raise ApprovalNotFoundError(
+            approval_id, pending_count=len(self._pack_state.pending_approvals)
+        )
 
     @property
     def trace(self):
@@ -1777,8 +1866,37 @@ class Runtime:
         if attached is not None:
             attached_path = getattr(attached, "path", None)
             if path is not None and attached_path is not None and path != attached_path:
-                raise ValueError(
-                    f"runtime already persisting to {attached_path!r}; cannot save to {path!r}"
+                from activegraph.runtime.config_errors import InvalidRuntimeConfiguration
+                raise InvalidRuntimeConfiguration(
+                    f"save_state(path={path!r}) — runtime already persisting to {attached_path!r}",
+                    what_failed=(
+                        f"runtime.save_state(path={path!r}) was called, but "
+                        f"this runtime is already persisting to "
+                        f"{attached_path!r}. Save targets are pinned at "
+                        f"runtime construction; save_state cannot redirect."
+                    ),
+                    why=(
+                        "A runtime's store is its source of truth for the "
+                        "event log. Redirecting save mid-run would split the "
+                        "log across two stores — replay would only see one "
+                        "half. The framework refuses the redirect to keep "
+                        "the audit trail consistent."
+                    ),
+                    how_to_fix=(
+                        "To save to the originally-attached store, omit the "
+                        "`path=` argument — `save_state()` flushes whatever "
+                        "store is attached:\n"
+                        "    rt.save_state()\n"
+                        "\n"
+                        "To move a run to a different store, use "
+                        "`activegraph migrate` after the run completes:\n"
+                        f"    activegraph migrate --from sqlite:///{attached_path} "
+                        f"--to sqlite:///{path}"
+                    ),
+                    context={
+                        "requested_path": path,
+                        "attached_path": attached_path,
+                    },
                 )
             # SQLite autocommit means already durable, but call commit() defensively.
             conn = getattr(attached, "_conn", None)
@@ -1790,7 +1908,35 @@ class Runtime:
             return attached_path or "<in-memory>"
 
         if path is None:
-            raise ValueError("save_state(path=...) required when no store is attached")
+            from activegraph.runtime.config_errors import InvalidRuntimeConfiguration
+            raise InvalidRuntimeConfiguration(
+                "save_state() requires path= when no store is attached",
+                what_failed=(
+                    "runtime.save_state() was called without a `path=` "
+                    "argument, but this runtime has no store attached. "
+                    "Without either, save_state has nowhere to write."
+                ),
+                why=(
+                    "save_state() is the bridge between an in-memory "
+                    "runtime and a durable store. It needs either a "
+                    "pre-attached store (from Runtime construction) or an "
+                    "explicit `path=` argument naming a SQLite file. "
+                    "Defaulting to a temp file would silently lose runs "
+                    "the next time the process exited."
+                ),
+                how_to_fix=(
+                    "Either attach a store at construction time:\n"
+                    "    rt = Runtime(graph, persist_to='/path/to/run.db')\n"
+                    "    rt.run_goal('...')\n"
+                    "    rt.save_state()\n"
+                    "or pass a path explicitly:\n"
+                    "    rt.save_state(path='/path/to/run.db')\n"
+                    "\n"
+                    "For ephemeral runs that should not persist, omit "
+                    "save_state() — the in-memory graph is the run's "
+                    "lifetime."
+                ),
+            )
 
         store = _open_sqlite_store(path, self.graph.run_id)
         store.upsert_run(
@@ -1925,7 +2071,38 @@ class Runtime:
 
         store = self.graph.store
         if store is None or not isinstance(store, SQLiteEventStore):
-            raise RuntimeError("fork requires a SQLite-backed runtime")
+            from activegraph.runtime.config_errors import IncompatibleRuntimeState
+            current_kind = (
+                "no store attached" if store is None else type(store).__name__
+            )
+            raise IncompatibleRuntimeState(
+                f"runtime.fork() requires a SQLite-backed runtime (current: {current_kind})",
+                what_failed=(
+                    f"runtime.fork() was called on a runtime with "
+                    f"{current_kind}. The fork primitive currently only "
+                    f"supports SQLite-backed runtimes."
+                ),
+                why=(
+                    "Fork copies events up to the fork point using the "
+                    "store's native primitives (SQLite uses a direct SQL "
+                    "copy under a single transaction). Postgres has a "
+                    "different transactional shape and an in-memory store "
+                    "has no copy primitive at all. v0.8 deliberately "
+                    "scoped the fork command to SQLite first — the "
+                    "limitation is documented in CONTRACT v0.8 #5."
+                ),
+                how_to_fix=(
+                    "Migrate the run to a SQLite store first, then fork:\n"
+                    "    activegraph migrate --from <current-url> --to sqlite:///fork-source.db\n"
+                    "    activegraph fork sqlite:///fork-source.db --run-id <run> --at-event <evt>\n"
+                    "\n"
+                    "For Postgres-native forking, file an issue — the "
+                    "primitive shape (transactional copy of events up to a "
+                    "seq cutoff) is known, and a contributor with Postgres "
+                    "operational experience could land it as a v1.1 follow-on."
+                ),
+                context={"current_store_kind": current_kind},
+            )
 
         new_run_id = self.graph.ids.run()
         SQLiteEventStore.fork_run(

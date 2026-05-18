@@ -1,4 +1,5 @@
-"""Cypher subset parser + matcher. CONTRACT v0.7 #8 / #9 / #11 / #12.
+"""Cypher subset parser + matcher. CONTRACT v0.7 #8 / #9 / #11 / #12,
++ CONTRACT v1.0 PR-B (error format migration).
 
 A strict subset of Cypher. Anything outside the subset raises
 `UnsupportedPatternError` pointing at the offending token. A clean
@@ -38,16 +39,217 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
+from activegraph.errors import DOCS_BASE_URL, PatternError
 
-class UnsupportedPatternError(SyntaxError):
-    """Pattern uses syntax outside the v0.7 subset."""
 
-    def __init__(self, message: str, *, at: Optional[str] = None) -> None:
+# CONTRACT v0.7 #8 voice notes for v1.0 PR-B:
+# The pattern subset is small on purpose. Every refusal in this module
+# protects two invariants — (a) patterns are exhaustively testable, so
+# a behavior either fires or does not based on a small finite spec; and
+# (b) the trace's audit trail stays meaningful, because a fuzzy match
+# would let a behavior appear to fire on input it did not actually
+# match. Recovery prose almost always points at "register two behaviors"
+# (for OR-like semantics) or "do it in the behavior body" (for mutation,
+# pipelines, etc.).
+
+
+class UnsupportedPatternError(PatternError, SyntaxError):
+    """Pattern uses syntax outside the v0.7 Cypher subset.
+
+    Multi-inherits :class:`SyntaxError` so existing user code that
+    catches ``SyntaxError`` around pattern compilation keeps working.
+    The v1.0 structured-format superclass is :class:`PatternError`,
+    which is itself an :class:`ActiveGraphError`.
+
+    Construct via :meth:`refused_feature` or :meth:`syntax_error` —
+    the factory class methods produce the canonical voice for the two
+    failure modes (a refused-but-recognized Cypher feature vs. a
+    parser-level syntax error). Direct construction with the structured
+    fields is supported for one-off cases.
+    """
+
+    _doc_slug = "unsupported-pattern-error"
+
+    def __init__(
+        self,
+        summary: str,
+        *,
+        what_failed: str,
+        why: str,
+        how_to_fix: str,
+        at: Optional[str] = None,
+        context: Optional[dict[str, Any]] = None,
+    ) -> None:
+        ctx: dict[str, Any] = dict(context) if context else {}
         if at is not None:
-            super().__init__(f"{message} (at: {at!r})")
-        else:
-            super().__init__(message)
+            ctx["at"] = at
         self.at = at
+        super().__init__(
+            summary,
+            what_failed=what_failed,
+            why=why,
+            how_to_fix=how_to_fix,
+            context=ctx,
+        )
+
+    @classmethod
+    def refused_feature(
+        cls,
+        *,
+        feature: str,
+        workaround: str,
+        at: Optional[str] = None,
+        why: Optional[str] = None,
+    ) -> "UnsupportedPatternError":
+        """The canonical case: a recognized Cypher feature that the v0.7
+        subset deliberately refuses, with a documented workaround.
+
+        Use for OR, OPTIONAL MATCH, variable-length paths, undirected
+        relationships, WITH, RETURN, CREATE, MERGE, etc. The ``feature``
+        argument is included in the summary verbatim, so the substring
+        is the same string an operator would search a log for.
+        """
+        return cls(
+            f"{feature} is not supported in the v0.7 Cypher subset",
+            what_failed=(
+                f"The pattern uses {feature}. The v0.7 subset refuses this "
+                f"feature at registration time — long before any match runs."
+            ),
+            why=(
+                why
+                if why
+                else (
+                    "The pattern subset is deliberately small and exhaustively "
+                    "testable. A fuzzy superset of Cypher would let patterns "
+                    "appear to match input they did not actually match, which "
+                    "would break the audit trail that pattern-driven behaviors "
+                    "preserve. See CONTRACT v0.7 #8 for the locked subset."
+                )
+            ),
+            how_to_fix=workaround,
+            at=at,
+        )
+
+    @classmethod
+    def syntax_error(
+        cls,
+        *,
+        what: str,
+        at: Optional[str] = None,
+        expected: Optional[str] = None,
+        got: Optional[str] = None,
+    ) -> "UnsupportedPatternError":
+        """Parser-level error: the pattern does not parse at all (vs.
+        parses-but-uses-refused-feature). Recovery points the developer
+        at the offending token / position.
+        """
+        if expected is not None and got is not None:
+            summary = f"pattern does not parse: expected {expected}, got {got}"
+            body_top = (
+                f"While parsing the pattern, the parser expected {expected} "
+                f"but found {got}."
+            )
+        else:
+            summary = f"pattern does not parse: {what}"
+            body_top = f"While parsing the pattern: {what}."
+        if at:
+            body_top += f"\n  at: {at!r}"
+        return cls(
+            summary,
+            what_failed=body_top,
+            why=(
+                "Behaviors register their pattern subscriptions at startup, "
+                "so the parser refuses ambiguous syntax now rather than risk "
+                "matching a pattern the developer did not actually write. An "
+                "unparseable pattern is a configuration bug; matching is the "
+                "next concern."
+            ),
+            how_to_fix=(
+                f"Fix the syntax. The supported subset is documented in CONTRACT "
+                f"v0.7 #8 and at\n"
+                f"    {DOCS_BASE_URL}/concepts/patterns\n"
+                f"If the syntax looks right, check for unbalanced brackets, a "
+                f"missing relationship type, or a missing arrow direction."
+            ),
+            at=at,
+        )
+
+
+# Per-keyword recovery prose. CONTRACT v0.7 #8 enumerates the refused
+# keywords; each one has a specific "do this in the behavior body
+# instead" answer.
+_KEYWORD_WORKAROUNDS: dict[str, str] = {
+    "RETURN": (
+        "Pattern subscriptions do not return values. Bindings reach the\n"
+        "behavior body via `ctx.matches` — read them there."
+    ),
+    "OPTIONAL": (
+        "OPTIONAL MATCH expresses 'match if present, else null.' The runtime\n"
+        "does not have a null binding. Register a second behavior whose\n"
+        "pattern is the optional sub-pattern."
+    ),
+    "WITH": (
+        "WITH composes a pipeline of matches. The runtime evaluates each\n"
+        "pattern as a flat match; pipelines are expressed as multiple\n"
+        "behaviors chained through emitted events."
+    ),
+    "MATCH": (
+        "Multiple MATCH clauses compose a pipeline. Flatten the pattern\n"
+        "or register one behavior per clause and chain them through\n"
+        "emitted events."
+    ),
+    "UNWIND": (
+        "UNWIND iterates a collection. Iterate in the behavior body\n"
+        "instead — `for row in ctx.matches: ...` — and express the source\n"
+        "collection as a sub-pattern."
+    ),
+    "UNION": (
+        "UNION takes the union of two queries. Register two behaviors,\n"
+        "one per branch, and let both fire."
+    ),
+    "CREATE": (
+        "Patterns observe the graph; they do not mutate it. Mutations go\n"
+        "in the behavior body via `graph.add_object` / `graph.add_relation`."
+    ),
+    "MERGE": (
+        "Same as CREATE — patterns do not mutate. Use\n"
+        "`graph.add_object` (with idempotency handled by the behavior) in\n"
+        "the body instead."
+    ),
+    "SET": (
+        "Same as CREATE — patterns do not mutate. Use\n"
+        "`graph.patch_object` in the behavior body."
+    ),
+    "DELETE": (
+        "Same as CREATE — patterns do not mutate. Use\n"
+        "`graph.remove_object` / `graph.remove_relation` in the behavior\n"
+        "body."
+    ),
+    "DETACH": (
+        "Same as DELETE — patterns do not mutate."
+    ),
+    "REMOVE": (
+        "Same as DELETE — patterns do not mutate."
+    ),
+    "FOREACH": (
+        "FOREACH iterates inside the pattern. Iterate in the behavior\n"
+        "body instead."
+    ),
+    "CALL": (
+        "CALL invokes a procedure. The runtime has no procedure registry;\n"
+        "call your function from the behavior body."
+    ),
+    "LIMIT": (
+        "LIMIT caps result count. Apply the cap in the behavior body by\n"
+        "slicing `ctx.matches`."
+    ),
+    "SKIP": (
+        "SKIP offsets results. Apply the offset in the behavior body."
+    ),
+    "ORDER": (
+        "ORDER BY sorts results. Sort in the behavior body."
+    ),
+}
 
 
 # ---------- AST -------------------------------------------------------------
@@ -171,8 +373,9 @@ def _tokenize(s: str) -> list[Tok]:
     while pos < len(s):
         m = _TOKEN_RE.match(s, pos)
         if not m:
-            raise UnsupportedPatternError(
-                f"unexpected character at position {pos}", at=s[pos : pos + 8]
+            raise UnsupportedPatternError.syntax_error(
+                what=f"unexpected character at position {pos}",
+                at=s[pos : pos + 8],
             )
         if m.lastgroup is None:
             pos = m.end()
@@ -182,9 +385,14 @@ def _tokenize(s: str) -> list[Tok]:
         if kind == "IDENT":
             upper = text.upper()
             if upper in _FORBIDDEN_KEYWORDS:
-                raise UnsupportedPatternError(
-                    f"keyword {upper!r} is not supported in the v0.7 Cypher subset "
-                    f"(see CONTRACT v0.7 #8)",
+                workaround = _KEYWORD_WORKAROUNDS.get(
+                    upper,
+                    f"Remove the {upper} keyword. The v0.7 subset refuses it; "
+                    f"no equivalent in-subset expression exists for this case.",
+                )
+                raise UnsupportedPatternError.refused_feature(
+                    feature=f"the {upper} keyword",
+                    workaround=workaround,
                     at=text,
                 )
             if upper in _KEYWORDS:
@@ -211,10 +419,11 @@ class _Parser:
     def eat(self, kind: str, text: Optional[str] = None) -> Tok:
         t = self.peek()
         if t.kind != kind or (text is not None and t.text != text):
-            raise UnsupportedPatternError(
-                f"expected {kind}"
-                + (f" {text!r}" if text else "")
-                + f", got {t.kind} {t.text!r}",
+            expected = kind + (f" {text!r}" if text else "")
+            raise UnsupportedPatternError.syntax_error(
+                what=f"expected {expected}, got {t.kind} {t.text!r}",
+                expected=expected,
+                got=f"{t.kind} {t.text!r}",
                 at=t.text or self.source[t.pos : t.pos + 8],
             )
         self.i += 1
@@ -239,8 +448,8 @@ class _Parser:
         # Anything after WHERE (or after the match if no WHERE) is junk.
         if self.peek().kind != "EOF":
             t = self.peek()
-            raise UnsupportedPatternError(
-                f"unexpected trailing tokens after pattern: {t.kind} {t.text!r}",
+            raise UnsupportedPatternError.syntax_error(
+                what=f"unexpected trailing tokens after pattern: {t.kind} {t.text!r}",
                 at=t.text,
             )
         return Pattern(match=match_clause, where=where, source=self.source)
@@ -286,13 +495,20 @@ class _Parser:
                 self.eat("ARROW_R")
                 return RelPat(var=rel_var, type=rel_type, direction="right")
             if arrow.kind == "DASH":
-                raise UnsupportedPatternError(
-                    "undirected relationships are not supported; "
-                    "use -[:type]-> or <-[:type]- (CONTRACT v0.7 #8)",
+                raise UnsupportedPatternError.refused_feature(
+                    feature="undirected-relationship syntax",
+                    workaround=(
+                        "Pick a direction. Use `(a)-[:rel]->(b)` for source→target\n"
+                        "or `(a)<-[:rel]-(b)` for target→source. The pattern\n"
+                        "matcher needs the direction so the audit trail knows which\n"
+                        "endpoint produced the binding."
+                    ),
                     at="-",
                 )
-            raise UnsupportedPatternError(
-                f"expected '->' after relationship, got {arrow.kind} {arrow.text!r}",
+            raise UnsupportedPatternError.syntax_error(
+                what=f"expected '->' after relationship, got {arrow.kind} {arrow.text!r}",
+                expected="'->'",
+                got=f"{arrow.kind} {arrow.text!r}",
                 at=arrow.text,
             )
         if t.kind == "ARROW_L":
@@ -300,8 +516,10 @@ class _Parser:
             rel_var, rel_type = self._parse_edge_brackets()
             self.eat("DASH")
             return RelPat(var=rel_var, type=rel_type, direction="left")
-        raise UnsupportedPatternError(
-            f"expected relationship between nodes, got {t.kind} {t.text!r}",
+        raise UnsupportedPatternError.syntax_error(
+            what=f"expected relationship between nodes, got {t.kind} {t.text!r}",
+            expected="a relationship",
+            got=f"{t.kind} {t.text!r}",
             at=t.text,
         )
 
@@ -310,8 +528,14 @@ class _Parser:
         # Reject variable-length path syntax explicitly so the error
         # message points at the right place.
         if self.consume_if("STAR") is not None:
-            raise UnsupportedPatternError(
-                "variable-length paths (-[*]-) are not supported (CONTRACT v0.7 #8)",
+            raise UnsupportedPatternError.refused_feature(
+                feature="variable-length path syntax (-[*]-)",
+                workaround=(
+                    "Express the path as N separate one-hop patterns and register\n"
+                    "one behavior per length you care about. If the path length is\n"
+                    "unbounded, the matcher would have unbounded cost — that's\n"
+                    "the reason for the refusal, not just policy."
+                ),
                 at="*",
             )
         var: Optional[str] = None
@@ -321,8 +545,8 @@ class _Parser:
         # have an explicit type.
         if not self.consume_if("COLON"):
             t = self.peek()
-            raise UnsupportedPatternError(
-                "relationship type required (e.g. [:supports] or [r:supports])",
+            raise UnsupportedPatternError.syntax_error(
+                what="relationship type required (e.g. [:supports] or [r:supports])",
                 at=t.text,
             )
         type_tok = self.eat("IDENT")
@@ -349,9 +573,26 @@ class _Parser:
         while self.consume_if("KW_AND"):
             parts.append(self.parse_unary())
         if self.consume_if("KW_OR"):
-            raise UnsupportedPatternError(
-                "OR is not supported in WHERE (CONTRACT v0.7 #8). "
-                "Register two behaviors for either-or semantics.",
+            raise UnsupportedPatternError.refused_feature(
+                feature="OR",
+                workaround=(
+                    "Register two behaviors, one per branch of the disjunction.\n"
+                    "Both fire independently; if both branches are true for the\n"
+                    "same event, both behaviors fire (which is usually what you\n"
+                    "want — OR-then-dedup is not).\n"
+                    "\n"
+                    "Example:\n"
+                    "  Instead of: WHERE c.confidence > 0.7 OR c.severity = 'high'\n"
+                    "  Register:   one behavior with WHERE c.confidence > 0.7\n"
+                    "              one behavior with WHERE c.severity = 'high'"
+                ),
+                why=(
+                    "OR in WHERE clauses can produce match-set ambiguity at the "
+                    "trace level: it's hard to tell, after the fact, which branch "
+                    "of the OR actually triggered. Registering two behaviors keeps "
+                    "every fire attributable to a specific pattern in the audit "
+                    "trail. See CONTRACT v0.7 #8."
+                ),
                 at="OR",
             )
         if len(parts) == 1:
@@ -377,8 +618,10 @@ class _Parser:
         left = self.parse_path()
         t = self.peek()
         if t.kind != "OP":
-            raise UnsupportedPatternError(
-                f"expected comparison operator, got {t.kind} {t.text!r}",
+            raise UnsupportedPatternError.syntax_error(
+                what=f"expected comparison operator, got {t.kind} {t.text!r}",
+                expected="a comparison operator (=, <>, <, <=, >, >=)",
+                got=f"{t.kind} {t.text!r}",
                 at=t.text,
             )
         op = self.eat("OP").text
@@ -390,8 +633,10 @@ class _Parser:
         if nxt.kind == "IDENT":
             right_path = self.parse_path()
             return Comparison(left_path=left, op=op, right_path=right_path)
-        raise UnsupportedPatternError(
-            f"expected literal or path on rhs of comparison, got {nxt.kind} {nxt.text!r}",
+        raise UnsupportedPatternError.syntax_error(
+            what=f"expected literal or path on rhs of comparison, got {nxt.kind} {nxt.text!r}",
+            expected="a literal (number, string, true/false/null) or a binding path (a.field)",
+            got=f"{nxt.kind} {nxt.text!r}",
             at=nxt.text,
         )
 
@@ -422,8 +667,11 @@ class _Parser:
         if t.kind == "KW_NULL":
             self.i += 1
             return None
-        raise UnsupportedPatternError(
-            f"expected literal, got {t.kind} {t.text!r}", at=t.text
+        raise UnsupportedPatternError.syntax_error(
+            what=f"expected literal, got {t.kind} {t.text!r}",
+            expected="a literal (number, string, true, false, null)",
+            got=f"{t.kind} {t.text!r}",
+            at=t.text,
         )
 
 
@@ -580,7 +828,34 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
             right = expr.right_value
         fn = _OPS.get(expr.op)
         if fn is None:
-            raise UnsupportedPatternError(f"unknown operator {expr.op!r}")
+            # Internal: the parser accepted an operator the evaluator does
+            # not recognize. Either the parser drifted from _OPS or the
+            # AST was constructed externally. PR-G normalization: uses the
+            # shared internal_bug_fields helper for uniform prose.
+            from activegraph.errors import internal_bug_fields
+            fields = internal_bug_fields(
+                summary=f"unknown comparison operator {expr.op!r}",
+                what_happened=(
+                    f"The WHERE evaluator received a comparison with operator "
+                    f"{expr.op!r}, but the operator table has no handler for it."
+                ),
+                why_invariant=(
+                    "The operator table (_OPS in this module) is the source of "
+                    "truth for which comparison operators the runtime accepts. "
+                    "If the parser produces an operator the evaluator does not "
+                    "know about, the audit trail would silently mis-evaluate "
+                    "the pattern — refuse instead."
+                ),
+                location="activegraph/runtime/patterns.py:_eval_where (unknown comparison operator)",
+                extra_context={"operator": expr.op},
+            )
+            raise UnsupportedPatternError(
+                fields["summary"],
+                what_failed=fields["what_failed"],
+                why=fields["why"],
+                how_to_fix=fields["how_to_fix"],
+                context=fields["context"],
+            )
         return fn(left, right)
     if isinstance(expr, NotExpr):
         return not _eval_where(expr.inner, bindings, graph)
@@ -604,8 +879,32 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
             if consistent:
                 return False
         return True
+    # Internal: an AST node the evaluator does not recognize. Should not
+    # happen given the parser produces a closed set of node types. PR-G
+    # normalization: uses the shared internal_bug_fields helper.
+    from activegraph.errors import internal_bug_fields
+    _fields = internal_bug_fields(
+        summary=f"unrecognized WHERE AST node {type(expr).__name__}",
+        what_happened=(
+            f"The WHERE evaluator received an AST node of type "
+            f"{type(expr).__name__}, but the evaluator only handles "
+            f"Comparison, NotExpr, AndExpr, and NotExists."
+        ),
+        why_invariant=(
+            "The AST node set is closed and produced by this module's parser. "
+            "An unrecognized node means either the parser drifted from the "
+            "evaluator or the AST was constructed externally — both would "
+            "produce silent mis-evaluation, so the runtime refuses."
+        ),
+        location="activegraph/runtime/patterns.py:_eval_where (unrecognized AST node)",
+        extra_context={"ast_node_type": type(expr).__name__},
+    )
     raise UnsupportedPatternError(
-        f"unrecognized where node {type(expr).__name__}"
+        _fields["summary"],
+        what_failed=_fields["what_failed"],
+        why=_fields["why"],
+        how_to_fix=_fields["how_to_fix"],
+        context=_fields["context"],
     )
 
 

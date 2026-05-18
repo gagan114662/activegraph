@@ -1,0 +1,17 @@
+InvalidStoreURL: store URL '/tmp/run.db' has no scheme
+
+What failed:
+  The string '/tmp/run.db' looks like a filesystem path with no URL scheme prefix.
+
+Why:
+  The framework addresses stores by URL everywhere — runtime, CLI, library — so the same string can be passed around without ambiguity about which driver opens it. A malformed URL is refused at parse time rather than silently coerced to a default scheme; guessing wrong would either corrupt the audit trail or open an unintended store.
+
+How to fix:
+  If it's a SQLite file, use:
+      sqlite:////tmp/run.db
+
+  If it's a Postgres database, use:
+      postgres://host/dbname
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-store-url-error

@@ -1,0 +1,17 @@
+InvalidStoreURL: unsupported store URL scheme 'mysql' in 'mysql://host/dbname'
+
+What failed:
+  The URL 'mysql://host/dbname' has scheme 'mysql', which the framework does not recognize.
+
+Why:
+  The framework addresses stores by URL everywhere — runtime, CLI, library — so the same string can be passed around without ambiguity about which driver opens it. A malformed URL is refused at parse time rather than silently coerced to a default scheme; guessing wrong would either corrupt the audit trail or open an unintended store.
+
+How to fix:
+  Supported schemes are:
+      sqlite:///...        local SQLite file
+      postgres://...       PostgreSQL (also accepted: postgresql://)
+
+  Other databases are not supported in v1.0; the EventStore protocol in activegraph/store/base.py is the path for adding new backends.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/invalid-store-url-error

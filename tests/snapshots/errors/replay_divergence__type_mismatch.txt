@@ -1,0 +1,20 @@
+ReplayDivergenceError: replay diverged at evt_113: event type mismatch
+
+What failed:
+  At the stream position pinned to event evt_113, the live re-run produced a different event type than recorded:
+    recorded:  'object.created'
+    live:      'patch.applied'
+
+Why:
+  Strict replay compares the type stream of non-lifecycle events between the recorded log and the live re-run. A type mismatch means the behavior graph took a different branch — usually because a behavior's `where` filter, a pattern subscription, or a conditional `graph.emit` changed since the recorded run.
+
+How to fix:
+  Identify the behavior that produced event evt_113 in the recorded log:
+      activegraph inspect <parent-run> --event evt_113
+
+  Diff that behavior against your current source. If the change was
+  intentional, re-run without `replay_strict=True` (or fork with --record
+  from the divergence point). If unintentional, revert the behavior.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/replay-divergence-error

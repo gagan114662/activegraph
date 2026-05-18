@@ -1,0 +1,14 @@
+ToolError: tool.execution_error: TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'
+
+What failed:
+  A tool body raised an exception:
+    TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'
+
+Why:
+  When a tool body raises, the framework catches it and surfaces a structured failure so the calling behavior can read `reason='tool.execution_error'` from tool.responded and decide whether to retry or fail. The raw exception is preserved in payload_extras for diagnosis without leaking it past the tool boundary.
+
+How to fix:
+  Inspect tool.responded.payload_extras for the original exception type and traceback. If the failure is intrinsic to the tool's inputs (bad data), tighten the input validation. If it's intermittent, add retry-on-execution-error logic to the calling behavior.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/tool-error

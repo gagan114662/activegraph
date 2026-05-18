@@ -1,0 +1,21 @@
+PackSchemaViolation: relation_type 'supports': source type 'memo' not allowed
+
+What failed:
+  `graph.add_relation(source, target, 'supports')` was rejected because the source object has type 'memo', but the pack's declared relation type for 'supports' (declared by pack 'diligence') only allows source types: 'claim', 'evidence'.
+
+Why:
+  Relation types declare which object-type pairs they can connect. The constraint serves the same purpose as object schemas: behaviors and pattern subscriptions that follow this relation rely on the source/target types being what the pack documented. An out-of-spec relation would cause pattern matches to silently miss or misfire.
+
+How to fix:
+  Either:
+    - Pass a source of an allowed type ('claim', 'evidence'); or
+    - Add 'memo' to the relation type's `source_types=` list when declaring the pack:
+        RelationType(
+            name='supports',
+            source_types=['claim', 'evidence', 'memo'],
+            target_types=[...],
+        )
+    - Or, if the constraint is wrong, remove `source_types=` to accept any source type.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/pack-schema-violation

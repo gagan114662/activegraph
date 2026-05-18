@@ -1,0 +1,19 @@
+MissingProviderError: no LLM provider configured for @llm_behavior
+
+What failed:
+  An LLM-backed behavior ('diligence.researcher') was registered, but Runtime(...) was constructed without an `llm_provider=` argument.
+
+Why:
+  @llm_behavior dispatches LLM calls through the provider attached to the runtime at construction. Failing loud at registration rather than at first invocation is the v0.6 contract — silently no-op'ing the behavior would corrupt the audit trail (behaviors fire and produce events; a missing provider would produce events that claim to depend on an LLM call that never happened).
+
+How to fix:
+  Pass `llm_provider=` to the Runtime constructor:
+      from activegraph.llm.anthropic import AnthropicProvider
+      rt = Runtime(graph, llm_provider=AnthropicProvider())
+
+  For offline replay or tests, use a recorded or scripted provider:
+      from activegraph.llm.recorded import RecordedLLMProvider
+      rt = Runtime(graph, llm_provider=RecordedLLMProvider(...))
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/missing-provider-error

@@ -1,0 +1,16 @@
+UnsupportedPatternError: pattern does not parse: unexpected character at position 10
+
+What failed:
+  While parsing the pattern: unexpected character at position 10.
+    at: '@'
+
+Why:
+  Behaviors register their pattern subscriptions at startup, so the parser refuses ambiguous syntax now rather than risk matching a pattern the developer did not actually write. An unparseable pattern is a configuration bug; matching is the next concern.
+
+How to fix:
+  Fix the syntax. The supported subset is documented in CONTRACT v0.7 #8 and at
+      https://yoheinakajima.github.io/activegraph/concepts/patterns
+  If the syntax looks right, check for unbalanced brackets, a missing relationship type, or a missing arrow direction.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error

@@ -1,0 +1,16 @@
+MissingOptionalDependency: PostgresEventStore requires the 'psycopg' Python package
+
+What failed:
+  While initializing PostgresEventStore, the import of 'psycopg' failed because the package is not installed in this environment.
+
+Why:
+  The framework keeps optional subsystems off the default install path so a minimal install stays small. Each optional subsystem declares its dependency explicitly; missing it produces this error rather than failing later with a confusing AttributeError or ImportError deep inside the subsystem.
+
+How to fix:
+  Install the optional dependency:
+      pip install 'activegraph[postgres]'
+
+  If you don't need PostgresEventStore, the bare `activegraph` install does not depend on 'psycopg' — the error only fires when the subsystem is actually used.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/missing-optional-dependency

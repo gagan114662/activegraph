@@ -1,0 +1,15 @@
+PackVersionConflictError: pack 'diligence': already loaded version '0.1.0', attempted to load version '0.2.0'
+
+What failed:
+  runtime.load_pack('diligence', version='0.2.0') was rejected because the runtime already holds 'diligence' version '0.1.0'.
+
+Why:
+  A runtime can hold at most one version of any pack. Two versions would compete for the same canonical names in the registry — `pack.behavior_name` would resolve differently depending on dispatch order, which would silently corrupt the audit trail.
+
+How to fix:
+  Pick one version. If you need both behaviors, the older version's namespace can be retained under a renamed pack: copy the pack, change its `name=` declaration, and load both. The two versions then have distinct canonical namespaces.
+
+  To unload the current version and load the new one, construct a fresh Runtime — load_pack does not support version swapping in place.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/pack-version-conflict-error

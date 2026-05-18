@@ -1,0 +1,16 @@
+AmbiguousBehaviorError: behavior name 'researcher' is ambiguous across loaded packs
+
+What failed:
+  The short behavior name 'researcher' resolves to behaviors in more than one loaded pack: 'diligence', 'research'. The runtime cannot pick one without an explicit choice.
+
+Why:
+  Pack-prefixed names are canonical; short names are a convenience for the common single-pack case (CONTRACT v0.9 #8). When multiple packs declare the same short name, the convenience would have to either pick one silently (which would change behavior on pack-load order) or pick neither — both produce surprises. The runtime refuses the lookup and asks for the canonical name.
+
+How to fix:
+  Use the canonical form:
+      rt.get_behavior('diligence.researcher')
+
+  If you wanted both packs' behaviors to fire together under the same trigger, they are registered separately in the runtime — both will fire on a matching event regardless of which one your lookup names. The lookup is for explicit by-name access, not for trigger dispatch.
+
+More:
+  https://yoheinakajima.github.io/activegraph/errors/ambiguous-behavior-error
