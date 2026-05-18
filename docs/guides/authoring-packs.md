@@ -7,9 +7,12 @@ to "I have a working diligence system in ten minutes."
 
 This document is the canonical reference for the pack format. It is
 companion reading to `examples/diligence_real_run.py` (the killer
-demo / executable spec) and `CONTRACT.md` v0.9 (the locked design
-decisions). When this guide and the contract disagree, the contract
-wins.
+demo / executable spec) and
+[`CONTRACT.md`](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md)
+(the locked design decisions — v0.9 introduced the pack format; v1.0
+added the per-pack-error reference catalog under
+[Reference: Errors](../reference/errors/pack-conflict-error.md)).
+When this guide and the contract disagree, the contract wins.
 
 ---
 
@@ -645,6 +648,12 @@ kebab-to-snake transformation of the pack name: `pack new
 diligence-extension` produces `diligence-extension/` with internal
 package `diligence_extension/`.
 
+`activegraph pack list` enumerates every pack the framework can
+discover in the current Python environment (entry-point name,
+version, and dotted import path). Useful for verifying that
+`pip install activegraph-extension` registered correctly before
+calling `load_by_name`.
+
 ---
 
 ## 15. Trust model and packs as code
@@ -665,8 +674,8 @@ This decision is locked. See CONTRACT v0.9 #12.
 
 ## 16. Backward compatibility
 
-The pack format is a strict addition. All v0–v0.8 tests pass
-unchanged. Global decorators behave exactly as before. The
+The pack format is a strict addition. All v0–v0.9 tests pass
+unchanged in v1.0. Global decorators behave exactly as before. The
 `Graph.add_object` path is unchanged in the no-packs-loaded case.
 
 If you have a v0.7-era custom diligence example (`examples/

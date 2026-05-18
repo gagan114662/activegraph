@@ -57,14 +57,22 @@ escapes to your code.
 
 When you want to know "what would happen if I changed this
 setting," fork from a point before the setting takes effect, run
-the fork with the override, and diff:
+the fork with the override, and diff.
+
+!!! note "The `fork --set` flag is part of the v1.1 release"
+    The CLI form below shows the `--set <pack>.<key>=<value>` flag
+    documented in CONTRACT v1.0. The flag itself lands in v1.1
+    (see [CONTRACT v1.1 #1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md#v11-1-cli-flags-specd-but-not-implemented)).
+    Until then, use the Python-API form in
+    [Fork with a pack-setting override (v1.0 — Python API)](#fork-with-a-pack-setting-override-v10-python-api)
+    below.
 
 ```bash
 # Find the event before the setting matters (usually the goal
 # event or a pack.loaded event):
 activegraph inspect <store> --run-id <run> --tail 50
 
-# Fork with the override:
+# Fork with the override (v1.1):
 activegraph fork <store> --run-id <run> --at-event <evt> \
     --label cautious \
     --set diligence.confidence_threshold_for_review=0.9 \
@@ -79,6 +87,70 @@ events, and divergent objects. The first divergent object tells
 you where the override started producing different work. See
 [`forking`](../concepts/forking.md) for the cutoff semantics and
 the `--set` rules (pack-settings-only, fail-loud-on-typo).
+
+## Fork with a pack-setting override (v1.0 — Python API)
+
+The canonical home for the fork-with-override workflow until the
+CLI's `--set` flag lands in v1.1. The Python form does the same
+thing the CLI form will: copies the parent's events up to the
+fork point, then resumes execution under different pack settings.
+
+```python
+from activegraph import Graph, IDGen, FrozenClock, Runtime
+from activegraph.packs.diligence import DiligenceSettings, pack as diligence_pack
+from activegraph.packs.diligence.fixtures import (
+    RecordedDiligenceProvider, THREE_COMPANIES, company_goal,
+)
+from activegraph.store import open_store
+
+PARENT_URL = "sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db"
+PARENT_RUN = "quickstart_demo_run"
+FORK_RUN = "quickstart_cautious_fork"
+
+# Find a fork point — typically the goal.created event for the
+# company you want to re-run with the override.
+parent_store = open_store(PARENT_URL, run_id=PARENT_RUN)
+fork_at = next(
+    e.id for e in parent_store.iter_events()
+    if e.type == "goal.created"
+)
+
+# Copy parent events up to the fork point into the new run.
+from activegraph.store.sqlite import SQLiteEventStore
+SQLiteEventStore.fork_run(
+    "/tmp/activegraph_quickstart/quickstart_demo_run.db",
+    parent_run_id=PARENT_RUN,
+    new_run_id=FORK_RUN,
+    at_event_id=fork_at,
+    label="cautious",
+    created_at="2026-01-01T00:00:00Z",
+)
+
+# Load the fork and run it with the override settings.
+fork_rt = Runtime.load(PARENT_URL, run_id=FORK_RUN)
+fork_rt.load_pack(
+    diligence_pack,
+    settings=DiligenceSettings(
+        llm_model="claude-sonnet-4-5",
+        confidence_threshold_for_review=0.9,  # ← the override (was 0.7)
+    ),
+)
+fork_rt.run_until_idle()
+fork_rt.save_state()
+```
+
+Diff the two runs from the CLI as usual:
+
+```bash
+activegraph diff sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db \
+    --run-a quickstart_demo_run \
+    --run-b quickstart_cautious_fork
+```
+
+The diff shows the structural difference produced by the
+threshold change. When `--set` lands in v1.1, the same workflow
+collapses to a single CLI command; until then, this is the
+canonical recipe.
 
 ## Pattern subscriptions for cross-object reactivity
 

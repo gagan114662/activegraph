@@ -2465,6 +2465,20 @@ the quickstart flow to understand what's structurally different
 about the framework. The transcript has an explicit beat for that
 moment of recognition.
 
+### v1.0 #1 errata — fixture source
+
+The original prompt for the quickstart-command commit framed
+fixtures as living under a separately-installable `activegraph_diligence`
+package with a "depends on diligence pack" optional-dep check.
+That was wrong: the diligence pack lives in `activegraph/packs/diligence/`
+as part of the main install and cannot be uninstalled separately.
+The optional-dep recovery path is dead code by construction.
+
+The correct shape: the quickstart command imports
+`from activegraph.packs.diligence import pack, fixtures` directly.
+No optional-dep check; no install-instruction error path. The
+pack is always present.
+
 ## v1.0 #2. Build order is fixed
 
 1. `examples/quickstart_session.txt` (the spec)
@@ -3780,3 +3794,297 @@ going to decide in the first 10 minutes whether they come back
 Monday. Slow down on implementation choices, speed up on user-facing
 polish, and remember that adoption-surface work is a different skill
 from runtime engineering.
+
+
+# v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
+
+The first v1.1 items that came from real user-facing work, not from
+internal audit. The v1.0 error-completeness milestone (~30 items from
+the PR-G end-of-series tally) is the broader v1.1 scope; this section
+records the implementation gaps that surfaced during rc1.
+
+The discipline: turn "we found a gap" into "we found a gap and we
+know exactly how to close it." Each entry has a spec source, an
+implementation scope, and the open design questions that need
+resolution in the v1.1 PR.
+
+## v1.1 #1. CLI flags spec'd but not implemented
+
+Three CLI flags are documented in CONTRACT v1.0 and in
+`examples/quickstart_session.txt` (the v1.0 transcript spec), but
+do not exist in code. The v1.0-rc1 tutorial work
+(rc1 #2/5, `docs/quickstart.md`) surfaced the first; the
+spec-vs-impl audit done as part of that commit surfaced the other
+two.
+
+**The three flags:**
+
+1. **`activegraph fork --set <pack>.<key>=<value>`** —
+   override a pack setting on a fork. Most user-visible of the
+   three; appears in the rendered doc-site at
+   `cookbook/common-patterns.md` (the fork-and-diff workflow),
+   `concepts/forking.md` (the forking conceptual model), and
+   `reference/cli.md` (the CLI reference). The tutorial's step 7
+   (the "fork-and-diff is the framework's mechanism for hypothesis
+   testing" closer) depends on it.
+
+2. **`activegraph inspect --memo`** — render a run's memo
+   objects in the same prose form as the quickstart command's
+   memo section. Spec'd in
+   `examples/quickstart_session.txt` BEAT 2 implementer notes
+   ("Memo output uses the same renderer the operator CLI uses
+   (`activegraph inspect --memo`). Two renderers diverge; one
+   renderer stays consistent.") Not currently visible in any
+   user-facing doc page.
+
+3. **`activegraph inspect --search "<query>"`** — substring or
+   keyword search across a run's events. Spec'd in BEAT 3 of the
+   transcript. Not currently visible in any user-facing doc page.
+
+**Implementation scope (per flag):**
+
+- `--set`: persist overrides on the run's metadata row at fork
+  time, read them back on `Runtime.load`, plumb through to
+  `load_pack(settings=...)` when packs reload. Affects the
+  SQLite/Postgres schemas (a new column or sidecar JSON on
+  `runs`), `Runtime.load`'s signature (optional override
+  parameter), and the fork primitive's CLI surface (add the flag
+  and the parsing).
+- `--memo`: small read-only flag on the existing `inspect`
+  command; reads memo objects from the run and prints them with
+  the same renderer the quickstart command's
+  `_print_memo_section` helper uses (lift the helper out of
+  `activegraph/cli/quickstart.py` into a shared module so the
+  two renderers don't diverge).
+- `--search`: small read-only flag on `inspect`; iterates events
+  and matches against payload JSON or type+actor fields. Lightest
+  of the three.
+
+**Open design questions for `--set` specifically** (the substantive
+one of the three):
+
+- **Replay semantics for overridden forks.** Does the override
+  apply during replay of the shared prefix (so re-fired
+  behaviors see the new setting), or only on events emitted
+  after the fork point? The semantically-clean answer is
+  "after the fork point only — the prefix is the parent's
+  recorded history with the parent's settings, and replay must
+  reproduce it." But that means a setting change pre-fork-point
+  in the override is silently ignored, which is surprising.
+  Alternative: refuse the fork if the prefix contains events
+  the override would have changed. Pick before implementation.
+- **Error timing.** Unknown override keys fail loud — but
+  where? At fork-time (the CLI rejects the flag), at load-time
+  (the next `Runtime.load` errors), or both? The cleanest
+  answer is fork-time (fail as early as possible), but that
+  requires the CLI to know the pack's settings schema at fork
+  time, which means importing the pack. That's expensive on a
+  CLI command that otherwise only does SQL.
+- **Type coercion failure.** Pydantic does the coercion; what
+  happens when the override value can't coerce? Same timing
+  question as above.
+- **Schema migration.** Adding the override column on `runs`
+  bumps `schema_version`. The migration is straightforward
+  (nullable column with default null) but it does mean the
+  store's schema version advances and existing runs need
+  `activegraph migrate` to upgrade.
+
+**Affected user-facing docs that currently reference `--set`** (in
+the order they need footnote admonitions until v1.1 #1 lands):
+
+- `docs/cookbook/common-patterns.md` — the fork-and-diff recipe.
+  Becomes the canonical home for the Python-API form of
+  fork-with-override (new sub-recipe added in rc1 #2/5).
+- `docs/concepts/forking.md` — admonition pointing at the
+  cookbook recipe.
+- `docs/reference/cli.md` — admonition pointing at the cookbook
+  recipe.
+
+The footnotes use mkdocs-material admonition syntax (`!!! note`)
+and are single-sentence pointers, not heavy "known limitations"
+sections.
+
+**Affected internal docs (transcript spec — `--memo` and
+`--search`):** no user-facing footnotes needed; the transcript is
+the implementation contract, not user-facing reading. Spec entries
+stay in place as the v1.1 #1 contract.
+
+## v1.1 #2. Spec-vs-impl drift gate for CLI flags
+
+The v1.0 broken-link CI gate (`tests/test_doc_links.py`) catches
+documentation URLs that don't resolve to real pages. There's no
+equivalent gate for CLI flags referenced in docs that don't exist
+in code. The `--set` gap (and the `--memo` / `--search` gaps it
+revealed) shipped through v1.0-rc1 because the gate didn't exist.
+
+**Implementation scope:**
+
+- Parse CLI flag references from doc pages. Two source forms:
+  - Code blocks marked as `bash` or `shell` — regex against
+    fenced blocks for `activegraph <subcommand> --<flag>`
+    patterns.
+  - Prose mentions in inline code spans (`` `--flag` ``) — same
+    regex, narrower context.
+- Build the truth set from the actual click command surface.
+  Walk the `cli` group, enumerate every subcommand, and pull
+  each subcommand's declared options. Click exposes this
+  introspectably; no source-code regex needed.
+- Compare: every flag referenced in docs must appear in the
+  truth set for its named subcommand. Mismatch fails CI with a
+  per-flag report (similar shape to the broken-link gate's
+  per-URL report).
+- Test file location: `tests/test_doc_cli_flags.py`. Same
+  pytest-failure-on-gap pattern as the broken-link gate.
+
+**Edge cases the gate should handle gracefully:**
+
+- Flag patterns inside intentional negative examples ("don't do
+  `activegraph fork --foo`"). Either annotate these with a
+  comment the gate can skip, or accept that prose contradicting
+  the spec is a finding worth surfacing.
+- Subcommand-less flag references (`--json` mentioned without a
+  subcommand context). Skip if subcommand-less; the truth-set
+  check requires a known subcommand.
+- New flags added in code but not yet documented. The gate
+  doesn't need to fail on these (the doc-coverage discipline is
+  separate); flag-existence is one-directional.
+
+**Why this gate matters beyond the immediate gaps:** the CLI is
+the framework's most operator-visible interface. A user reading
+the docs and hitting a usage error on an undocumented flag loses
+trust in the doc site instantly. The gate keeps the trust
+contract by making spec-vs-impl drift a CI-blocking finding,
+same shape as the broken-link gate did for URLs.
+
+## v1.1 #3. Type-completeness on the public-surface allowlist
+
+CONTRACT v1.0 #C5's mypy --strict gate baselines at 22/38
+allowlist modules clean (57.9% of the public surface).
+``docs/reference/api/TYPE_REPORT.md`` enumerates the 16 dirty
+modules with their per-module error categories. The v1.1
+type-completeness follow-on closes that gap in one PR series.
+
+**The audit's converged classification.** Mypy's view of a module
+depends on which siblings are in scope: with ``follow_imports =
+"skip"`` and ``files = [N clean modules]``, every import outside
+``files`` is Any. Adding or removing a module from ``files`` can
+flip sibling modules between clean and dirty. The audit
+(``scripts/audit_types.py``) converges to the largest stable set
+by iteratively removing modules with findings until the set is
+fixed under one mypy invocation. The pyproject ``files`` and
+``[[tool.mypy.overrides]]`` lists are exactly that converged set.
+
+**The 16 dirty modules** (TYPE_REPORT categories shown for
+triage; full breakdown in the report):
+
+- The bulk are mechanical fixes — ``no-untyped-def`` (missing
+  annotations on internal helpers), ``type-arg`` (unparameterised
+  generics like bare ``dict``), ``no-any-return`` (returning a
+  value typed Any from a function whose return type is
+  concrete).
+- A smaller tail needs per-case judgment — ``attr-defined``
+  (genuine missing attribute, usually a Protocol gap),
+  ``arg-type`` (a real type mismatch that needs a Union or a
+  TypeGuard), ``misc`` (subclassing Any, etc.).
+
+The mechanical categories are most of the work. The v1.1 PR
+series closes them in 3-5 commits grouped by category: one
+commit for ``no-untyped-def``, one for ``type-arg``, one or
+two for ``no-any-return``, one for the tail.
+
+**Re-baseline discipline.** When a dirty module is fixed:
+
+1. Run ``python scripts/audit_types.py``. The converged clean
+   set updates; the report regenerates.
+2. Add the now-clean module to both ``files`` and the per-module
+   ``[[tool.mypy.overrides]]`` strict block in pyproject.toml.
+3. Run ``mypy`` to confirm the gate still passes with the
+   expanded set.
+
+The gate's purpose isn't to be strict everywhere — it's to
+prevent regression on the surface that's already clean. Each
+dirty module fixed and added to the gate is a one-way
+ratchet.
+
+**v1.1 milestone end state.** All 38 allowlist modules in the
+gate; mypy --strict at 100% across the public surface; the
+audit script retained as a regression check for future
+allowlist expansions (new pack ``__all__`` entries, new public
+re-exports).
+
+## v1.1 #4. Docstring-completeness on the public-surface allowlist
+
+CONTRACT v1.0 #C2's docstring gate baselines at 92/100 Ring 0
+symbols not-missing (92.0%) and 84.7% Ring 1 not-missing.
+``docs/reference/api/COVERAGE_REPORT.md`` is the audit; the
+gate's curated exemption list is ``docstring_gaps.toml``.
+
+**The gate's pass condition.** Ring 0: every symbol in
+``activegraph.__all__`` and pack-level ``__all__``s must have
+a docstring (one-line counts) OR be listed in
+``docstring_gaps.toml`` with a reason. Ring 1: aggregate
+not-missing coverage must stay at or above the floor (currently
+80%) set in the toml's ``[ring1]`` block. A regression on
+either gate fails CI.
+
+**Sibling burndown list.** The mypy gate's per-module overrides
+in ``pyproject.toml`` and the docstring gate's per-symbol
+exemptions in ``docstring_gaps.toml`` are the two halves of
+the public-surface completeness milestone. The same set of
+modules drives both audits (``activegraph.__all__`` plus pack
+``__all__``s); the same v1.1 PR series can close both gaps in
+parallel.
+
+**Two-stage v1.1 target.**
+
+- **Wave 1** — close every Ring 0 "missing" gap by adding a
+  docstring (at minimum a one-liner). Each closed gap removes
+  its entry from ``docstring_gaps.toml``. Wave 1 end state: the
+  exemption list is empty; the gate passes against 100% Ring 0
+  not-missing.
+- **Wave 2** — upgrade every one-line docstring on the public
+  surface to a "full" docstring (per the audit's classification:
+  ≥3 lines or has Args/Returns/Raises/Examples). Wave 2 end
+  state: COVERAGE_REPORT.md shows 100% Ring 0 fully-documented.
+  The gate doesn't enforce wave 2 directly — the audit is the
+  measure.
+
+Ring 1 burndown follows the same staging but the gate's
+threshold is the only CI-enforced floor; per-symbol upgrades
+are deliberate PR work, not gate exemptions.
+
+**Re-baseline discipline.** When a Ring 0 symbol gets a
+docstring:
+
+1. Run ``python scripts/audit_docstrings.py`` to refresh
+   ``COVERAGE_REPORT.md``.
+2. Remove the symbol's entry from ``docstring_gaps.toml``.
+3. Run ``python scripts/gate_docstrings.py`` to confirm the
+   gate still passes (and note the "stale exemption" warning
+   if you missed step 2).
+
+When a new public symbol is added without a docstring, the
+gate fails CI — same protection-against-regression shape as
+the mypy gate.
+
+**v1.1 milestone end state.** Wave 1 + Wave 2 + Ring 1
+upgrades + the mypy --strict allowlist all hit 100%. The
+public surface meets the CONTRACT v1.0 #C2 target end-to-end.
+The audit scripts stay in place as regression checks for
+future allowlist expansions.
+
+## v1.1 #5 and beyond
+
+The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series
+tally and the existing v1.1 error-completeness milestone notes
+above):
+
+- v1.0-rc1 documented gaps not yet itemized here — additional
+  gaps may surface during the remaining rc1 commit (changelog).
+- The 22 partial Pack* migrations from CONTRACT v1.0 PR-E.
+- The 4 deferred DB-error wrappers from CONTRACT v1.0 PR-C.
+- The real-user-test gate findings (CONTRACT v1.0 #C4), once it
+  runs externally on rc1.
+
+This list is the v1.1 backlog. CONTRACT v1.1 expands it into a
+proper milestone scope when v1.1 work begins.

@@ -1,0 +1,45 @@
+# Docstring coverage gate on the public allowlist.
+# CONTRACT v1.0 #C2.
+#
+# Ring 0 (__all__ symbols): every symbol must have a docstring or be
+# in docstring_gaps.toml with a reason. New public symbols added
+# without a docstring fail CI.
+#
+# Ring 1 (importable but not re-exported): threshold gate, floor set
+# in docstring_gaps.toml's [ring1] block (currently 80%).
+#
+# The audit (scripts/audit_docstrings.py) generates COVERAGE_REPORT.md
+# for the v1.1 burndown. The gate (scripts/gate_docstrings.py) is what
+# CI runs — same exit-code-is-the-gate shape as the mypy workflow.
+
+name: docstrings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "activegraph/**"
+      - "docstring_gaps.toml"
+      - "scripts/gate_docstrings.py"
+      - ".github/workflows/docstrings.yml"
+  pull_request:
+    paths:
+      - "activegraph/**"
+      - "docstring_gaps.toml"
+      - "scripts/gate_docstrings.py"
+      - ".github/workflows/docstrings.yml"
+  workflow_dispatch:
+
+jobs:
+  docstrings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Run docstring gate
+        run: python scripts/gate_docstrings.py

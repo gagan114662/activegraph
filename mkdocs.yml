@@ -118,6 +118,7 @@ strict: false
 # Nav: only pages that exist today. Grows with the doc-site phase.
 nav:
   - Home: index.md
+  - Quickstart: quickstart.md
   - Concepts:
       - Graph: concepts/graph.md
       - Events: concepts/events.md
@@ -152,6 +153,7 @@ nav:
           - Observability: reference/api/observability.md
           - Diligence pack: reference/api/packs/diligence.md
       - Errors:
+          - Catalog overview: reference/errors.md
           - ReplayDivergenceError: reference/errors/replay-divergence-error.md
           - UnsupportedPatternError: reference/errors/unsupported-pattern-error.md
           - CorruptedEventPayloadError: reference/errors/corrupted-event-payload-error.md
@@ -183,3 +185,5 @@ nav:
           - InvalidPatchLifecycleState: reference/errors/invalid-patch-lifecycle-state.md
           - PackSchemaViolation: reference/errors/pack-schema-violation.md
           - InternalEvaluatorError: reference/errors/internal-evaluator-error.md
+  - About:
+      - Changelog: about/changelog.md

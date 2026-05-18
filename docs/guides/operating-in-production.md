@@ -16,10 +16,12 @@ here appears there. If the two ever disagree, the example is right.
 
 ---
 
-## What v0.8 adds
+## The operator surface
 
-v0.8 hardens the boundary between the framework and the world it
-runs in:
+The framework treats the boundary between itself and the world it
+runs in as a load-bearing contract. Five primitives compose that
+surface; together they make a run inspectable, observable, and
+recoverable without reading source code:
 
 1. **Postgres** as a second `EventStore`, behind the same protocol as
    SQLite. Same schema, same semantics, different driver.
@@ -31,17 +33,30 @@ runs in:
    gauges. Custom backends (OpenTelemetry, Datadog, statsd) implement
    the protocol — three methods.
 4. **`activegraph` CLI**: `inspect`, `replay`, `fork`, `diff`,
-   `export-trace`, `migrate`. The CLI is a thin wrapper around library
-   APIs; anything it does, programmatic callers can do too.
+   `export-trace`, `migrate`, `pack`, `quickstart`. The CLI is a thin
+   wrapper around library APIs; anything it does, programmatic callers
+   can do too.
 5. **Runtime introspection**: `runtime.status(recent=N)` returns a
    frozen snapshot of queue depth, budget remaining, registered
    behaviors, recent events, and current frame. The CLI's `inspect`
    command sits on top of this primitive.
 
-What v0.8 deliberately does **not** add: a web UI, an HTTP server, a
-distributed runtime, real-time subscriptions, multi-model LLM routing,
-or streaming LLM responses. Those are v0.9+ or v1.0. The framework is
-small, sharp, and operable. Stay scoped.
+The operator surface introduced in v0.8 has been extended additively
+since: v0.9 added the pack format (and `activegraph pack` for
+listing/scaffolding); v1.0 added per-error reference pages
+([Reference: Errors](../reference/errors/replay-divergence-error.md))
+that every error message links to, plus operator-targeted CLI
+follow-on flags (`inspect --event <id>` for divergence triage,
+`inspect --behaviors` for replay length mismatches, `inspect
+--pack-version` for prompt-hash audits, `migrate --skip-corrupted`
+for corrupted-payload recovery, `fork --record` for intentional
+re-recording).
+
+What the framework deliberately does **not** ship: a web UI, an HTTP
+server, a distributed runtime, real-time subscriptions, multi-model
+LLM routing, or streaming LLM responses. The framework is small,
+sharp, and operable. Plug in adapters at the boundaries where you
+need them.
 
 ---
 
@@ -373,12 +388,23 @@ A programmatic user can do everything the CLI does.
 
 ```
 activegraph inspect <url> [--run-id <id>] [--tail N] [--json]
+                          [--event <id> | --behaviors | --pack-version]
 activegraph replay <url> --run-id <id> [--json]
-activegraph fork <url> --run-id <id> --at-event <id> --label <label> [--to <url>] [--json]
+activegraph fork <url> --run-id <id> --at-event <id> --label <label>
+                       [--to <url>] [--record] [--json]
 activegraph diff <url> --run-a <id> --run-b <id> [--json]
 activegraph export-trace <url> --run-id <id> [--format text|jsonl] [-o PATH]
-activegraph migrate --from <url> --to <url> [--run-id <id>] [--json]
+activegraph migrate --from <url> --to <url> [--run-id <id>] [--skip-corrupted] [--json]
+activegraph pack list
+activegraph pack new <name>
 ```
+
+`--event`, `--behaviors`, and `--pack-version` on `inspect` are
+mutually-exclusive selectors that focus the output on one section
+instead of the full snapshot. See the
+[CLI reference](../reference/cli.md) for the full surface; the
+[debugging cookbook](../cookbook/debugging.md) walks through
+diagnostic workflows that build on these flags.
 
 ### Exit codes
 
@@ -405,6 +431,21 @@ the same data as a single JSON object — the same shape as the
 activegraph inspect sqlite:///run.db
 activegraph inspect postgres://localhost/agdb --run-id run_01J... --tail 50 --json
 ```
+
+Three v1.0 selectors focus the output on one section instead of the
+full snapshot:
+
+- `--event <id>` prints the full payload of one event. Used when an
+  error message names an event id — `ReplayDivergenceError` always
+  does.
+- `--behaviors` prints only the registered-behaviors section. Used
+  when diagnosing a replay length mismatch: compare which behaviors
+  fire now against which fired in the recorded run.
+- `--pack-version` prints every `pack.loaded` event in the run with
+  prompt content-hash summaries. Used to confirm the pack version (or
+  prompt drift) responsible for a divergence.
+
+The three are mutually exclusive — they're selectors, not filters.
 
 ### `replay`
 
@@ -434,6 +475,14 @@ The forked run is dormant — nothing is running it. To continue from
 the fork point, load it with `Runtime.load(url, run_id=<new_run_id>)`
 and call `run_until_idle()`.
 
+Pass `--record` to mark the fork as an intentional re-recording
+(used after a `ReplayDivergenceError` when the divergence was
+intentional). The flag appends `-recording` to the label and prints
+follow-on guidance. The fork-with-pack-setting-override workflow
+(the canonical recipe behind `--set`, landing in v1.1) is documented
+under [Cookbook: common patterns — Fork with a pack-setting
+override](../cookbook/common-patterns.md#fork-with-a-pack-setting-override-v10-python-api).
+
 ### `diff`
 
 Structural diff between two runs in the same store. Prints shared and
@@ -458,7 +507,12 @@ activegraph export-trace sqlite:///run.db --run-id run_01J... --format jsonl -o 
 
 ### `migrate`
 
-See [Migration](#migration-transaction-per-run) above.
+See [Migration](#migration-transaction-per-run) above. The v1.0
+`--skip-corrupted` flag lets a migration recover the readable subset
+when source events have corrupted JSON payloads instead of failing
+the whole run; the skipped event ids appear in the per-run report's
+`skipped_events`. The resulting destination run is partial — the
+operator is on notice.
 
 ---
 
