@@ -67,6 +67,53 @@ are opt-in extras.
   `More:` link to a page that explains when it fires, why, and how to
   fix it. Catalog at [docs.activegraph.ai/reference/errors](https://docs.activegraph.ai/reference/errors/).
 
+## Concepts at a glance
+
+The framework's twelve primitives, in roughly the order you meet them
+when reading a trace. Each links to its concept page on the doc site;
+read those when you want depth on one piece.
+
+- **Graph** — objects and typed relations forming the world the
+  framework reasons about. The graph is a projection of the event log;
+  every mutation is an event. [→ concepts/graph](https://docs.activegraph.ai/concepts/graph/)
+- **Events** — the append-only history. Every behavior fires in
+  response to events and produces more events; the trace is the
+  ordered log of all of them. [→ concepts/events](https://docs.activegraph.ai/concepts/events/)
+- **Behaviors** — the unit of reactive code. Function, class, or
+  LLM-backed; declares what events it subscribes to and what it
+  produces. The determinism contract is per-behavior. [→ concepts/behaviors](https://docs.activegraph.ai/concepts/behaviors/)
+- **Relations** — typed edges between objects, with their own
+  behaviors. The relation-behavior primitive — coordination logic on
+  the edge, not on either endpoint — is uncommon in other agent
+  frameworks. [→ concepts/relations](https://docs.activegraph.ai/concepts/relations/)
+- **Patches** — proposed mutations with optimistic concurrency.
+  Behaviors propose patches; the runtime applies or rejects them;
+  rejections are events in their own right. [→ concepts/patches](https://docs.activegraph.ai/concepts/patches/)
+- **Views** — scoped reads of the graph for behavior context. Type
+  filters, depth filters, recent-event windows. Views are how
+  pattern-driven behaviors see only what they need to. [→ concepts/views](https://docs.activegraph.ai/concepts/views/)
+- **Frames** — bounded contexts for a run. Goal, constraints, budget,
+  and the registered behaviors for this frame. A run can have one
+  frame or many. [→ concepts/frames](https://docs.activegraph.ai/concepts/frames/)
+- **Policies** — approval and gating for behavior capabilities. Which
+  behaviors can call which tools, which mutations require human
+  approval, what the runtime refuses. [→ concepts/policies](https://docs.activegraph.ai/concepts/policies/)
+- **Patterns** — the Cypher subset for pattern subscriptions. Beyond
+  event-type + predicate, behaviors can subscribe to graph shapes
+  (claim-cited-by-evidence, task-blocks-task, …) with `NOT EXISTS`
+  and temporal predicates. [→ concepts/patterns](https://docs.activegraph.ai/concepts/patterns/)
+- **Replay** — re-execute a run from its event log. Strict mode
+  re-fires every behavior and fails on divergence; permissive mode
+  reconstructs state without re-firing. The LLM replay cache is what
+  makes fork cheap. [→ concepts/replay](https://docs.activegraph.ai/concepts/replay/)
+- **Forking** — branch any run at any event into an independent
+  fork; structurally diff the fork against the parent. The framework's
+  mechanism for hypothesis testing on agentic systems. [→ concepts/forking](https://docs.activegraph.ai/concepts/forking/)
+- **Failure model** — a behavior failure is a `behavior.failed`
+  event, not an exception. The audit trail captures failures as
+  first-class history. Exceptions live at runtime entry points only.
+  [→ concepts/failure-model](https://docs.activegraph.ai/concepts/failure-model/)
+
 ## A small example
 
 The relation-behavior primitive — coordination logic on the edge,
