@@ -91,6 +91,9 @@ nav:
       - Views: concepts/views.md
       - Frames: concepts/frames.md
       - Pattern subscriptions: concepts/patterns.md
+      - Policies: concepts/policies.md
+      - Replay: concepts/replay.md
+      - Forking: concepts/forking.md
       - Failure model: concepts/failure-model.md
   - Guides:
       - Operating in production: guides/operating-in-production.md
