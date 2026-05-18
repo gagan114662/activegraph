@@ -87,6 +87,9 @@ nav:
       - Events: concepts/events.md
       - Behaviors: concepts/behaviors.md
       - Relations: concepts/relations.md
+      - Patches: concepts/patches.md
+      - Views: concepts/views.md
+      - Frames: concepts/frames.md
       - Pattern subscriptions: concepts/patterns.md
       - Failure model: concepts/failure-model.md
   - Guides:
