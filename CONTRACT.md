@@ -3794,3 +3794,181 @@ going to decide in the first 10 minutes whether they come back
 Monday. Slow down on implementation choices, speed up on user-facing
 polish, and remember that adoption-surface work is a different skill
 from runtime engineering.
+
+
+# v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
+
+The first v1.1 items that came from real user-facing work, not from
+internal audit. The v1.0 error-completeness milestone (~30 items from
+the PR-G end-of-series tally) is the broader v1.1 scope; this section
+records the implementation gaps that surfaced during rc1.
+
+The discipline: turn "we found a gap" into "we found a gap and we
+know exactly how to close it." Each entry has a spec source, an
+implementation scope, and the open design questions that need
+resolution in the v1.1 PR.
+
+## v1.1 #1. CLI flags spec'd but not implemented
+
+Three CLI flags are documented in CONTRACT v1.0 and in
+`examples/quickstart_session.txt` (the v1.0 transcript spec), but
+do not exist in code. The v1.0-rc1 tutorial work
+(rc1 #2/5, `docs/quickstart.md`) surfaced the first; the
+spec-vs-impl audit done as part of that commit surfaced the other
+two.
+
+**The three flags:**
+
+1. **`activegraph fork --set <pack>.<key>=<value>`** —
+   override a pack setting on a fork. Most user-visible of the
+   three; appears in the rendered doc-site at
+   `cookbook/common-patterns.md` (the fork-and-diff workflow),
+   `concepts/forking.md` (the forking conceptual model), and
+   `reference/cli.md` (the CLI reference). The tutorial's step 7
+   (the "fork-and-diff is the framework's mechanism for hypothesis
+   testing" closer) depends on it.
+
+2. **`activegraph inspect --memo`** — render a run's memo
+   objects in the same prose form as the quickstart command's
+   memo section. Spec'd in
+   `examples/quickstart_session.txt` BEAT 2 implementer notes
+   ("Memo output uses the same renderer the operator CLI uses
+   (`activegraph inspect --memo`). Two renderers diverge; one
+   renderer stays consistent.") Not currently visible in any
+   user-facing doc page.
+
+3. **`activegraph inspect --search "<query>"`** — substring or
+   keyword search across a run's events. Spec'd in BEAT 3 of the
+   transcript. Not currently visible in any user-facing doc page.
+
+**Implementation scope (per flag):**
+
+- `--set`: persist overrides on the run's metadata row at fork
+  time, read them back on `Runtime.load`, plumb through to
+  `load_pack(settings=...)` when packs reload. Affects the
+  SQLite/Postgres schemas (a new column or sidecar JSON on
+  `runs`), `Runtime.load`'s signature (optional override
+  parameter), and the fork primitive's CLI surface (add the flag
+  and the parsing).
+- `--memo`: small read-only flag on the existing `inspect`
+  command; reads memo objects from the run and prints them with
+  the same renderer the quickstart command's
+  `_print_memo_section` helper uses (lift the helper out of
+  `activegraph/cli/quickstart.py` into a shared module so the
+  two renderers don't diverge).
+- `--search`: small read-only flag on `inspect`; iterates events
+  and matches against payload JSON or type+actor fields. Lightest
+  of the three.
+
+**Open design questions for `--set` specifically** (the substantive
+one of the three):
+
+- **Replay semantics for overridden forks.** Does the override
+  apply during replay of the shared prefix (so re-fired
+  behaviors see the new setting), or only on events emitted
+  after the fork point? The semantically-clean answer is
+  "after the fork point only — the prefix is the parent's
+  recorded history with the parent's settings, and replay must
+  reproduce it." But that means a setting change pre-fork-point
+  in the override is silently ignored, which is surprising.
+  Alternative: refuse the fork if the prefix contains events
+  the override would have changed. Pick before implementation.
+- **Error timing.** Unknown override keys fail loud — but
+  where? At fork-time (the CLI rejects the flag), at load-time
+  (the next `Runtime.load` errors), or both? The cleanest
+  answer is fork-time (fail as early as possible), but that
+  requires the CLI to know the pack's settings schema at fork
+  time, which means importing the pack. That's expensive on a
+  CLI command that otherwise only does SQL.
+- **Type coercion failure.** Pydantic does the coercion; what
+  happens when the override value can't coerce? Same timing
+  question as above.
+- **Schema migration.** Adding the override column on `runs`
+  bumps `schema_version`. The migration is straightforward
+  (nullable column with default null) but it does mean the
+  store's schema version advances and existing runs need
+  `activegraph migrate` to upgrade.
+
+**Affected user-facing docs that currently reference `--set`** (in
+the order they need footnote admonitions until v1.1 #1 lands):
+
+- `docs/cookbook/common-patterns.md` — the fork-and-diff recipe.
+  Becomes the canonical home for the Python-API form of
+  fork-with-override (new sub-recipe added in rc1 #2/5).
+- `docs/concepts/forking.md` — admonition pointing at the
+  cookbook recipe.
+- `docs/reference/cli.md` — admonition pointing at the cookbook
+  recipe.
+
+The footnotes use mkdocs-material admonition syntax (`!!! note`)
+and are single-sentence pointers, not heavy "known limitations"
+sections.
+
+**Affected internal docs (transcript spec — `--memo` and
+`--search`):** no user-facing footnotes needed; the transcript is
+the implementation contract, not user-facing reading. Spec entries
+stay in place as the v1.1 #1 contract.
+
+## v1.1 #2. Spec-vs-impl drift gate for CLI flags
+
+The v1.0 broken-link CI gate (`tests/test_doc_links.py`) catches
+documentation URLs that don't resolve to real pages. There's no
+equivalent gate for CLI flags referenced in docs that don't exist
+in code. The `--set` gap (and the `--memo` / `--search` gaps it
+revealed) shipped through v1.0-rc1 because the gate didn't exist.
+
+**Implementation scope:**
+
+- Parse CLI flag references from doc pages. Two source forms:
+  - Code blocks marked as `bash` or `shell` — regex against
+    fenced blocks for `activegraph <subcommand> --<flag>`
+    patterns.
+  - Prose mentions in inline code spans (`` `--flag` ``) — same
+    regex, narrower context.
+- Build the truth set from the actual click command surface.
+  Walk the `cli` group, enumerate every subcommand, and pull
+  each subcommand's declared options. Click exposes this
+  introspectably; no source-code regex needed.
+- Compare: every flag referenced in docs must appear in the
+  truth set for its named subcommand. Mismatch fails CI with a
+  per-flag report (similar shape to the broken-link gate's
+  per-URL report).
+- Test file location: `tests/test_doc_cli_flags.py`. Same
+  pytest-failure-on-gap pattern as the broken-link gate.
+
+**Edge cases the gate should handle gracefully:**
+
+- Flag patterns inside intentional negative examples ("don't do
+  `activegraph fork --foo`"). Either annotate these with a
+  comment the gate can skip, or accept that prose contradicting
+  the spec is a finding worth surfacing.
+- Subcommand-less flag references (`--json` mentioned without a
+  subcommand context). Skip if subcommand-less; the truth-set
+  check requires a known subcommand.
+- New flags added in code but not yet documented. The gate
+  doesn't need to fail on these (the doc-coverage discipline is
+  separate); flag-existence is one-directional.
+
+**Why this gate matters beyond the immediate gaps:** the CLI is
+the framework's most operator-visible interface. A user reading
+the docs and hitting a usage error on an undocumented flag loses
+trust in the doc site instantly. The gate keeps the trust
+contract by making spec-vs-impl drift a CI-blocking finding,
+same shape as the broken-link gate did for URLs.
+
+## v1.1 #3 and beyond
+
+The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series
+tally and the existing v1.1 error-completeness milestone notes
+above):
+
+- v1.0-rc1 documented gaps not yet itemized here — additional
+  gaps may surface during the remaining rc1 commits (mypy gate,
+  docstring gate, changelog).
+- The 22 partial Pack* migrations from CONTRACT v1.0 PR-E.
+- The 4 deferred DB-error wrappers from CONTRACT v1.0 PR-C.
+- The real-user-test gate findings (CONTRACT v1.0 #C4), once it
+  runs externally on rc1.
+
+This list is the v1.1 backlog. CONTRACT v1.1 expands it into a
+proper milestone scope when v1.1 work begins.

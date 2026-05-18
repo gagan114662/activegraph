@@ -118,6 +118,7 @@ strict: false
 # Nav: only pages that exist today. Grows with the doc-site phase.
 nav:
   - Home: index.md
+  - Quickstart: quickstart.md
   - Concepts:
       - Graph: concepts/graph.md
       - Events: concepts/events.md

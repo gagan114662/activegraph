@@ -118,6 +118,15 @@ Exits: 0 on success, 3 if the store / run doesn't exist.
 Create a new run by copying events from a parent run up to and
 including `--at-event`.
 
+!!! note "The `--set` flag is part of the v1.1 release"
+    `--set <pack>.<setting>=<value>` is documented in CONTRACT
+    v1.0 and shown in the signature below, but the implementation
+    lands in v1.1 (see [CONTRACT v1.1 #1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md#v11-1-cli-flags-specd-but-not-implemented)).
+    Until then, use the Python-API form in
+    [Fork with a pack-setting override (v1.0 — Python API)](../cookbook/common-patterns.md#fork-with-a-pack-setting-override-v10-python-api)
+    for fork-with-override workflows. Other flags below (`--at-event`,
+    `--label`, `--to`, `--record`, `--json`) are available now.
+
 ```
 activegraph fork <url> --run-id <parent> --at-event <evt> \
                       [--label <text>] [--to <dest-url>]

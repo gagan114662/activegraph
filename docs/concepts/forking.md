@@ -40,6 +40,13 @@ cheap.
 
 ## The CLI surface
 
+!!! note "The `--set` flag is part of the v1.1 release"
+    The `--set <pack>.<key>=<value>` flag below is documented in
+    CONTRACT v1.0 but lands in v1.1 (see [CONTRACT v1.1 #1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md#v11-1-cli-flags-specd-but-not-implemented)).
+    Until then, use the Python-API form documented in
+    [Fork with a pack-setting override (v1.0 — Python API)](../cookbook/common-patterns.md#fork-with-a-pack-setting-override-v10-python-api)
+    for fork-with-override workflows.
+
 ```bash
 activegraph fork <parent-url> \
     --run-id <parent-run> \
