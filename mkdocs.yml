@@ -134,6 +134,10 @@ nav:
   - Guides:
       - Operating in production: guides/operating-in-production.md
       - Authoring packs: guides/authoring-packs.md
+  - Cookbook:
+      - Common patterns: cookbook/common-patterns.md
+      - Debugging: cookbook/debugging.md
+      - Migration from v0.7: cookbook/migration-from-v0-7.md
   - Reference:
       - API reference:
           - Overview: reference/api/index.md
