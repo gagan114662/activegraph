@@ -187,3 +187,4 @@ nav:
           - InternalEvaluatorError: reference/errors/internal-evaluator-error.md
   - About:
       - Changelog: about/changelog.md
+      - Publishing a release: about/publishing.md

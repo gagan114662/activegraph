@@ -20,12 +20,133 @@ Nothing yet. v1.1 scope is tracked in
 
 ## [v1.0] — TBD
 
-Placeholder. v1.0 final ships after the first-time-user gate
-(externally owned per
-[CONTRACT v1.0 #C4](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md#v10-c4-v10-ships-as-v10-rc1-first-time-user-gate-is-owned-externally))
-runs against v1.0-rc1 and the friction findings land.
+Placeholder. v1.0 final ships after a lighter-weight verification
+pass against v1.0-rc2 (steps 1, 2, and 7 of the tutorial — the
+beats the rc1 user-test gate hit blockers on) confirms the rc2
+fixes resolved the gate findings.
 
-Scope = v1.0-rc1 + the gate findings.
+Scope = v1.0-rc2 + any lighter-pass findings.
+
+## [v1.0-rc2] — 2026-05-18
+
+The user-test-findings milestone. Five findings from the
+[CONTRACT v1.0 #C4](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md)
+gate addressed; one was a latent runtime state-machine bug since
+v0.5. No new runtime capability; no public-API renames.
+
+### Added
+
+- **PyPI publish workflow** (`.github/workflows/publish.yml`).
+  Tag-push trigger matching `v*` triggers `python -m build` then
+  upload via PyPI trusted publishing (OIDC-based). Documented in
+  [Publishing a release](https://docs.activegraph.dev/about/publishing/).
+  Externally owned per
+  [CONTRACT v1.0 #C8](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md)
+  — the agent ships the workflow, the maintainer runs the publish.
+- **Tutorial-snippet CI test** (`tests/test_tutorial_snippets.py`).
+  Subprocess-runs the tutorial's step 7 fork snippet end-to-end
+  against the bundled fixtures; asserts exit 0 and idempotency on
+  re-run. Tactical down-payment on
+  [CONTRACT v1.1 #2 expansion](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md)
+  (spec-vs-impl drift gate for Python doc snippets).
+- **`_requeue_unfired` regression test** (`tests/test_requeue_unfired.py`).
+  Locks the C3 regression vector: `Runtime.load` on a cleanly-drained
+  saved run produces `queue_depth == 0`.
+
+### Changed
+
+- **`_requeue_unfired` uses `runtime.idle` as the high-water mark.**
+  Latent bug since CONTRACT v0.5 #8: the function relied on the false
+  reverse-implication "no `behavior.started` references this event id
+  ⟹ event was still in the queue." Events with **zero** subscribed
+  behaviors are popped-and-discarded with no `behavior.started`
+  emitted, so they were falsely requeued on every `Runtime.load`.
+  The fix uses the last `runtime.idle` event as the high-water mark
+  (the runtime emits `runtime.idle` only after the queue empties);
+  only events after the last idle are candidates for requeue.
+  `runtime.budget_exhausted` is explicitly NOT a drain marker —
+  using it would break budget-bounded pause-and-resume.
+- **Tutorial step 3 and quickstart prose** distinguish the provider
+  layer (where the fixture provider produces responses) from the
+  runtime's replay cache layer (where `cache_hit=true` legitimately
+  appears under strict-replay loads or `Runtime.fork()` in-process).
+  Pre-rc2 prose conflated the two. The conflation was originally in
+  the v1.0 spec at `examples/quickstart_session.txt`; the spec is
+  updated with a header drift-note documenting the two-layer reality.
+- **Tutorial step 7 fork snippet** uses
+  `RecordedDiligenceProvider(companies=THREE_COMPANIES)` as the fork's
+  `llm_provider=`. Matches the parent run's provider; preserves the
+  "no API key required" tutorial pitch. The snippet also includes a
+  tutorial-only cleanup-on-collision branch so it's re-runnable
+  without manual DB surgery.
+- **`_prepare_interactive_subdir` collision prompt** re-prompts on
+  unrecognized input. Pre-rc2 behavior fell through to the suffix
+  branch on any input that wasn't `o` or `q`, which swallowed
+  typeahead from the next prompt. Mirrors the existing iteration-loop
+  pattern at `run_interactive_mode`.
+
+### Deprecated
+
+Nothing. Backward compatibility holds — all v0–v1.0-rc1 tests pass.
+
+### Removed
+
+Nothing user-facing.
+
+### Fixed
+
+- **`Runtime.load(...).status().queue_depth` reads 0 on a freshly
+  loaded cleanly-drained run.** Was a non-zero false count of events
+  that had been popped-and-discarded during the original run. See
+  the Changed entry for `_requeue_unfired` above.
+- **`activegraph --version` reports the correct version.** Was stuck
+  at `0.9.1` through v1.0-rc1's release (the version-sync gate
+  validated internal consistency but not correspondence with the git
+  tag). The v1.1 #6 version-tag-correspondence gate closes this gap
+  in v1.1.
+- **Tutorial step 7 fork snippet runs end-to-end against bundled
+  fixtures** with no API key, matching the rest of the quickstart's
+  "no API key required" pitch.
+- **`cache_hit=true` claim** in the tutorial and quickstart "what
+  just happened" prose: the claim was wrong for initial fixture-mode
+  runs (the runtime's replay cache only fires on strict-replay or
+  in-process fork). Prose corrected; two-layer vocabulary lands
+  cleanly for first-time readers.
+
+### Migration from v1.0-rc1
+
+Additive. No code changes required. Existing v1.0-rc1 installs
+should:
+
+```bash
+pip install --upgrade activegraph==1.0.0rc2
+```
+
+Existing saved runs (`*.db` files) load with `queue_depth == 0`
+correctly post-upgrade — the C3 fix is in the load path, not the
+storage format.
+
+### Known follow-ons (v1.1 scope)
+
+In addition to the v1.0-rc1 v1.1 backlog (carried forward):
+
+- **CONTRACT v1.1 #2 expansion** — spec-vs-impl drift gate covers
+  executable Python snippets in docs, not just CLI flags. v1.0-rc2
+  ships the tactical step 7 test; v1.1 generalizes.
+- **CONTRACT v1.1 #5** — `Runtime.load` auto-provider ergonomics.
+  The rc2 fix for B2 passes `RecordedDiligenceProvider` explicitly;
+  the v1.1 design question is whether `Runtime.load` should infer a
+  provider from the run's recorded events or from a pack-manifest
+  declaration. New runtime capability, banned in v1.0.
+- **CONTRACT v1.1 #6** — version-tag-correspondence CI gate.
+  Existing version-sync gate validates `__version__` matches
+  `pyproject.toml`; the v1.1 gate adds correspondence with the
+  current annotated tag in tagged-release CI runs.
+- **CONTRACT v1.1 #7 backlog item: fork cache pre-population
+  symmetry.** `Runtime.fork(at_event=...)` in-process pre-populates
+  the LLM cache from the parent's events; the persistent shape
+  (`SQLiteEventStore.fork_run` then `Runtime.load`) does not. The
+  two paths should be symmetric. New runtime behavior, banned in v1.0.
 
 ## [v1.0-rc1] — 2026-05-18
 

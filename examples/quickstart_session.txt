@@ -20,6 +20,22 @@ than 15 minutes to reach the last beat in this transcript, the API is too
 rough or the tutorial is too long — fix one or the other before tagging
 v1.0 final.
 
+Drift note (v1.0-rc2): the original draft of this transcript showed
+`cache_hit=true` on every `llm.requested`/`llm.responded` line in BEATS
+2, 3, and 4, treating fixture-provider responses as cache hits. The
+shipped implementation correctly distinguishes two layers — the
+provider (which produces responses, including the fixture provider)
+is separate from the runtime's replay cache (which records
+`llm.responded` events and serves them back). The replay cache fires
+under strict-replay loads and `Runtime.fork(at_event=...)` in-process;
+the fork-via-storage-then-load shape used in BEAT 4 does not currently
+pre-populate the cache. Normalizing both fork paths to pre-populate
+the cache is a v1.1 candidate (new runtime behavior, banned in v1.0);
+for v1.0 the transcript reflects the shipped reality. The
+provider/replay-cache distinction is documented in the tutorial's
+step 3 prose so first-time users absorb the two-layer vocabulary
+before they meet either layer's specifics.
+
 ----------------------------------------------------------------------------
  BEAT 1 — install
 ----------------------------------------------------------------------------
@@ -63,8 +79,8 @@ $ activegraph quickstart
 > [behavior.started]        diligence.company_planner
 > [object.created]          company#1 "Northwind Robotics"
 > [behavior.started]        diligence.question_generator  (matched ...)
-> [llm.requested]           evt_006  diligence.question_generator  model=claude-sonnet-4-5 cache_hit=true
-> [llm.responded]           evt_007  diligence.question_generator  cache_hit=true
+> [llm.requested]           evt_006  diligence.question_generator  model=claude-sonnet-4-5 prompt_normalized=true
+> [llm.responded]           evt_007  diligence.question_generator  tokens_in=110 tokens_out=22 cost=$0.001 latency=0.4s
 > [object.created]          question#2 "What drives unit economics in cobot deployments?"
 > ...
 > [object.created]          memo#41 (approved)
@@ -107,10 +123,16 @@ $ activegraph quickstart
 >      You did not write a workflow. The behaviors are pattern-matched
 >      against event types and object shapes.
 >
->   3. Every LLM call was cached against a recorded fixture, so the run
->      is deterministic and runs offline. The trace above shows
->      `cache_hit=true` on every llm.responded — production runs would
->      hit a real provider instead.
+>   3. Every LLM call was served by the bundled fixture provider
+>      (RecordedDiligenceProvider), so the run is deterministic and runs
+>      offline. The trace above shows cost and latency on each llm.responded
+>      line — those are the fixture's recorded numbers. Production runs
+>      against a real provider would show real costs and latencies.
+>
+>      (The framework also has a separate replay cache that records
+>      llm.responded events and serves them back on fork or replay —
+>      that's where `cache_hit=true` appears in the trace. Different
+>      layer; you'll see it if you fork this run.)
 >
 >   4. Each memo cites evidence for every claim, surfaces at least one
 >      risk, and either lists open contradictions or states explicitly
@@ -166,8 +188,8 @@ $ activegraph inspect /tmp/activegraph_quickstart/01J...
 > last:       evt_671  runtime.idle  4s ago
 >
 > Tail (20 events):
->   evt_652  llm.requested      diligence.memo_synthesizer  model=claude-sonnet-4-5 cache_hit=true
->   evt_653  llm.responded      diligence.memo_synthesizer  cache_hit=true
+>   evt_652  llm.requested      diligence.memo_synthesizer  model=claude-sonnet-4-5 prompt_normalized=true
+>   evt_653  llm.responded      diligence.memo_synthesizer  tokens_in=440 tokens_out=380 cost=$0.012 latency=1.8s
 >   evt_654  object.created     memo#41  "Pinecone Bio"
 >   ...
 >   evt_671  runtime.idle
@@ -209,8 +231,8 @@ $ activegraph fork /tmp/activegraph_quickstart/01J... \
 > [replay.complete]         619 events replayed, graph reconstructed
 > [runtime.idle]            ready to resume
 > [trace.flags]             prompt_normalized=true (3 llm requests)
-> [behavior.started]        diligence.risk_identifier  (replayed cache available)
-> [llm.requested]           evt_620  diligence.risk_identifier  model=claude-sonnet-4-5 cache_hit=true
+> [behavior.started]        diligence.risk_identifier
+> [llm.requested]           evt_620  diligence.risk_identifier  model=claude-sonnet-4-5 prompt_normalized=true
 > ...
 > [object.created]          memo#41 (approved)
 > [runtime.idle]            queue empty, budget remaining

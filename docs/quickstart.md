@@ -64,12 +64,25 @@ A few specific lines to find:
   immediately by `[object.created] company#1` — the planner behavior
   fired in response to the goal, and produced a `company` object on
   the graph.
-- `[llm.requested]` and `[llm.responded]` pairs with `cache_hit=true`
-  — each LLM call was served from the recorded fixture, not from a
-  network call.
+- `[llm.requested]` and `[llm.responded]` pairs — every LLM call
+  was served by the bundled fixture provider
+  (`RecordedDiligenceProvider`), so no network requests fired. The
+  trace shows `cost=$0.00X latency=0.Xs` on each `llm.responded`
+  line; in a production run against a real provider those numbers
+  would be real costs and real latencies.
 - `[runtime.idle] queue empty, budget remaining` at the end of each
   goal's events — the runtime finished all the work it could do and
   stopped.
+
+Two layers worth distinguishing now so the vocabulary lands cleanly
+later: the **provider** is what produces LLM responses (here, the
+fixture provider; in production, an `AnthropicProvider`). The
+runtime's **replay cache** is a separate layer that records
+`llm.responded` events and serves them back when a run replays
+under strict-replay mode or when `Runtime.fork(at_event=...)` is
+called in-process — that's where you'll see `cache_hit=true` in
+the trace. See [`concepts/replay`](concepts/replay.md) and
+[`concepts/forking`](concepts/forking.md) for the deep dive.
 
 That trace is the framework's audit trail. The same artifact you
 just read for fun is what you'd read while debugging a production
@@ -180,14 +193,32 @@ the `activegraph diff` CLI command. Drop this into a file
 (`fork_and_diff.py`) and run it:
 
 ```python
+import sqlite3
+
 from activegraph import Runtime
 from activegraph.packs.diligence import DiligenceSettings, pack as diligence_pack
+from activegraph.packs.diligence.fixtures import (
+    RecordedDiligenceProvider,
+    THREE_COMPANIES,
+)
 from activegraph.store import open_store
 from activegraph.store.sqlite import SQLiteEventStore
 
-PARENT_URL = "sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db"
+DB_PATH = "/tmp/activegraph_quickstart/quickstart_demo_run.db"
+PARENT_URL = f"sqlite:///{DB_PATH}"
 PARENT_RUN = "quickstart_demo_run"
 FORK_RUN = "quickstart_cautious"
+
+# Tutorial-only: remove any prior fork so this snippet is re-runnable.
+# Real workflows handle fork-id collisions intentionally — pick a
+# unique FORK_RUN per experiment instead of deleting the prior one.
+with sqlite3.connect(DB_PATH) as _conn:
+    deleted = _conn.execute(
+        "DELETE FROM events WHERE run_id = ?", (FORK_RUN,)
+    ).rowcount
+    _conn.execute("DELETE FROM runs WHERE run_id = ?", (FORK_RUN,))
+    if deleted:
+        print(f"Removed previous fork ({deleted} events) to re-run cleanly.")
 
 # Pick the goal event for the first company as the fork point.
 parent_store = open_store(PARENT_URL, run_id=PARENT_RUN)
@@ -198,7 +229,7 @@ fork_at = next(
 
 # Copy the parent's events up to the fork point into a new run.
 SQLiteEventStore.fork_run(
-    "/tmp/activegraph_quickstart/quickstart_demo_run.db",
+    DB_PATH,
     parent_run_id=PARENT_RUN,
     new_run_id=FORK_RUN,
     at_event_id=fork_at,
@@ -206,8 +237,14 @@ SQLiteEventStore.fork_run(
     created_at="2026-01-01T00:00:00Z",
 )
 
-# Load the fork and run it with a higher confidence threshold.
-fork_rt = Runtime.load(PARENT_URL, run_id=FORK_RUN)
+# Load the fork. The provider matches the parent run's
+# RecordedDiligenceProvider, so cached LLM responses from the parent
+# replay byte-identically and no network or API key is needed.
+fork_rt = Runtime.load(
+    PARENT_URL,
+    run_id=FORK_RUN,
+    llm_provider=RecordedDiligenceProvider(companies=THREE_COMPANIES),
+)
 fork_rt.load_pack(
     diligence_pack,
     settings=DiligenceSettings(

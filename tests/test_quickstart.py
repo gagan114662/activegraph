@@ -187,6 +187,78 @@ def test_interactive_collision_offer_overwrite(tmp_path, monkeypatch) -> None:
     assert "growth_flagger" in original.read_text()
 
 
+def test_interactive_collision_reprompts_on_unrecognized_input(
+    tmp_path, monkeypatch
+) -> None:
+    """Unrecognized input at the collision prompt re-prompts rather
+    than falling through to suffix.
+
+    Pre-rc2 behavior: any input that wasn't `o`/`q` (including
+    `continue`, `c`, `yes`, accidental keystrokes typed ahead for
+    the next prompt) silently selected the suffix branch. The
+    tester reported (CONTRACT v1.0-rc2 finding M1) that typing
+    `continue` ahead of the prompt was eaten as the collision
+    answer, producing an unexpected my_first_behavior_2.py.
+
+    Post-rc2: unrecognized input echoes
+    "(unrecognized: ...; choose o, s, or q)" and re-prompts. The
+    second prompt accepts a recognized choice. This mirrors the
+    existing iteration-loop pattern in run_interactive_mode so
+    the two prompts have the same voice and behavior.
+    """
+    monkeypatch.chdir(tmp_path)
+    subdir = tmp_path / _INTERACTIVE_SUBDIR
+    subdir.mkdir()
+    (subdir / "my_first_behavior.py").write_text("# pre-existing\n")
+
+    buf = io.StringIO()
+    rc = run_interactive_mode(
+        stream=buf,
+        prompt_fn=_ScriptedPrompt(["continue", "q"]),
+    )
+    assert rc == 1, (
+        "the second prompt response 'q' should quit (rc=1); the "
+        "pre-rc2 bug let the first response 'continue' fall through "
+        "to suffix, which would have set up a behavior file and "
+        "returned a different exit code"
+    )
+    out = buf.getvalue()
+    assert "unrecognized" in out, (
+        "collision prompt must echo an 'unrecognized' message on the "
+        "first response 'continue' (M1 regression vector)"
+    )
+    # The existing file is preserved because we quit before creating.
+    assert (subdir / "my_first_behavior.py").read_text() == "# pre-existing\n"
+    # No suffix file should have been created.
+    assert not (subdir / "my_first_behavior_2.py").exists(), (
+        "the pre-rc2 bug fell through to suffix on unrecognized input, "
+        "creating my_first_behavior_2.py — the post-rc2 fix re-prompts "
+        "instead so no spurious file lands"
+    )
+
+
+def test_interactive_collision_default_empty_input_is_suffix(
+    tmp_path, monkeypatch
+) -> None:
+    """Empty input at the collision prompt still defaults to suffix
+    (click's default mechanism). Verifies the rc2 reprompt-on-
+    unrecognized fix doesn't accidentally make empty input fall
+    through to the reprompt loop.
+    """
+    monkeypatch.chdir(tmp_path)
+    subdir = tmp_path / _INTERACTIVE_SUBDIR
+    subdir.mkdir()
+    (subdir / "my_first_behavior.py").write_text("# pre-existing\n")
+
+    buf = io.StringIO()
+    rc = run_interactive_mode(
+        stream=buf,
+        prompt_fn=_ScriptedPrompt(["", "quit"]),
+    )
+    assert rc == 0
+    assert (subdir / "my_first_behavior_2.py").exists()
+
+
 def test_interactive_collision_quit_preserves_existing(tmp_path, monkeypatch) -> None:
     """Quit at the collision prompt leaves the existing directory
     untouched and returns non-zero."""

@@ -2324,12 +2324,13 @@ Research pack), a pack registry, error message i18n, video tutorials,
 adaptive question generation in Diligence, the contradiction
 resolver, richer fixture cardinality.
 
-## v1.0 contract diff vs. the v1.0 plan (seven revisions)
+## v1.0 contract diff vs. the v1.0 plan (eight revisions)
 
 The v1.0 plan as authored prompted seven pieces of pushback that
 changed the contract before the first line of code in the v1.0 PR
-series. Recording them here so the contract diff is visible from the
-start of the work, not buried in PR descriptions.
+series. The eighth landed after rc1, surfaced by the user-test gate
+(`#C4`). Recording all eight here so the contract diff is visible
+from the start of the work, not buried in PR descriptions.
 
 ### v1.0 #C1. Error message rewrite ships as a PR series, not one PR
 
@@ -2446,6 +2447,39 @@ v1.0 is an adoption-surface milestone, and milestone discipline says
 no milestone starts with carryover from the previous one. v0.9.1 is
 committed before any v1.0 work begins. **Done. See v0.9.1 sections
 above.**
+
+### v1.0 #C8. PyPI publishing is externally owned
+
+The v1.0-rc1 user-test gate (CONTRACT v1.0 #C4) surfaced the gap:
+`pip install activegraph` is the README's first line and the
+tutorial's step 1, but the package was not on PyPI. The first-time
+user has no path forward. The tester fell back to a clone-and-edit-
+install; a real first-time user without the repo cloned hits a wall.
+
+Mirrors `#C4` (user-test gate) and `#C6` (DNS for the doc site):
+externally-owned final steps gated behind work the agent loop can
+do. The agent ships the release-publish workflow as a GitHub Action;
+the maintainer runs the publish on tag push.
+
+Workflow shape (locked):
+
+- Trigger on git tag push matching `v*` so any future tag
+  (`v1.0-rc2`, `v1.0`, `v1.0.1`) publishes automatically without
+  workflow edits.
+- Build sdist + wheel via `python -m build` (post-setuptools standard).
+- Upload via PyPI **trusted publishing** (OIDC-based) as the default
+  path — modern recommendation, no long-lived secrets to rotate or
+  leak. If trusted-publishing setup on PyPI requires maintainer
+  action before the workflow can succeed, that's surfaced as a
+  prerequisite in the operating guide, not a workflow change.
+- Workflow documented in `docs/about/publishing.md` (sibling to the
+  doc-site deploy workflow) with prerequisites, the trigger, and
+  post-publish verification steps (`pip install activegraph==<version>`
+  from a fresh environment).
+
+The README and tutorial do not regress to "clone and install editable";
+the install instruction `pip install activegraph` stays accurate
+because v1.0 final ships with the package on PyPI.
 
 ## v1.0 #1. The quickstart command is the spec
 
@@ -3956,6 +3990,35 @@ trust in the doc site instantly. The gate keeps the trust
 contract by making spec-vs-impl drift a CI-blocking finding,
 same shape as the broken-link gate did for URLs.
 
+### v1.1 #2 expansion: executable Python snippets in docs
+
+The v1.0-rc1 user-test gate surfaced finding **B2** (step 7 fork
+snippet crashed with `MissingProviderError` — a documented-behavior-
+that-doesn't-match-shipped-behavior gap of the same shape as `--set`).
+The CLI-flags gate would not have caught it: the drift was in a
+Python code block in `docs/quickstart.md`, not a CLI invocation.
+
+The v1.1 #2 gate's scope expands to cover executable Python snippets
+in tutorial and cookbook pages. Scope shape:
+
+- A snippet is "executable" if it's a complete fenced `python` block
+  marked with an opt-in annotation (e.g., `<!-- gate: execute -->`
+  immediately above the fence) or matches a documented allowlist of
+  tutorial-canonical pages.
+- The gate runs each executable snippet in a subprocess against the
+  bundled fixtures, asserts exit 0, optionally asserts expected stdout
+  patterns (snapshot-shaped).
+- The gate covers tutorial pages (currently just `docs/quickstart.md`)
+  and the cookbook fork-with-override recipe. Other pages opt in via
+  the annotation.
+- Test file location: `tests/test_doc_python_snippets.py`. Same
+  pytest-failure-on-gap pattern as the CLI-flags gate and the
+  broken-link gate.
+
+The v1.0-rc2 work lands a tactical down-payment: `tests/test_tutorial_snippets.py`
+covering step 7 only (the snippet that crashed). The full v1.1 #2
+gate generalizes that pattern across the doc surface.
+
 ## v1.1 #3. Type-completeness on the public-surface allowlist
 
 CONTRACT v1.0 #C5's mypy --strict gate baselines at 22/38
@@ -4073,18 +4136,113 @@ public surface meets the CONTRACT v1.0 #C2 target end-to-end.
 The audit scripts stay in place as regression checks for
 future allowlist expansions.
 
-## v1.1 #5 and beyond
+## v1.1 #5. `Runtime.load` auto-provider ergonomics (from user-test B2)
+
+The v1.0-rc1 user-test gate surfaced **B2**: the tutorial's step 7
+fork snippet crashed because `Runtime.load(...)` was called without
+`llm_provider=`, and the loaded diligence pack has LLM behaviors.
+The v1.0-rc2 tactical fix passes `RecordedDiligenceProvider`
+explicitly — preserves "no API key required" and matches the parent
+run's provider.
+
+The v1.1 design question this defers: should `Runtime.load(...)`
+discover a provider from the loaded pack's declaration, or from a
+recorded-provider sidecar in the run's metadata? The current behavior
+(explicit `llm_provider=` required) is defensible — explicit over
+magic — but if the tutorial's step 7 is a representative shape, real
+fork workflows trip over it. The right v1.1 affordance is one of:
+
+- **`auto_provider=True` flag on `Runtime.load`** — opt-in inference
+  from the run's recorded `pack.loaded` and `llm.responded` events
+  (the events name the provider class indirectly via model + fixture
+  identity). Backward-compatible; default stays explicit.
+- **Pack-declared default provider** — the pack manifest names a
+  default provider class; `Runtime.load` picks it up. Tighter
+  coupling between packs and providers; pack authors decide.
+- **Sidecar in run metadata** — the parent run records its provider
+  class identity at `pack.loaded` time; forks inherit unless
+  overridden. Most magic; most likely to surprise.
+
+The v1.0 ban on new runtime capability is the reason this didn't
+land in rc2. v1.1 reopens the capability surface and picks one.
+
+Open design questions for v1.1:
+
+- Replay strictness interaction. If `auto_provider=True` infers
+  `RecordedDiligenceProvider` from the parent's events but the
+  caller is in `replay_strict=True` mode, the inferred provider
+  has to produce byte-identical responses or the strict check fires.
+  Does the inference also load the parent's recorded responses into
+  the LLM cache? (Likely yes — but lock the answer in v1.1.)
+- Provider-class identity. The runtime knows the provider produced
+  the parent's `llm.responded` events; it doesn't know which Python
+  class produced them. Inference needs a registration mechanism —
+  providers self-identify on a registry, `Runtime.load` looks up by
+  identifier from the parent's metadata.
+- Failure mode when inference fails. Today: `MissingProviderError`
+  at first LLM call. With auto-inference: same error but with
+  recovery prose pointing at "register your provider on the
+  registry, or pass `llm_provider=` explicitly." The error message
+  carries the inference attempt's findings.
+
+## v1.1 #6. Version-tag-correspondence CI gate (from user-test C1)
+
+The v1.0-rc1 user-test gate surfaced **C1**: README announced
+`v1.0-rc1` but `activegraph --version` returned `0.9.1`. The
+existing version-sync gate (`tests/test_version_sync.py`) asserts
+that `activegraph.__version__` matches `pyproject.toml`'s version;
+both can be wrong together and the gate stays green.
+
+The v1.1 gate closes the loop. Same shape as the existing version-
+sync gate, the broken-link gate, the CLI-flags gate, the v1.1 #2
+Python-snippets gate: small, mechanical, prevents a class of finding
+from recurring.
+
+**Implementation scope:**
+
+- Read the latest annotated tag in the current branch
+  (`git describe --tags --abbrev=0` or equivalent).
+- Normalize the tag to PEP 440 form (strip leading `v`, dash-to-no-
+  dash for pre-release suffixes: `v1.0-rc2` → `1.0.0rc2`).
+- Assert it matches `activegraph.__version__`.
+- Run only in tagged-release CI runs (skip in feature-branch CI,
+  where there's intentionally no tag).
+- Test file: `tests/test_version_tag_sync.py`. Skip-with-reason when
+  no tag is reachable, so feature branches aren't blocked.
+
+**Edge cases:**
+
+- Pre-release tags before merge to main — skip cleanly.
+- Tags with build metadata (`+local.123`) — strip build metadata
+  before compare.
+- Multi-tag commits (rare) — sort by version and compare against
+  the highest-version tag.
+
+## v1.1 #7 and beyond
 
 The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series
 tally and the existing v1.1 error-completeness milestone notes
 above):
 
-- v1.0-rc1 documented gaps not yet itemized here — additional
-  gaps may surface during the remaining rc1 commit (changelog).
 - The 22 partial Pack* migrations from CONTRACT v1.0 PR-E.
 - The 4 deferred DB-error wrappers from CONTRACT v1.0 PR-C.
-- The real-user-test gate findings (CONTRACT v1.0 #C4), once it
-  runs externally on rc1.
+- The 2 internal-evaluator errors needing framework-version
+  context from CONTRACT v1.0 PR-G.
+- **Fork cache pre-population symmetry** (discovered during
+  v1.0-rc2 #4/8 B2 fix). `Runtime.fork(at_event=...)` in-process
+  pre-populates the LLM cache from the parent's recorded
+  `llm.responded` events (CONTRACT v0.6 #8). The persistent shape
+  (`SQLiteEventStore.fork_run()` followed by `Runtime.load(...,
+  run_id=<fork>)`) does not — the loaded fork sees only the
+  fork's events, which end at the fork point. Forks via the
+  persistent shape replay their LLM behaviors against the live
+  provider rather than the cache. The two paths should be
+  symmetric: `Runtime.load` of a fork run should look up the
+  parent's `forked_at_event_id` (already on the runs row) and
+  pre-populate the cache from the parent's events through that
+  point. New runtime behavior, banned in v1.0; opens up in v1.1.
+- Any additional v1.0-rc2 user-test findings (the lighter
+  verification pass after rc2 lands).
 
 This list is the v1.1 backlog. CONTRACT v1.1 expands it into a
 proper milestone scope when v1.1 work begins.
