@@ -46,6 +46,42 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
 
+plugins:
+  - search
+  - mkdocstrings:
+      # API reference rendering. CONTRACT v1.0 #C2 (tiered docstring
+      # coverage) + #5 (doc-site structure). The audit script at
+      # scripts/audit_docstrings.py produces the coverage report
+      # consumed by the docstring-gate CI commit.
+      handlers:
+        python:
+          options:
+            # The framework's docstrings are mostly free-form Markdown
+            # rather than structured (Google/NumPy/Sphinx). The Google
+            # parser is the most tolerant default and falls back to
+            # raw rendering for unstructured prose.
+            docstring_style: google
+            # Render methods in source order — matches reading order
+            # in the .py file. Alphabetic order would scramble
+            # related-method groupings.
+            members_order: source
+            # The API reference renders the API contract, not the
+            # implementation. Readers who want source go to GitHub.
+            show_source: false
+            # Show base classes for class members so the v1.0
+            # category hierarchy is visible.
+            show_bases: true
+            # Show the inheritance hierarchy so multi-inherit pairs
+            # like NonSerializableEventError(StorageError, TypeError)
+            # render with both base classes.
+            show_inheritance_diagram: false
+            # Group by category (attributes, methods, etc.) for
+            # readability on long classes like Runtime.
+            group_by_category: true
+            # Heading levels: page title is h1, top-level symbols are
+            # h2 (one per ::: directive).
+            heading_level: 2
+
 markdown_extensions:
   - admonition
   - attr_list
@@ -99,6 +135,17 @@ nav:
       - Operating in production: guides/operating-in-production.md
       - Authoring packs: guides/authoring-packs.md
   - Reference:
+      - API reference:
+          - Overview: reference/api/index.md
+          - Runtime: reference/api/runtime.md
+          - Graph: reference/api/graph.md
+          - Behaviors: reference/api/behaviors.md
+          - Tools: reference/api/tools.md
+          - Store: reference/api/store.md
+          - Packs: reference/api/packs.md
+          - Errors: reference/api/errors.md
+          - Observability: reference/api/observability.md
+          - Diligence pack: reference/api/packs/diligence.md
       - Errors:
           - ReplayDivergenceError: reference/errors/replay-divergence-error.md
           - UnsupportedPatternError: reference/errors/unsupported-pattern-error.md
