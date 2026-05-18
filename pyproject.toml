@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "activegraph"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 description = "An event-sourced reactive graph runtime for long-running, auditable, agentic systems."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,9 +58,27 @@ Homepage = "https://github.com/yoheinakajima/activegraph"
 include = ["activegraph*"]
 exclude = ["tests*", "examples*"]
 
+# Runtime data files shipped with the wheel. CONTRACT v1.1 #8 (the
+# wheel-completeness gate) is the enforcement layer that catches
+# any future addition here that's declared in the source tree but
+# not in this block. The `prompts/` directory is not a Python
+# package (no `__init__.py`), so `packages.find` does not see it;
+# the explicit glob below is what gets the `.md` prompt files into
+# the wheel.
+#
+# Adding a new pack with non-`.py` data files? Add a key for the
+# pack's parent package and the glob(s) for its data files. The
+# CI gate (.github/workflows/wheel-completeness.yml) runs the
+# quickstart against the installed wheel; if the data is missing,
+# the gate fails before the wheel can ship.
+
+[tool.setuptools.package-data]
+"activegraph.packs.diligence" = ["prompts/*.md"]
+
 [tool.pytest.ini_options]
 markers = [
     "postgres: tests that require a running Postgres (skipped unless ACTIVEGRAPH_TEST_POSTGRES_URL is set)",
+    "slow: long-running tests opt-in by name in CI (e.g. wheel-completeness gate; builds + installs into a fresh venv)",
 ]
 
 # ---------------------------------------------------------------------------

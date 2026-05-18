@@ -7,8 +7,11 @@
 #     for a PR before merge)
 #   - manual dispatch
 #
-# The custom domain docs.activegraph.dev is locked via docs/CNAME.
-# Until DNS resolves, the site serves on the github.io fallback URL.
+# The custom domain docs.activegraph.ai is locked via docs/CNAME
+# (CONTRACT v1.0 #C6, v1.0-rc3 amendment — primary domain switched
+# from .dev to .ai). Until Pages is enabled on the repo AND DNS
+# resolves, the site is unreachable; the v1.1 #9 deploy-verification
+# gate is the failure signal until that lands.
 
 name: docs
 

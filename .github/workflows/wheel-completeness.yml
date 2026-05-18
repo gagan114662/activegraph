@@ -1,0 +1,57 @@
+# Wheel-completeness CI gate. CONTRACT v1.1 #8.
+#
+# Builds the wheel, installs it into a fresh venv (NOT editable),
+# and runs `activegraph quickstart` against the installed package.
+# If any runtime data file is missing from the wheel, the
+# quickstart crashes with `PackPromptLoadError` (the v1.0-rc2 B3
+# failure shape) or analog, and the gate fails.
+#
+# This catches the class of bug that's structurally invisible to
+# every other CI gate: source-tree tests and editable installs see
+# the prompts directory by definition; only a clean-venv install
+# from the built wheel exposes a missing package-data declaration.
+#
+# This workflow is configured as a required status check on the
+# main branch (CONTRACT v1.1 #8 implementation scope). The slow
+# marker is passed explicitly so the test runs in CI; locally it's
+# opt-in via `pytest -m slow`.
+
+name: wheel-completeness
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "activegraph/**"
+      - "pyproject.toml"
+      - "tests/test_wheel_completeness.py"
+      - ".github/workflows/wheel-completeness.yml"
+  pull_request:
+    paths:
+      - "activegraph/**"
+      - "pyproject.toml"
+      - "tests/test_wheel_completeness.py"
+      - ".github/workflows/wheel-completeness.yml"
+  workflow_dispatch:
+
+jobs:
+  wheel-completeness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install build + pytest + activegraph (for conftest)
+        # The outer env needs activegraph importable because
+        # tests/conftest.py imports from it on pytest collection.
+        # The gate's inner venv (created inside the test) is fully
+        # isolated — that's where the wheel-completeness check
+        # actually happens. The outer install can use editable
+        # mode; it has zero effect on the gate's verdict.
+        run: |
+          pip install build pytest
+          pip install -e .
+      - name: Run wheel-completeness gate
+        run: pytest -m slow tests/test_wheel_completeness.py -v

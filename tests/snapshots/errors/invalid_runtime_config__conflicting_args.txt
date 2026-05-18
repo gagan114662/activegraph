@@ -15,4 +15,4 @@ How to fix:
   The two forms produce equivalent runtimes for SQLite. Use `store=` when you need a non-SQLite backend or want to share an open store across runtimes.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-runtime-configuration
+  https://docs.activegraph.ai/errors/invalid-runtime-configuration

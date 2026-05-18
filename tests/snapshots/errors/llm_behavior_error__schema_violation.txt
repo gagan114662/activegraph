@@ -11,4 +11,4 @@ How to fix:
   Check whether the schema's required fields match what the model actually produces. Common causes: a required field is missing in the response, an enum value is out-of-range, or a list field contains items of the wrong type. Add the missing fields to the prompt's example output, or relax the schema (e.g. `Optional[X]`) if the field genuinely can be absent.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/llm-behavior-error
+  https://docs.activegraph.ai/errors/llm-behavior-error

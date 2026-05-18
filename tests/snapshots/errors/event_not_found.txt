@@ -16,4 +16,4 @@ How to fix:
       activegraph inspect <store-url> --run-id run_test
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/event-not-found-error
+  https://docs.activegraph.ai/errors/event-not-found-error

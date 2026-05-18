@@ -17,4 +17,4 @@ How to fix:
   Or diff the prompt against the recorded version to find the drift.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/llm-behavior-error
+  https://docs.activegraph.ai/errors/llm-behavior-error

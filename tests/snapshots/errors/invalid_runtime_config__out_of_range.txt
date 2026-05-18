@@ -15,4 +15,4 @@ How to fix:
   To get every event, read `rt.graph.events` directly rather than passing a large `recent`.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-runtime-configuration
+  https://docs.activegraph.ai/errors/invalid-runtime-configuration

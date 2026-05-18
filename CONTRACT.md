@@ -2439,6 +2439,47 @@ reach. v1.0:
   message URLs plus a one-line CNAME update. Documented in the
   CHANGELOG so the swap is reproducible.
 
+**v1.0-rc3 amendment: primary domain switched from
+`activegraph.dev` to `activegraph.ai`.** Same cutover pattern,
+different target. `activegraph.ai` is already owned;
+`activegraph.dev` will be registered and configured as a redirect
+to the primary (the registration is externally owned; the redirect
+is a server-side concern, not a codebase concern). The codebase
+holds exactly one primary domain — `docs.activegraph.ai` — and the
+constant `DOCS_BASE_URL` is the swap point as before.
+
+Concrete effects of the rc3 amendment:
+
+- `docs/CNAME` updated to `docs.activegraph.ai`.
+- `mkdocs.yml` `site_url` updated to `https://docs.activegraph.ai/`.
+- `activegraph.errors.DOCS_BASE_URL` updated to
+  `https://docs.activegraph.ai`. Every error message URL and every
+  `DOCS_BASE_URL`-derived f-string updates with it.
+- README, CHANGELOG, HANDOFF, and `docs/about/publishing.md`
+  references updated to the primary domain.
+- `tests/test_doc_links.py` continues to recognize the old
+  `docs.activegraph.dev` URLs as valid (so historical CHANGELOG
+  entries' .dev URLs still pass the source-presence check). The
+  new primary `docs.activegraph.ai` is added; both resolve to the
+  same `docs/` source tree.
+- Error snapshots regenerated under the new `DOCS_BASE_URL` via
+  `UPDATE_SNAPSHOTS=1`. The regenerated snapshots are the new
+  contract baseline for the format gate.
+
+Discipline note on what this amendment does NOT do:
+
+- It does not retroactively rewrite historical CONTRACT entries
+  that referenced `docs.activegraph.dev`. Those entries are records
+  of what was decided at the time and stay accurate as history.
+  Forward-looking spec text (the URL pattern for error pages, the
+  current-state description of where the site serves) is updated.
+- It does not assume the `.dev` redirect is live. The codebase
+  ships with `.ai` as the primary; the `.dev` redirect is a
+  user-owned operational step that lands separately. Until it
+  does, users who type the old `.dev` URL by hand hit the same
+  404 the rc2 user-test surfaced — the fix is the redirect, not
+  more codebase changes.
+
 ### v1.0 #C7. v0.9.1 lands before v1.0 PR-A
 
 The two follow-ups (granular approval-demo output, prompt_normalized
@@ -2549,11 +2590,11 @@ How to fix:
   <concrete action the developer can take>
 
 More:
-  https://docs.activegraph.dev/errors/<error-class-slug>
+  https://docs.activegraph.ai/errors/<error-class-slug>
 ```
 
 Snapshot-tested per-error-class. Doc URL must resolve to a real
-page; broken links fail CI. Until DNS for `docs.activegraph.dev` is
+page; broken links fail CI. Until DNS for `docs.activegraph.ai` is
 live, the URL renders as the github.io fallback (#C6) and the swap
 is the documented cutover.
 
@@ -4217,6 +4258,235 @@ from recurring.
   before compare.
 - Multi-tag commits (rare) — sort by version and compare against
   the highest-version tag.
+
+## v1.1 #8. Package-data completeness CI gate (from user-test B3)
+
+The v1.0-rc2 user-test gate surfaced **B3**: the published wheel
+omitted `activegraph/packs/diligence/prompts/*.md`, so every fresh
+`pip install activegraph` crashed in the quickstart with
+`PackPromptLoadError: prompts directory does not exist`. The bug
+was structurally invisible to all existing CI gates — every test
+ran against the source tree (or an editable install), where the
+prompts directory is present by definition. Only a clean-environment
+install from the built wheel exposes the gap.
+
+The v1.1 gate closes the loop. Same shape as the version-sync
+gate, the broken-link gate, the CLI-flags gate, the v1.1 #2
+Python-snippets gate, the v1.1 #6 version-tag-correspondence gate:
+small, mechanical, prevents a class of finding from recurring.
+
+**Why this gate is in v1.1 and not v1.0:**
+
+v1.0's user-test gate (CONTRACT v1.0 #C4) was the layer that caught
+what internal CI couldn't, and B3 specifically required PyPI-
+installability — or at least clean-venv-wheel-installability — to
+surface. The rc1 user-test ran from a cloned repo because PyPI
+publication wasn't a prerequisite yet, so packaging bugs were
+structurally untestable by the rc1 gate, not just not caught by
+it. v1.1 #8 institutionalizes wheel-artifact verification inside
+CI, which moves the user-test boundary outward by one layer. After
+this gate lands, the lighter user-test verifies the PyPI artifact
+(CDN, upload, distribution) — not the wheel itself. The user-test
+gate doesn't disappear; its scope tightens to what only an external
+user can verify.
+
+This implicitly schedules a related-but-separate v1.x gate (not
+v1.1 — too late for that scope): the lighter user-test reframed as
+CI-augmented manual verification, with a structured checklist that
+distinguishes "what CI verified" from "what only a human can
+verify." Filed as a v1.x candidate; tracked when v1.x scope opens.
+
+**Implementation scope:**
+
+- New CI step that runs `python -m build --wheel`, creates a fresh
+  venv, installs the built wheel (NOT `pip install -e .` — the
+  gate's whole point is to test the wheel artifact, not the source
+  tree), and runs a smoke command that exercises every runtime
+  data path.
+- Smoke command shape: `activegraph quickstart` (the default,
+  non-interactive fixture-backed demo — no API key, no network).
+  The quickstart is the v1.0 spec (CONTRACT v1.0 #1) and exercises
+  the diligence pack end-to-end, which loads all 4 prompts. If
+  any runtime data file is missing from the wheel, the smoke run
+  fails with the same `PackPromptLoadError` (or analog) that the
+  user-test caught.
+- Test file: `tests/test_wheel_completeness.py`. Orchestrates the
+  build-and-install via subprocess; the smoke run lives in the
+  same test. Marked with `@pytest.mark.slow` so it runs in CI but
+  not in the default local `pytest` invocation.
+- New workflow file: `.github/workflows/wheel-completeness.yml`.
+  Runs on every PR to main AND on push to main, same trigger
+  shape as `types.yml` and `docstrings.yml`. **The CI invocation
+  must explicitly pass the slow marker** (`pytest -m slow
+  tests/test_wheel_completeness.py`) so the gate actually runs;
+  the marker is opt-in for local-dev ergonomics, opt-in by name
+  in CI.
+- **Required for merge.** The version-sync gate, broken-link gate,
+  mypy gate, and docstring gate are merge-blockers (configured as
+  required status checks on the `main` branch); v1.1 #8 needs the
+  same status. Otherwise a regression that fails the gate can still
+  merge if the reviewer doesn't notice the red check.
+
+**Why a runtime smoke test, not a wheel-RECORD assertion:**
+
+A static check ("the wheel's RECORD file contains
+`activegraph/packs/diligence/prompts/document_researcher.md`")
+would catch B3 specifically but not the next analog. Future packs,
+future runtime data files, future migrations — each one would
+need its own RECORD assertion added. The smoke-run shape
+generalizes: if the runtime exercises the data path successfully,
+the data is present, regardless of category. Same discipline as
+the broken-link gate (fetches every URL, doesn't enumerate URLs
+by hand).
+
+**Edge cases:**
+
+- Optional-dep features (LLM, postgres) are not gated — the smoke
+  run uses the fixture LLM provider and SQLite store, the default
+  quickstart shape.
+- Network-disabled CI: the smoke run must not require network
+  access (no live PyPI install, no LLM provider calls). The
+  fixture provider satisfies this.
+- Prompt files use TOML frontmatter inside `.md` containers per
+  CONTRACT v0.9 #2 (hash-as-replay-contract); the package-data
+  declaration is keyed on the file extension, not the frontmatter
+  format. Future packs adding alternate prompt formats (e.g.
+  plain-text, JSON-Schema, YAML) need separate globs in
+  `[tool.setuptools.package-data]` AND the smoke run must
+  exercise them — adding a glob without exercising it would let
+  the next analog of B3 slip through.
+- Pre-release vs. release wheels build identically; the gate runs
+  on both.
+
+**What this gate does NOT do:**
+
+- It does not verify the wheel matches PyPI's published artifact —
+  that's a separate (and rarer) class of bug (CDN cache, broken
+  upload). The gate verifies the *build* produces a runnable
+  wheel; the publish workflow is responsible for uploading what
+  was built.
+- It does not verify documentation or developer-tool data files
+  (e.g., snippets used only by the docs build). Those aren't
+  shipped in the wheel and are gated by other CI steps.
+
+## v1.1 #9. Deploy-verification CI gate (from user-test B4)
+
+The v1.0-rc2 user-test gate surfaced **B4**: the doc site at
+`https://yoheinakajima.github.io/activegraph/` (and at
+`docs.activegraph.dev` per the pre-rc3 primary) returned 404, and
+nobody noticed for the entire duration of the doc-site phase. Root
+cause per the rc3 #2 investigation: `has_pages: false` on the repo
+(GitHub Pages was never enabled) + `private: true` (private-repo
+Pages requires a paid GitHub plan). Both are externally-owned
+operational decisions; the agent flagged them and paused for the
+user's call.
+
+The deeper finding behind B4: `tests/test_doc_links.py` is scoped
+to source-tree presence, not HTTP reachability. Its own docstring
+called this out (*"a separate check can verify the rendered URLs
+resolve over HTTP"*) but the separate check never landed. The 404
+dwelled silently because every CI gate verified the docs `.md`
+source files existed, not that they were being served.
+
+v1.1 #9 closes the loop. Same shape as v1.1 #8: small, mechanical,
+prevents a class of regression.
+
+**Why this gate is in v1.1 and not v1.0:**
+
+v1.0's CI verified the docs source tree (`test_doc_links.py`); the
+doc site's *reachability* was assumed-without-checking. Same
+boundary as the B3 case: internal source-tree checks ship green,
+the external artifact is broken, the user-test catches it because
+no other layer exists to catch it. v1.1 #9 institutionalizes HTTP-
+reachability verification inside CI, which moves the user-test
+boundary outward by one more layer. After this gate lands, the
+lighter user-test verifies the published-domain experience as a
+whole (does the link from the README land on a page that reads
+well? does the navigation feel right?) — not the basic
+reachability question of "does this URL return 200."
+
+**Implementation scope:**
+
+- New test file: `tests/test_doc_site_reachable.py`. Imports
+  `DOCS_BASE_URL` from `activegraph.errors` so the test stays in
+  sync with the cutover constant. Fetches the base URL and a
+  small set of known-good page paths (`/quickstart`,
+  `/reference/errors/`, one per top-level section). Asserts
+  HTTP 200 and that the response body contains `Active Graph`
+  (the `site_name` from `mkdocs.yml` — broad enough to survive
+  theme changes, narrow enough that an unrelated catchall page
+  fails the check).
+- Marked `slow` so local `pytest` doesn't pay the network cost
+  on every invocation. CI invokes the test explicitly via
+  `pytest -m slow tests/test_doc_site_reachable.py`.
+- New workflow file: `.github/workflows/deploy-verification.yml`.
+  Runs on push to main (post-deploy verification) and on a
+  scheduled cron (catches drift if the site goes down later
+  without a code change). Pull-request trigger is intentionally
+  omitted — branch PRs don't change what's published, so running
+  the check per-PR is noise.
+- **Required for merge once Pages is enabled.** Same status as
+  the v1.1 #8 gate. The branch protection rule is the user-owned
+  flip; the workflow exists immediately, runs immediately, but
+  blocking only kicks in when the gate is stably green.
+- **Advisory until then.** The user's rc3 visibility decision was
+  "yes public but wait til fully ready" — meaning the gate WILL
+  be red on every rc3 CI run. The red signal is the discipline
+  call to action: the gate is green only when the doc site is
+  actually live. Until then, the gate's failure message names
+  the operational steps that close the gap (enable Pages,
+  configure DNS, register .dev redirect).
+
+**Failure-mode design:**
+
+When the gate fails, the failure message must distinguish the
+common cases so the maintainer doesn't have to debug:
+
+- DNS failure (host not found) -> "DNS for $DOCS_BASE_URL is not
+  resolving. Verify the CNAME record points at
+  yoheinakajima.github.io."
+- HTTP 404 -> "$DOCS_BASE_URL resolves but returns 404. Verify
+  GitHub Pages is enabled (Settings → Pages → Source: GitHub
+  Actions) and that the docs workflow's most recent deploy job
+  succeeded."
+- HTTP 200 but content mismatch -> "$DOCS_BASE_URL returns 200 but
+  the body does not contain 'Active Graph'. Verify the deploy
+  artifact is the framework's site, not a default Pages
+  landing page or a catchall."
+
+**What this gate does NOT do:**
+
+- It does not verify every URL in the docs site (link-rot
+  detection). That's a higher-frequency check (mkdocs's own link
+  checker, run during `mkdocs build`) and a different scope.
+  v1.1 #9 verifies the *site is reachable*; mkdocs verifies the
+  *site is internally consistent*.
+- It does not verify the doc site's rendering quality (broken
+  CSS, missing fonts, JS errors). That's a manual user-test
+  concern; the gate is a binary reachability check.
+- It does not verify the .dev redirect, since the redirect is
+  user-owned operational state outside the codebase. If you
+  want a redirect-correctness check, it lives in the same gate
+  later as a separate assertion ("GET docs.activegraph.dev
+  should 301/302 to docs.activegraph.ai") — adding it now would
+  fail loudly during the period before you register .dev.
+
+**Edge cases:**
+
+- CI without outbound network: GitHub Actions runners have
+  network access; if the test ever runs in an air-gapped
+  environment (some forks of the workflow), it will fail with a
+  connect error, which is correct — the gate cannot verify what
+  it cannot reach.
+- Transient site outage: a single fetch failure shouldn't be
+  enough to fail the gate. The test retries on connection
+  errors (3 attempts, exponential backoff) before giving up.
+  HTTP 404 / 500 status codes are not retried — those are real
+  failures, not transient.
+- Rate-limiting from GitHub Pages: unlikely at the gate's
+  frequency (cron + post-merge), but the test uses a 10-second
+  timeout per request so a hung connection fails the gate
+  rather than the workflow.
 
 ## v1.1 #7 and beyond
 

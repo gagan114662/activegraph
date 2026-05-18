@@ -14,4 +14,4 @@ How to fix:
   If you genuinely need wall-clock scheduling, file an issue — the v1+ contract leaves room for it behind a separate primitive (see CONTRACT v0.7 #23).
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-activate-after
+  https://docs.activegraph.ai/errors/invalid-activate-after

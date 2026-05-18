@@ -13,4 +13,4 @@ How to fix:
   endpoint produced the binding.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error
+  https://docs.activegraph.ai/errors/unsupported-pattern-error

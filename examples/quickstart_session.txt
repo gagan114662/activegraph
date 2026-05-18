@@ -147,9 +147,9 @@ $ activegraph quickstart
 > ----------------------------------------------------------------------------
 >
 >   See your run:           activegraph inspect /tmp/activegraph_quickstart/<run-id>/
->   Fork it and diff:       see https://docs.activegraph.dev/quickstart#fork
+>   Fork it and diff:       see https://docs.activegraph.ai/quickstart#fork
 >   Write a behavior:       activegraph quickstart --interactive
->   Read the tutorial:      https://docs.activegraph.dev/quickstart
+>   Read the tutorial:      https://docs.activegraph.ai/quickstart
 
 # [PAUSE] Developer reads the trace and the "What just happened" section.
 # 60-90 seconds. The trace is dense; some of it they understand on the first
@@ -391,7 +391,7 @@ $ activegraph quickstart --interactive
 >
 > Your behavior fired on every object.created with object.type=claim.
 > For richer patterns (e.g., "only on claims with confidence above a
-> threshold"), see https://docs.activegraph.dev/guides/pattern-subscriptions
+> threshold"), see https://docs.activegraph.ai/guides/pattern-subscriptions
 >
 > You're done with the tutorial. What you wrote runs in the same runtime
 > the Diligence pack uses. There's no separate "user behavior" path.
@@ -426,7 +426,7 @@ $ activegraph --help | tail -10
 >   pack          Manage installed packs
 >   export-trace  Export a run's trace as JSONL
 >
-> Docs: https://docs.activegraph.dev
+> Docs: https://docs.activegraph.ai
 > Issues: https://github.com/yoheinakajima/activegraph/issues
 
 # [PAUSE] 5 seconds. They close the terminal. They open the docs site in a

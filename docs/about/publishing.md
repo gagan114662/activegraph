@@ -115,7 +115,7 @@ If a release ships broken:
    and re-tag.
 
 The yank-and-bump path is documented because the framework's
-[invariant-protection voice](https://docs.activegraph.dev/concepts/failure-model/)
+[invariant-protection voice](https://docs.activegraph.ai/concepts/failure-model/)
 extends to release ops: the next maintainer needs to know what to
 do, not guess.
 

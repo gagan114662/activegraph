@@ -16,4 +16,4 @@ How to fix:
       rt = Runtime(graph, llm_provider=RecordedLLMProvider(...))
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/missing-provider-error
+  https://docs.activegraph.ai/errors/missing-provider-error

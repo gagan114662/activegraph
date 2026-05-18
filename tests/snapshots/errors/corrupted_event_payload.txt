@@ -29,4 +29,4 @@ How to fix:
   propagate backward in time.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/corrupted-event-payload-error
+  https://docs.activegraph.ai/errors/corrupted-event-payload-error

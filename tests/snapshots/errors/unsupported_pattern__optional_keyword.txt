@@ -12,4 +12,4 @@ How to fix:
   pattern is the optional sub-pattern.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error
+  https://docs.activegraph.ai/errors/unsupported-pattern-error

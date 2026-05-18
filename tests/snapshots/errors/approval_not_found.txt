@@ -15,4 +15,4 @@ How to fix:
   shows the canonical pattern: enumerate, then approve by id.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/approval-not-found-error
+  https://docs.activegraph.ai/errors/approval-not-found-error

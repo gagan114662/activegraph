@@ -14,4 +14,4 @@ How to fix:
       activate_after='5 event'
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/invalid-activate-after
+  https://docs.activegraph.ai/errors/invalid-activate-after

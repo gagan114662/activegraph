@@ -11,4 +11,4 @@ How to fix:
   Inspect tool.responded.payload_extras for the original exception type and traceback. If the failure is intrinsic to the tool's inputs (bad data), tighten the input validation. If it's intermittent, add retry-on-execution-error logic to the calling behavior.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/tool-error
+  https://docs.activegraph.ai/errors/tool-error

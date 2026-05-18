@@ -16,7 +16,7 @@ locked format:
       <concrete action>
 
     More:
-      https://docs.activegraph.dev/errors/<slug>
+      https://docs.activegraph.ai/errors/<slug>
 
 The seven category bases are stable. Concrete leaves are migrated under
 their categories one PR at a time (CONTRACT v1.0 #C1 — the rewrite ships
@@ -25,8 +25,8 @@ as the reference category; subsequent PRs migrate the other categories
 without changing the bases.
 
 `_doc_slug` on each class is the URL slug for the error's doc page. The
-base URL is the github.io fallback (CONTRACT v1.0 #C6); once DNS for
-`docs.activegraph.dev` is live, the constant is swapped in one place.
+base URL is the primary `docs.activegraph.ai` domain (CONTRACT v1.0 #C6,
+v1.0-rc3 amendment); the constant is the single swap point.
 """
 
 from __future__ import annotations
@@ -34,10 +34,13 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 
-# CONTRACT v1.0 #C6: until docs.activegraph.dev DNS is live, error URLs
-# point at the github.io fallback. The cutover is a one-line edit here
-# plus a README update; the URLs in every error message follow.
-DOCS_BASE_URL = "https://yoheinakajima.github.io/activegraph"
+# CONTRACT v1.0 #C6 (v1.0-rc3 amendment): primary doc-site domain is
+# docs.activegraph.ai. Until the user-owned Pages enablement and DNS
+# land, the URL renders the same 404 the rc2 user-test surfaced; the
+# v1.1 #9 deploy-verification gate fails until that lands, which is
+# the correct signal. One-line swap point: update this constant and
+# every error message URL and `DOCS_BASE_URL`-derived f-string follows.
+DOCS_BASE_URL = "https://docs.activegraph.ai"
 
 
 def _indent_continuation(text: str, indent: str = "  ") -> str:

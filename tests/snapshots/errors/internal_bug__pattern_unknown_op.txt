@@ -12,8 +12,8 @@ How to fix:
   internal error location, and the full message above:
       https://github.com/yoheinakajima/activegraph/issues/new
 
-    framework version:   activegraph 1.0.0rc2
+    framework version:   activegraph 1.0.0rc3
     internal location:   activegraph/runtime/patterns.py:_eval_where (unknown comparison operator)
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/unsupported-pattern-error
+  https://docs.activegraph.ai/errors/unsupported-pattern-error

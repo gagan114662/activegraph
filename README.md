@@ -65,7 +65,7 @@ are opt-in extras.
   8 object types, 7 behaviors, 3 tools, recorded fixtures.
 - **Per-error reference pages.** Every error message ends with a
   `More:` link to a page that explains when it fires, why, and how to
-  fix it. Catalog at [docs.activegraph.dev/reference/errors](https://docs.activegraph.dev/reference/errors/).
+  fix it. Catalog at [docs.activegraph.ai/reference/errors](https://docs.activegraph.ai/reference/errors/).
 
 ## A small example
 
@@ -103,14 +103,14 @@ runtime.print_trace()
 
 The `unblock` relation behavior fires only for events touching one of
 its edge endpoints. The conceptual deep-dive on edges-with-logic is
-in [`docs/concepts/relations.md`](https://docs.activegraph.dev/concepts/relations/).
+in [`docs/concepts/relations.md`](https://docs.activegraph.ai/concepts/relations/).
 
 ## Documentation
 
-- **[docs.activegraph.dev](https://docs.activegraph.dev/)** — full doc site:
+- **[docs.activegraph.ai](https://docs.activegraph.ai/)** — full doc site:
   concepts, guides, cookbook, CLI reference, API reference, the
   per-error catalog.
-- **[10-minute tutorial](https://docs.activegraph.dev/quickstart/)** — install
+- **[10-minute tutorial](https://docs.activegraph.ai/quickstart/)** — install
   to a working custom behavior, including fork-and-diff.
 - **[CHANGELOG.md](CHANGELOG.md)** — every release, with per-version
   migration notes.
@@ -149,7 +149,7 @@ per-version migration notes.
 Major shipped milestones:
 
 - **v1.0 (rc1)** — error hierarchy rewrite with per-error reference
-  pages, doc site at [docs.activegraph.dev](https://docs.activegraph.dev/),
+  pages, doc site at [docs.activegraph.ai](https://docs.activegraph.ai/),
   `activegraph quickstart` command, mypy `--strict` and docstring
   coverage CI gates.
 - **v0.9** — pack format and the Diligence reference pack (8 object

@@ -17,4 +17,4 @@ How to fix:
   from the divergence point). If unintentional, revert the behavior.
 
 More:
-  https://yoheinakajima.github.io/activegraph/errors/replay-divergence-error
+  https://docs.activegraph.ai/errors/replay-divergence-error
