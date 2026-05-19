@@ -1,4 +1,4 @@
-"""LLM behaviors subpackage. CONTRACT v0.6.
+"""LLM behaviors subpackage. CONTRACT v0.6; OpenAIProvider added v1.0.1 #5.
 
 Public surface:
 
@@ -6,6 +6,8 @@ Public surface:
   LLMMessage             — single role-tagged message
   LLMResponse            — what `complete()` returns
   AnthropicProvider      — reference implementation
+  OpenAIProvider         — second concrete provider, surface parity
+                           with AnthropicProvider (v1.0.1 #5)
   RecordedLLMProvider    — fixture-backed provider for tests
   RecordingLLMProvider   — wraps another provider, persists responses
                            as fixtures (for first-time test seed)
@@ -17,11 +19,16 @@ Public surface:
   LLMBehaviorError       — structured failure carrier from @llm_behavior
                            wrappers; runtime turns it into
                            `behavior.failed` with a `reason`
+  parse_structured_response — JSON-extraction-then-Pydantic-validate
+                           helper shared by every provider that uses
+                           the framework's instruction-based path
 """
 
 from activegraph.llm.anthropic import AnthropicProvider
 from activegraph.llm.cache import LLMCache
 from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
+from activegraph.llm.openai import OpenAIProvider
+from activegraph.llm.parsing import parse_structured_response
 from activegraph.llm.prompt import (
     AssembledPrompt,
     assemble_prompt,
@@ -42,10 +49,12 @@ __all__ = [
     "LLMProvider",
     "LLMResponse",
     "MissingProviderError",
+    "OpenAIProvider",
     "RecordedLLMProvider",
     "RecordingLLMProvider",
     "ToolCall",
     "assemble_prompt",
+    "parse_structured_response",
     "schema_to_json",
     "serialize_view",
 ]

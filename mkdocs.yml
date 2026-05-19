@@ -145,6 +145,7 @@ nav:
       - Migration from v0.7: cookbook/migration-from-v0-7.md
   - Reference:
       - CLI: reference/cli.md
+      - LLM providers: reference/llm-providers.md
       - API reference:
           - Overview: reference/api/index.md
           - Runtime: reference/api/runtime.md

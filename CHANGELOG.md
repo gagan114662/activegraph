@@ -20,15 +20,25 @@ Nothing yet. v1.1 scope is tracked in
 
 ## [v1.0.1] — 2026-05-19
 
-The first-external-user-test patch. v1.0 final shipped on
-2026-05-18; the first developer outside the maintainer's loop ran
-the install / quickstart / tutorial path on the day-of, and three
-small UX findings surfaced before v1.0.1 publish. All three fit the
-"X is confusing" shape on HANDOFF.md's user-test heuristic (none
-"X doesn't compose with Y the way I expected" — architectural shape
-held). No CONTRACT amendments to v1.0's own decisions, no public-API
+The first-external-user-test patch plus the OpenAI provider
+expansion. v1.0 final shipped on 2026-05-18; the first developer
+outside the maintainer's loop ran the install / quickstart /
+tutorial path on the day-of, and three small UX findings surfaced
+before v1.0.1 publish. All three fit the "X is confusing" shape on
+HANDOFF.md's user-test heuristic (none "X doesn't compose with Y
+the way I expected" — architectural shape held).
+
+v1.0.1 also closes an implicit adoption-surface gap the user-test
+didn't surface but readers feel: the framework shipped a single
+concrete `LLMProvider` (`AnthropicProvider`), making the
+provider-agnostic claim read as theoretical. v1.0.1 #5 ships
+`OpenAIProvider` with surface parity and locks in the
+provider-commitment contract.
+
+No CONTRACT amendments to v1.0's own decisions, no public-API
 renames, no new runtime capability. CONTRACT v1.0.1 records the
-three fixes; this entry is the shipping changelog.
+four user-test fixes plus the provider-expansion decision; this
+entry is the shipping changelog.
 
 ### Added
 
@@ -128,9 +138,85 @@ three fixes; this entry is the shipping changelog.
   hinting at the higher-level `persist_to=` API. See "Changed:
   `SQLiteEventStore()` constructor error" above.
 
+### Provider expansion
+
+- **`activegraph.llm.OpenAIProvider`** — second concrete
+  `LLMProvider` with surface parity to `AnthropicProvider`. Same
+  three Protocol methods (`complete`, `estimate_cost`,
+  `count_tokens`), same lazy-SDK + env-var loading shape, same
+  family-prefix pricing table, same structured-output path through
+  the framework's instruction-based prompt assembly. A runtime
+  swapping `AnthropicProvider()` for `OpenAIProvider()` doesn't
+  reshape any `@llm_behavior` definition. CONTRACT v1.0.1 #5.
+- **`activegraph.llm.parsing.parse_structured_response`** —
+  JSON-extraction-then-Pydantic-validate helper extracted from
+  `AnthropicProvider`. Both shipped providers (and any future
+  provider that uses the framework's instruction-based path)
+  import it directly, producing byte-identical `llm.parse_error`
+  and `llm.schema_violation` reason codes for byte-identical
+  responses. The extraction preserved Anthropic's behavior
+  exactly; all 9 existing `test_llm_anthropic.py` tests pass
+  unchanged. CONTRACT v1.0.1 #5.
+- **`pyproject.toml` extras follow a three-pattern shape.** `[llm]`
+  pulls every shipped provider's SDK (`anthropic>=0.40`,
+  `openai>=1.0`, `tiktoken>=0.7`). `[anthropic]` and `[openai]`
+  aliases install one provider at a time for cost-conscious
+  production deployments. `[all]` rolls up everything from `[llm]`
+  plus persistence and metrics extras. CONTRACT v1.0.1 #5 (b).
+- **`docs/reference/llm-providers.md`** — new reference page
+  documenting both providers side-by-side: install commands, API
+  key env vars, the symmetric Protocol surface, the asymmetric
+  details (`count_tokens` server-side vs client-side, tool-use
+  support gap, native structured-output mode deferral), and a
+  "writing a custom provider" section pointing at
+  `parse_structured_response` for error-semantics parity. Wired
+  into the mkdocs nav under Reference. CONTRACT v1.0.1 #5.
+
+### Provider non-promises in v1.0.1 (per CONTRACT v1.0.1 #5 (c))
+
+Documented as contract clauses rather than discovered as user
+friction later — same discipline as v1.0's honesty section.
+
+- **Token counting is provider-dependent.** Anthropic uses
+  `messages.count_tokens` server-side; OpenAI uses `tiktoken`
+  client-side when available and a `chars / 4` heuristic when
+  not, with a one-time debug log on first heuristic call.
+  Operators gating on `budget.max_cost_usd` should install
+  `tiktoken` (via `[openai]` or `[llm]`) for accurate accounting.
+- **Tool use is Anthropic-only in v1.0.1.** `OpenAIProvider`
+  accepts the `tools=` kwarg for Protocol compatibility but
+  raises `LLMBehaviorError(reason="llm.network_error")` with a
+  v1.1 pointer when the list is non-empty. Tool-shape translation
+  in `Tool.to_definition()` is filed under v1.1 #7-and-beyond.
+- **Native structured-output modes are v1.1 candidates.** Both
+  providers use the instruction-based path that v1.0.1 #2's
+  example-instance work feeds. OpenAI's
+  `response_format={"type":"json_schema",...}` and analogous
+  future modes stay v1.1 — they diverge providers' latency
+  profiles, cache-key semantics, and error paths in ways that
+  warrant their own decision.
+- **No new reason codes.** The closed CONTRACT v0.6 #11 taxonomy
+  is unchanged. OpenAI auth failures land in `llm.network_error`
+  with the exception message preserved verbatim, same as
+  Anthropic for the same failure mode.
+
+### Examples
+
+- **`examples/babyagi.py`** with companion
+  `examples/babyagi/README.md` — BabyAGI's autonomous agent loop
+  (Nakajima 2023) rebuilt as three reactive behaviors over a
+  shared graph. The minimal-loop counterpart to the Diligence
+  pack's domain-rich example: same conceptual lineage as the
+  framework's launch essays, runnable end-to-end against either
+  provider, traces to `traces/babyagi-<timestamp>.sqlite`. The
+  v1.0.1 public `register()` API replaces v1.0's `_REGISTRY`
+  workaround. A `--provider {anthropic,openai}` CLI flag exercises
+  the new symmetric surface — same example, same loop, swap the
+  provider with one argument.
+
 ### Migration from v1.0
 
-Additive. The three changes are forward-compatible:
+Additive. The changes are forward-compatible:
 
 ```bash
 pip install --upgrade activegraph==1.0.1
@@ -150,6 +236,11 @@ pip install --upgrade activegraph==1.0.1
   re-record pass. Same shape as any v0.6+ prompt-assembly change;
   see [`llm-behavior-error`](https://docs.activegraph.ai/errors/llm-behavior-error/)'s
   re-record recipe.
+- `OpenAIProvider` is new; install via
+  `pip install "activegraph[openai]"` or
+  `pip install "activegraph[llm]"`. Existing `[llm]` extra users
+  pick up `openai` and `tiktoken` automatically on upgrade
+  alongside the existing `anthropic` SDK.
 
 ## [v1.0] — 2026-05-18
 

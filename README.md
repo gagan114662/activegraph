@@ -36,11 +36,19 @@ capability.
 
 ```bash
 pip install activegraph                    # core runtime + SQLite store + Diligence pack
-pip install "activegraph[llm]"             # Anthropic provider
+pip install "activegraph[llm]"             # Anthropic + OpenAI providers
+pip install "activegraph[anthropic]"       # Anthropic provider only
+pip install "activegraph[openai]"          # OpenAI provider only (+ tiktoken)
 pip install "activegraph[postgres]"        # Postgres-backed event store
 pip install "activegraph[prometheus]"      # Prometheus metrics
 pip install "activegraph[all]"             # everything
 ```
+
+Both LLM providers expose the same `LLMProvider` Protocol surface;
+swap one for the other without touching `@llm_behavior` definitions.
+The [LLM providers reference](https://docs.activegraph.ai/reference/llm-providers/)
+covers the side-by-side surface and the v1.0.1 limitations
+(OpenAI tool use is a v1.1 candidate).
 
 Python 3.11+. Two hard dependencies (`click` for the CLI, `pydantic`
 for the pack format); persistence backends and provider integrations
@@ -169,7 +177,9 @@ in [`docs/concepts/relations.md`](https://docs.activegraph.ai/concepts/relations
   [`resume_and_fork.py`](examples/resume_and_fork.py),
   [`llm_claim_extraction.py`](examples/llm_claim_extraction.py),
   [`diligence_with_tools.py`](examples/diligence_with_tools.py),
-  [`operate_a_run.py`](examples/operate_a_run.py).
+  [`operate_a_run.py`](examples/operate_a_run.py),
+  [`babyagi.py`](examples/babyagi.py) — BabyAGI's autonomous agent loop,
+  rebuilt as three reactive behaviors over a shared graph.
 
 ## What this is not
 
