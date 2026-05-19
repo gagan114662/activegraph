@@ -49,6 +49,13 @@ def live_runtimes() -> list["Runtime"]:
     return list(_LIVE_RUNTIMES)
 
 
+def _clear_for_test() -> None:
+    """Empty the live-Runtime set. Test-only — used by the conftest
+    fixture that isolates the global registry between tests. Production
+    code shouldn't call this: the WeakSet cleans itself on GC."""
+    _LIVE_RUNTIMES.clear()
+
+
 def validate_behavior_against_live_runtimes(behavior: Any) -> None:
     """Validate a freshly-registered behavior against every live
     Runtime's provider. Raises :class:`InvalidRuntimeConfiguration` on
