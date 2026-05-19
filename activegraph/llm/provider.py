@@ -1,11 +1,13 @@
 """The `LLMProvider` Protocol every provider implements.
 
-CONTRACT v0.6 #3, extended in v0.7. Narrow, explicit, keyword-only.
-Shipped reference implementation is `AnthropicProvider`. Tests use
+CONTRACT v0.6 #3, extended in v0.7, additively widened in v1.0.2 #1.
+Narrow, explicit, keyword-only. Shipped reference implementations are
+`AnthropicProvider` and `OpenAIProvider`. Tests use
 `RecordedLLMProvider` + `RecordingLLMProvider`. The demo ships its
 own scripted provider.
 
-A provider does three things:
+A provider does three things plus two declarations:
+
   * `complete()`: run a single non-streaming completion. v0.7 adds
     an optional `tools=` parameter; when non-empty, the model is
     allowed to return tool_use blocks in the response.
@@ -14,6 +16,18 @@ A provider does three things:
     prompt that's about to be sent. Used for pre-call budget gating
     when `budget.max_cost_usd` is set; otherwise skipped (see
     CONTRACT v0.6 #4 / decision 10).
+  * `default_model`: the model name to use when an `@llm_behavior`
+    didn't pin one (v1.0.2 #1).
+  * `recognizes_model(name)`: True when `name` belongs to a model
+    family this provider serves. Used by the runtime at
+    registration time to flag cross-provider mismatches before the
+    first network call (v1.0.2 #1).
+
+`default_model` and `recognizes_model` are additive: the runtime
+guards their use with `getattr(...)`, so custom providers that
+pre-date v1.0.2 keep working — they just require an explicit
+`model=` on every `@llm_behavior` and don't participate in
+cross-provider validation.
 
 No streaming, no multi-model orchestration — those are deferred to
 v0.8+. Tool use IS in v0.7, but the loop is orchestrated by the
@@ -32,6 +46,11 @@ from activegraph.llm.types import LLMMessage, LLMResponse
 
 @runtime_checkable
 class LLMProvider(Protocol):
+    # v1.0.2 #1: declared as an attribute on the Protocol. Concrete
+    # providers set it as a class attribute; custom providers may
+    # omit it (the runtime falls back to getattr-with-default).
+    default_model: str
+
     def complete(
         self,
         *,
@@ -63,4 +82,16 @@ class LLMProvider(Protocol):
         messages: list[LLMMessage],
         model: str,
     ) -> int:
+        ...
+
+    def recognizes_model(self, name: str) -> bool:
+        """True when `name` belongs to a model family this provider serves.
+
+        v1.0.2 #1. Used at registration time to flag cross-provider
+        mismatches (e.g. ``model="claude-sonnet-4-5"`` on a runtime
+        configured with ``OpenAIProvider``). Permissive by default:
+        unknown names — fine-tuned models, internal deployment names,
+        experimental prefixes — should return False so the runtime
+        passes them through without a diagnostic.
+        """
         ...

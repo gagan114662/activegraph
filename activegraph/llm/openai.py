@@ -82,6 +82,20 @@ def _pricing_for(
 
 
 class OpenAIProvider(LLMProvider):
+    # v1.0.2 #1: provider-aware default model. @llm_behavior(model=None)
+    # resolves to this string at registration time. gpt-4o-mini is the
+    # cheap, fast member of the GPT-4o family — matches Anthropic's
+    # default-model shape (cheapest sensible default; override for prod).
+    default_model: str = "gpt-4o-mini"
+
+    # v1.0.2 #1: the model-name prefixes this provider recognizes.
+    # `gpt-` covers the GPT-3.5 / GPT-4 / GPT-4o families; the
+    # `o1-` / `o3-` / `o4-` prefixes cover the reasoning-model line
+    # (o1, o3, o4 and their dated variants). Names matching none of
+    # these pass through registration silently per v1.0.2 #1 (b)'s
+    # permissive-default rule.
+    _RECOGNIZED_PREFIXES: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
+
     def __init__(
         self,
         *,
@@ -266,6 +280,12 @@ class OpenAIProvider(LLMProvider):
             # overhead per the published "How to count tokens" guide.
             total += 4
         return max(1, total)
+
+    def recognizes_model(self, name: str) -> bool:
+        """True for OpenAI model families (``gpt-*``, ``o1-*``, ``o3-*``,
+        ``o4-*``). v1.0.2 #1.
+        """
+        return any(name.startswith(p) for p in self._RECOGNIZED_PREFIXES)
 
     def _heuristic_count(self, system: str, messages: list[LLMMessage]) -> int:
         if not self._heuristic_warned:

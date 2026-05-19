@@ -42,11 +42,66 @@ Override the env-var name via the `api_key_env=` constructor kwarg
 if you need a different one (per-environment key rotation, for
 example).
 
+## Default model resolution
+
+Each provider declares a `default_model` — the model name the
+runtime uses when an `@llm_behavior` doesn't pin one explicitly:
+
+```python
+@llm_behavior(name="extractor", output_schema=Claim)
+def extractor(event, graph, ctx, llm_output):
+    ...
+```
+
+With `AnthropicProvider()` this resolves to `"claude-sonnet-4-5"`;
+with `OpenAIProvider()` it resolves to `"gpt-4o-mini"`. The
+runtime stamps the resolved name onto the behavior at
+registration time (inside `Runtime(...)`'s first registry
+materialization), so swapping providers is a one-line change:
+
+```python
+rt = Runtime(Graph(), llm_provider=OpenAIProvider())  # gpt-4o-mini
+rt = Runtime(Graph(), llm_provider=AnthropicProvider())  # claude-sonnet-4-5
+```
+
+Pass `model="..."` on the decorator to override:
+
+```python
+@llm_behavior(name="extractor", output_schema=Claim, model="gpt-4o")
+def extractor(event, graph, ctx, llm_output):
+    ...
+```
+
+## Cross-provider model-name validation
+
+When a behavior pins `model="..."` explicitly, the runtime checks
+the name against each shipped provider's `recognizes_model()`:
+
+| Provider | Recognized prefixes |
+| --- | --- |
+| `AnthropicProvider` | `claude-` |
+| `OpenAIProvider` | `gpt-`, `o1-`, `o3-`, `o4-` |
+
+If the configured provider doesn't recognize the name but a
+*different* shipped provider does, the runtime raises
+`InvalidRuntimeConfiguration` at registration time with a
+structured error naming both providers. This catches the most
+common shape of provider-swap misconfiguration — an `@llm_behavior`
+copied from an Anthropic example into an OpenAI-configured runtime
+— before the first network call, instead of letting the provider
+404 silently.
+
+Names no shipped provider recognizes (custom deployments, OpenAI
+fine-tunes like `ft:gpt-4o-mini:org::id`, internal naming
+conventions) pass through silently. The validation is permissive
+by design: only *recognized* cross-provider mismatches fire.
+
 ## Side-by-side
 
 | Aspect | `AnthropicProvider` | `OpenAIProvider` |
 | --- | --- | --- |
-| Default model family | `claude-sonnet-4-5` (set on `@llm_behavior`) | `gpt-4o` family |
+| `default_model` (used when `@llm_behavior` omits `model=`) | `"claude-sonnet-4-5"` | `"gpt-4o-mini"` |
+| Recognized model families (per `recognizes_model()`) | `claude-*` | `gpt-*`, `o1-*`, `o3-*`, `o4-*` |
 | API key env | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY` |
 | SDK | `anthropic>=0.40` | `openai>=1.0` |
 | Structured output | Instruction-based: schema + example instance embedded in the system prompt by [`build_system_prompt`](api/index.md); provider parses JSON out of the response via the shared `parse_structured_response` helper | Same path. Native `response_format={"type":"json_schema",...}` mode is a v1.1 candidate |
@@ -85,6 +140,8 @@ from decimal import Decimal
 from activegraph.llm import LLMMessage, LLMResponse, LLMProvider
 
 class MyProvider:
+    default_model = "my-model-name"   # v1.0.2 #1 — used when @llm_behavior omits model=
+
     def complete(self, *, system, messages, model, max_tokens,
                  temperature, top_p, output_schema, timeout_seconds,
                  tools=None) -> LLMResponse:
@@ -96,8 +153,17 @@ class MyProvider:
     def count_tokens(self, *, system, messages, model) -> int:
         ...
 
+    def recognizes_model(self, name: str) -> bool:  # v1.0.2 #1
+        return name.startswith("my-")
+
 assert isinstance(MyProvider(), LLMProvider)
 ```
+
+`default_model` and `recognizes_model` are additive (v1.0.2 #1).
+Custom providers that pre-date v1.0.2 and omit them keep working
+at the three core call sites — they just require an explicit
+`model=` on every `@llm_behavior` and don't participate in
+cross-provider validation.
 
 If your provider exposes the framework's instruction-based
 structured-output path (most do), reuse

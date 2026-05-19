@@ -93,7 +93,11 @@ class LLMBehavior(Behavior):
 
     handler: Optional[Callable[..., None]] = None
     description: str = ""
-    model: str = "claude-sonnet-4-5"
+    # v1.0.2 #1: model is optional. None = "use the configured provider's
+    # default_model"; the runtime resolves and stamps the concrete string
+    # at registration time. Existing call sites that pass an explicit
+    # string keep working unchanged.
+    model: Optional[str] = None
     output_schema: Optional[type] = None
     deterministic: bool = False
     max_tokens: int = 4096
@@ -134,10 +138,17 @@ class LLMBehavior(Behavior):
             if ar_expr:
                 around_id = _resolve_event_path(ar_expr, event)
             depth = self.view_spec.get("depth")
+        # v1.0.2 #1: if model is still None, the runtime hasn't stamped
+        # a provider default yet — `build_prompt` is for inspection
+        # (CONTRACT v0.6 #20) and must work without a Runtime, so fall
+        # back to the v1.0.1 hardcoded default for inspection-time hash
+        # stability. Real provider calls always go through Runtime,
+        # which resolves the configured provider's default_model first.
+        inspection_model = self.model or "claude-sonnet-4-5"
         return assemble_prompt(
             behavior_name=self.name,
             description=self.description,
-            model=self.model,
+            model=inspection_model,
             output_schema=self.output_schema,
             creates=self.creates,
             view=view,

@@ -110,8 +110,20 @@ class RecordedLLMProvider(LLMProvider):
     silent fallthrough to a real call.
     """
 
+    # v1.0.2 #1: fixtures already carry their own model name in the hash
+    # input, so default-model resolution only matters when an
+    # @llm_behavior omits model=. The recorded provider has no opinion
+    # about which family it's replaying; declare the historical default
+    # so existing fixtures stay reachable.
+    default_model: str = "claude-sonnet-4-5"
+
     def __init__(self, fixtures_dir: str) -> None:
         self._dir = fixtures_dir
+
+    def recognizes_model(self, name: str) -> bool:
+        # Fixture-backed: claim every name so cross-provider validation
+        # doesn't fire against recorded responses.
+        return True
 
     # ---- LLMProvider methods ----
 
@@ -206,6 +218,20 @@ class RecordingLLMProvider(LLMProvider):
         self._inner = inner
         self._dir = fixtures_dir
         os.makedirs(self._dir, exist_ok=True)
+
+    # v1.0.2 #1: delegate default_model + recognizes_model to the inner
+    # provider so wrapping doesn't change the resolution surface. Falls
+    # back to the historical default if the inner provider pre-dates
+    # v1.0.2 and doesn't declare one.
+    @property
+    def default_model(self) -> str:
+        return getattr(self._inner, "default_model", "claude-sonnet-4-5")
+
+    def recognizes_model(self, name: str) -> bool:
+        recognizes = getattr(self._inner, "recognizes_model", None)
+        if recognizes is None:
+            return True
+        return bool(recognizes(name))
 
     def complete(
         self,

@@ -62,6 +62,10 @@ def _pricing_for(model: str, pricing: Mapping[str, Mapping[str, str]]) -> tuple[
 
 
 class AnthropicProvider(LLMProvider):
+    # v1.0.2 #1: provider-aware default model. @llm_behavior(model=None)
+    # resolves to this string at registration time.
+    default_model: str = "claude-sonnet-4-5"
+
     def __init__(
         self,
         *,
@@ -204,6 +208,10 @@ class AnthropicProvider(LLMProvider):
             kwargs["system"] = system
         result = client.messages.count_tokens(**kwargs)
         return int(getattr(result, "input_tokens", 0) or 0)
+
+    def recognizes_model(self, name: str) -> bool:
+        """True for the ``claude-*`` model family. v1.0.2 #1."""
+        return name.startswith("claude-")
 
 
 # ---- helpers ---------------------------------------------------------------
