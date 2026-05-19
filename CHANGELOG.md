@@ -25,6 +25,86 @@ observes the event. Both need design consideration and are tracked
 in the HANDOFF working notes for the next session rather than this
 changelog.
 
+## [v1.0.2.post1] — 2026-05-19
+
+Post-release fix to v1.0.2. The CONTRACT amendment landed in v1.0.2
+promised registration-time validation; an external spot-check
+discovered the implementation was firing the validation lazily, at
+first `run_goal()` / `run_until_idle()` / `run_until()` via
+`_ensure_registry()` rather than at registration time. The
+validation logic and error message were correct — the boundary was
+wrong.
+
+This post-release moves the validation to **both binding moments**
+so cross-provider model mismatches fail fast at setup time:
+
+1. **`Runtime(graph, llm_provider=...)` construction** — runs the
+   bulk validation pass against whatever is already registered
+   (global registry, explicit `behaviors=[...]`, or pack-loaded).
+2. **`register()` / `@llm_behavior` decoration** — when one or more
+   Runtimes are alive, the freshly-registered behavior is checked
+   against each live Runtime's provider via a `weakref.WeakSet`.
+   The WeakSet auto-cleans on GC; no `Runtime.close()` is added.
+
+The lazy path inside `_ensure_registry()` stays in place as a
+defensive double-check for code paths that bypass both binding
+moments (currently: pack behaviors registered after Runtime
+construction via `load_pack`). Pack-load-time validation is filed
+as a v1.1 candidate if friction surfaces.
+
+The CONTRACT v1.0.2 #1 (b) wording is clarified to match — see
+that section for the locked decision.
+
+### Changed
+
+- **Validation boundary corrected.** No public-API change; the
+  error message is byte-identical to v1.0.2. The difference is
+  *when* it fires: at `Runtime(...)` construction or at
+  `@llm_behavior` / `register()` time, instead of at first
+  `run_goal()`.
+- **`Runtime.__init__` order updated.** Bulk validation runs
+  before the Runtime self-registers in the live-set, so a Runtime
+  whose construction fails validation stays out of the WeakSet.
+  This prevents pytest exception-traceback strong-refs on
+  failed-construction `self` from polluting subsequent
+  `@llm_behavior` validation passes during a test session. In
+  production it's a no-op (failed-construction Runtimes go out of
+  scope and are GC'd promptly anyway), but the invariant — "only
+  successfully-constructed Runtimes participate in validation" —
+  is worth keeping clean.
+- **`tests/conftest.py`** clears the live-Runtime WeakSet in the
+  autouse `_isolate_registry` fixture for the same pytest-pollution
+  reason. The WeakSet auto-cleans on GC in production; only test
+  isolation needs the explicit clear.
+
+### Added
+
+- **`activegraph/runtime/_live.py`** — new module owning the live-
+  Runtime WeakSet, the `track_runtime()` hook, and the
+  single-behavior cross-provider validator that both binding
+  moments invoke. The validator is factored out of v1.0.2's
+  `_resolve_and_validate_llm_models` so the check itself lives in
+  one place; the bulk function and the new decorator-path call
+  site both delegate.
+
+### Fixed
+
+- **External spot-check finding** — `Runtime(graph,
+  llm_provider=...)` no longer returns successfully when the
+  registry contains a cross-provider model mismatch. The
+  `@llm_behavior` decorator no longer adds a conflicting behavior
+  to the registry when a Runtime with an incompatible provider
+  is already alive. Same diagnostic message; earlier boundary.
+
+### Migration from v1.0.2
+
+No code changes required. The error fires at an earlier point in
+the program's execution — what used to surface at `rt.run_goal(...)`
+now surfaces at `Runtime(...)` or at `@llm_behavior` decoration.
+Code that was already catching `InvalidRuntimeConfiguration`
+around `run_goal` should move the `try`/`except` to the relevant
+binding moment, or wrap the whole setup block.
+
 ## [v1.0.2] — 2026-05-19
 
 Patch release addressing the most urgent of three findings from the

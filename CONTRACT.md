@@ -4201,14 +4201,14 @@ serves. Shipped definitions:
   starting with `"gpt-"`, `"o1-"`, `"o3-"`, or `"o4-"` (the
   OpenAI reasoning-model prefixes that exist in 2026).
 
-The runtime uses these for cross-provider validation at
-registration time. When a behavior pins `model=` explicitly and
-the configured provider doesn't recognize the name, the runtime
-asks each shipped provider whether *it* recognizes the name. If
-exactly one *other* shipped provider claims it, the runtime
-raises `InvalidRuntimeConfiguration` with a structured error
-naming both the claimed-by provider and the configured provider
-and listing the configured provider's model families.
+The runtime uses these for cross-provider validation. When a
+behavior pins `model=` explicitly and the configured provider
+doesn't recognize the name, the runtime asks each shipped
+provider whether *it* recognizes the name. If exactly one
+*other* shipped provider claims it, the runtime raises
+`InvalidRuntimeConfiguration` with a structured error naming
+both the claimed-by provider and the configured provider and
+listing the configured provider's model families.
 
 If no shipped provider recognizes the name (custom models,
 fine-tunes, experimental names, internal-deployment names), the
@@ -4216,9 +4216,36 @@ validation passes silently. This is the **permissive default**:
 unknown model names are user responsibility, only *recognized
 mismatches* fire the diagnostic.
 
-The validation fires at `Runtime._ensure_registry()` time — the
-same hook that already raises `MissingProviderError` for
-`@llm_behavior` with no provider configured (CONTRACT v0.6 #21).
+The validation fires at **both binding moments** — whichever sees
+both the provider and the behavior present first:
+
+1. **At `Runtime(graph, llm_provider=...)` construction**, against
+   every behavior already in the global registry, every explicit
+   `behaviors=[...]` argument, and every pack behavior loaded
+   subsequently via `runtime.load_pack(...)`. This catches the
+   common case where decorators run on import (populating the
+   global registry) and `Runtime(...)` is constructed afterwards.
+2. **At `register()` / `@llm_behavior`-time**, against every
+   live Runtime's provider via a module-level `weakref.WeakSet`
+   of constructed Runtimes. This catches the README quickstart
+   pattern, where `Runtime(...)` is constructed first against an
+   empty registry and decorators run afterwards.
+
+Both moments invoke the same single-behavior cross-provider
+check; the bulk-at-construction path also stamps provider defaults
+onto `model=None` behaviors per (a). The lazy-at-first-run path
+inside `Runtime._ensure_registry()` stays in place as a defensive
+double-check for code paths that don't flow through the two
+binding moments above (notably pack-loaded behaviors registered
+after Runtime construction, which currently fall through to
+first-run validation rather than load-pack-time validation —
+filed as a v1.1 follow-on if it surfaces as friction).
+
+The `weakref.WeakSet` cleanup is automatic: a Runtime that goes
+out of scope without an explicit `close()` is silently removed
+from the live-set on the next GC pass. No `Runtime.close()`
+method is added — the framework's Runtime lifecycle stays as it
+was at v1.0.
 
 ### (c) `LLMBehavior.model` becomes `Optional[str]`
 
