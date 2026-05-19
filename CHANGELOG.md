@@ -15,13 +15,161 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 
 ## [Unreleased]
 
-Nothing yet. v1.1 scope is tracked in
-[CONTRACT.md § v1.1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md).
-v1.0.3 surfaces multiple v1.1 candidates (dict-form `output_schema=`,
-`on_failure=` callback on `run_goal()`, OpenAI tool-use translation,
-fire-once-on-condition aggregation triggers, pack-load-time
-cross-provider validation); a contract-review work item handles v1.1
-backlog consolidation.
+Nothing yet. v1.1 scope is tracked in `v1.1-plan.md` (consolidated by
+the post-v1.0.3 contract review). v1.0.4 surfaced two additional v1.1
+candidates: C-3 (lock the failure-routing convention for eval-time
+pattern failures and `ReplayDivergenceError`) and I-4 (cross-link
+`replay-divergence-error.md` to replay/fixture documentation).
+
+## [v1.0.4] — 2026-05-19
+
+Pre-launch foundation cleanup absorbing six small findings from the
+post-v1.0.3 contract review (see `CONTRACT-review-findings.md` §5).
+No abstraction changes, no new runtime capability, no new CI gate.
+Three documentation corrections, one additive API method, one test
+addition, one CONTRACT archeology restoration.
+
+The release also operationalizes the two Standing Rules adopted by
+the contract review banner: §1 (amendments append, never modify)
+shaped every v1.0.4 commit; §2 (tests anchor on the contract
+boundary, not the implementation's path) shaped the new tests for
+#1 and #4.
+
+### The six findings
+
+  v1.0.4 #1 — graph.relations(source=, target=, type=) canonical
+              filter API (mirrors v1.0.3 #1's graph.objects fix)
+  v1.0.4 #2 — per-error-page footer pointing at failure-model.md's
+              "Observing failures in caller code" (10 pages)
+  v1.0.4 #3 — WARNING-log vs BehaviorFailure field-name divergence
+              documented in failure-model.md
+  v1.0.4 #4 — boundary-anchored test for _requeue_unfired
+              zero-subscriber carve-out (Standing Rule §2 shape)
+  v1.0.4 #5 — review-overlay markers at v0 #11, v0 #16, v0.8 #19
+              for stale forward-pointer prose
+  v1.0.4 #6 — appended ### v1.0.2.post1 section to CONTRACT under
+              v1.0.2 #1, restoring archeology that v1.0.2.post1's
+              in-place revision destroyed
+
+### Added
+
+- **`Graph.relations(source=None, target=None, type=None) -> list[Relation]`
+  (v1.0.4 #1).** Canonical filter API on `Graph`. Three kwargs
+  compose by AND; no-kwargs returns every relation; the
+  source/target decomposition replaces the asymmetric
+  `direction="outgoing"|"incoming"|"both"` axis on the alias.
+  Eight filter combinations (each row of the table in CONTRACT
+  v1.0.4 #1) are the contract claim; each is covered by a
+  dedicated test in `tests/test_graph.py`.
+
+  Implementation note: the method is a direct projection over
+  `self._relations.values()`, not a wrapper over `get_relations`.
+  The underlying loop is six lines, and routing through the alias
+  would obscure the per-row contract claim that the tests anchor
+  on. The duplication trade is small; the readability win is the
+  point.
+
+- **`tests/test_requeue_unfired.py::test_zero_subscriber_event_ids_are_absent_from_requeue_set_on_load`
+  (v1.0.4 #4).** Boundary-anchored sibling to the existing
+  `queue_depth == 0` test. Asserts directly on the requeue set
+  (`rt._queue._q`) rather than the implementation's symptom.
+  Locks the v0.5 #8 carve-out at the contract boundary the
+  amendment names.
+
+### Changed
+
+- **`Graph.get_relations(...)` (v1.0.4 #1).** Kept as a
+  backward-compatible alias for `Graph.relations`. No deprecation
+  warning in v1.0.4; v1.1's Theme A (Graph/View harmonization)
+  owns the deprecation decision.
+
+### Documentation
+
+- **`docs/concepts/graph.md`** (v1.0.4 #1). The long-broken
+  line-43 reference `graph.relations(source=claim_id)` now
+  resolves to the new method. Three canonical-form examples
+  (`source=`, `target=`, `type=`) plus one line on the
+  `get_relations` alias.
+- **`docs/concepts/failure-model.md`** (v1.0.4 #3). Adds one
+  paragraph in the "Observing failures in caller code" section
+  naming the intentional field-name divergence between the
+  WARNING log (`error_type` / `error_message` — v0.8 #6 schema)
+  and `BehaviorFailure` (`exception_type` / `message` — Python
+  convention). Values are identical; only the names differ.
+- **`docs/reference/errors/*.md`** (v1.0.4 #2). Adds the fixed
+  one-line footer pointing at
+  `failure-model.md#observing-failures-in-caller-code` to the 10
+  per-error pages whose error classes route through
+  `behavior.failed` (identified by tracing each error class's
+  raise sites through the runtime emission path, not by guessing
+  from page titles). The 21 pages whose errors are raised at
+  decoration / registration / setup / lookup time do NOT get the
+  footer.
+
+### CONTRACT amendments
+
+- **v1.0.4 milestone added** with six amendments and a
+  "deliberately does NOT touch" section.
+- **`### v1.0.2.post1` subsection appended** as §(e)-equivalent
+  under v1.0.2 #1 (v1.0.4 #6). Documents the validation-boundary
+  correction (lazy-at-first-run → both binding moments), the
+  `_live.py` `weakref.WeakSet` mechanism, and cites
+  `tests/test_llm_default_model.py` Section (g) as the canonical
+  Standing Rule §2 model.
+- **Top-of-v1.0.2-#1 breadcrumb** updated in place to point at
+  the now-existing post1 section (the single in-place edit
+  Standing Rule §1 permits in v1.0.4, explicitly authorized by
+  the contract review).
+- **Three review-overlay markers added in place** at v0 #11,
+  v0 #16, v0.8 #19 (v1.0.4 #5). Original prose preserved
+  verbatim; each overlay is bracketed `[review overlay
+  2026-05-19: …]` so the layer boundary is explicit and
+  greppable by date.
+
+### v1.1 backlog (filed in `v1.1-plan.md`)
+
+- **C-3 — Lock failure-routing for eval-time pattern failures.**
+  Surfaced during v1.0.4 #2's audit. Most dispatch-time errors
+  route through `behavior.failed`; `ReplayDivergenceError` and
+  `UnsupportedPatternError` eval-time raises deliberately escape.
+  v1.1 should either keep the asymmetry and document the
+  carve-out criterion in CONTRACT, or route every dispatch-time
+  error uniformly. The current state is neither documented nor
+  locked.
+- **I-4 — Cross-link `replay-divergence-error.md` to
+  replay/fixture documentation.** The standard v1.0.4 #2 footer
+  doesn't apply to this page because the error deliberately
+  escapes rather than emitting `behavior.failed`. A different
+  cross-link is needed; phrasing depends on how C-3 resolves.
+
+### Migration from v1.0.3
+
+Forward-compatible. No code changes required.
+
+```bash
+pip install --upgrade activegraph==1.0.4
+```
+
+- `graph.get_relations(object_id=, type=, direction=)` keeps
+  working byte-identically; new code uses
+  `graph.relations(source=, target=, type=)`.
+- All v1.0.3 surfaces (Graph.objects, Runtime.errors,
+  BehaviorFailure, LLMMessage.tool_calls, WARNING log) are
+  unchanged.
+- All v1.0.2 / v1.0.2.post1 surfaces (LLMProvider.default_model,
+  recognizes_model, both-binding-moments validation) are
+  unchanged.
+
+### Provider non-promises in v1.0.4
+
+Inheriting v1.0.3 / v1.0.2 / v1.0.1 #5 (c). Specifically
+unchanged in this release:
+
+- `LLMProvider` Protocol stays at v1.0.2 #1's widened shape;
+  no further additions.
+- The closed CONTRACT v0.6 #11 reason taxonomy is unchanged.
+- The `behavior.failed` event payload, the WARNING log format,
+  and the `BehaviorFailure` shape stay byte-identical to v1.0.3.
 
 ## [v1.0.3] — 2026-05-19
 
