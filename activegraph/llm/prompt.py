@@ -213,12 +213,113 @@ def build_system_prompt(
 
     if output_schema_name and output_schema_json is not None:
         schema_block = json.dumps(output_schema_json, indent=2, sort_keys=True)
+        example = example_instance_from_schema(output_schema_json)
+        example_block = json.dumps(example, indent=2, sort_keys=True)
+        # v1.0.1: explicit "instance, not the schema" framing. The
+        # user-test surfaced that some models echo the JSON Schema
+        # definition back instead of an instance, triggering
+        # llm.schema_violation. Showing an example alongside the
+        # schema and naming the failure mode pulls the model toward
+        # the right shape.
         blocks.append(
             f"Respond with JSON that matches the `{output_schema_name}` "
-            f"schema:\n{schema_block}"
+            f"schema. Return an INSTANCE that conforms to this schema, "
+            f"NOT the schema itself.\n"
+            f"\n"
+            f"Schema:\n{schema_block}\n"
+            f"\n"
+            f"Example instance (the shape your response must take, with "
+            f"placeholder values — replace them with real values):\n"
+            f"{example_block}"
         )
 
     return "\n\n".join(blocks)
+
+
+def example_instance_from_schema(schema: dict[str, Any]) -> Any:
+    """Build a minimal example instance from a JSON Schema dict.
+
+    Used by :func:`build_system_prompt` to render an example
+    alongside the schema when ``output_schema=`` is set, so the model
+    has a concrete shape to mirror rather than only the abstract
+    schema (the user-test surfaced models echoing the schema back as
+    their response when only the schema was shown).
+
+    Walks the schema's ``type``, ``properties``, ``items``, ``enum``,
+    ``required``, and ``$defs`` keys; produces deterministic
+    placeholder values per type (``"<string>"``, ``0``, ``0.0``,
+    ``true``, ``[...]``, ``{...}``, ``null``). Unrecognized shapes
+    fall back to ``null``.
+    """
+    return _example_instance(schema, defs=schema.get("$defs") or schema.get("definitions") or {})
+
+
+_PLACEHOLDER_BY_TYPE = {
+    "string": "<string>",
+    "integer": 0,
+    "number": 0.0,
+    "boolean": True,
+    "null": None,
+}
+
+
+def _example_instance(node: Any, *, defs: dict[str, Any], depth: int = 0) -> Any:
+    """Recursive worker for :func:`example_instance_from_schema`.
+
+    Bounded recursion (``depth`` ceiling) keeps the example small for
+    deeply nested schemas; the placeholder values are deterministic so
+    snapshot tests over the system prompt stay stable.
+    """
+    if not isinstance(node, dict) or depth > 6:
+        return None
+
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        key = ref[len("#/$defs/"):]
+        target = defs.get(key)
+        if target is not None:
+            return _example_instance(target, defs=defs, depth=depth + 1)
+
+    enum_values = node.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        return enum_values[0]
+
+    const = node.get("const")
+    if const is not None:
+        return const
+
+    for variant_key in ("anyOf", "oneOf"):
+        variants = node.get(variant_key)
+        if isinstance(variants, list) and variants:
+            non_null = [v for v in variants if isinstance(v, dict) and v.get("type") != "null"]
+            choice = non_null[0] if non_null else variants[0]
+            return _example_instance(choice, defs=defs, depth=depth + 1)
+
+    schema_type = node.get("type")
+    if isinstance(schema_type, list):
+        non_null = [t for t in schema_type if t != "null"]
+        schema_type = non_null[0] if non_null else "null"
+
+    if schema_type == "object":
+        properties = node.get("properties") or {}
+        if not properties:
+            return {}
+        return {
+            name: _example_instance(spec, defs=defs, depth=depth + 1)
+            for name, spec in properties.items()
+        }
+
+    if schema_type == "array":
+        items = node.get("items") or {}
+        return [_example_instance(items, defs=defs, depth=depth + 1)]
+
+    if schema_type in _PLACEHOLDER_BY_TYPE:
+        return _PLACEHOLDER_BY_TYPE[schema_type]
+
+    if "properties" in node:
+        return _example_instance({"type": "object", **node}, defs=defs, depth=depth)
+
+    return None
 
 
 # ---------- user message ----------------------------------------------------
@@ -297,11 +398,15 @@ def build_instruction(
     if output_schema_name and creates:
         creates_str = ", ".join(sorted(set(creates)))
         return (
-            f"Return JSON matching the `{output_schema_name}` schema. "
+            f"Return a JSON instance of the `{output_schema_name}` schema "
+            f"(NOT the schema definition itself — see the example above). "
             f"Your output will be used to create objects of type: {creates_str}."
         )
     if output_schema_name:
-        return f"Return JSON matching the `{output_schema_name}` schema."
+        return (
+            f"Return a JSON instance of the `{output_schema_name}` schema "
+            f"(NOT the schema definition itself — see the example above)."
+        )
     if creates:
         creates_str = ", ".join(sorted(set(creates)))
         return (
