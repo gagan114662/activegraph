@@ -5659,6 +5659,245 @@ Restated here for `v1.1-plan.md`'s backlog:
    mechanical file-generation scope.
 
 
+# v1.0.5.post1 — pre-launch foundation: license switch and contribution surface
+
+Pre-launch foundation pass before the repository is flipped public.
+Three coupled deliverables: the licensing change drives the
+contribution policy; the contribution policy references the new
+license; the issue templates name the contribution policy. Bundled
+in one release because shipping any one without the others would
+leave a public repository in a half-stated posture.
+
+No framework code changes. No new public API. No reshape of any
+locked decision below v1.0.5. The release surface is repo-root
+metadata (`LICENSE`, `NOTICE`, `pyproject.toml`'s license field,
+`README.md`'s license section), contributor-facing prose
+(`CONTRIBUTING.md`), and the GitHub issue-template surface
+(`.github/ISSUE_TEMPLATE/`). Standing Rule §1 compliance: this
+section appends; no pre-banner prose is rewritten. Standing Rule §2
+compliance: `tests/test_license.py` anchors on the contract claim
+named below ("Active Graph is licensed under Apache 2.0 from
+v1.0.5.post1 forward"), not on any specific file's existence in
+isolation.
+
+## v1.0.5.post1 #1. License switches from MIT to Apache 2.0
+
+### The contract claim
+
+**Active Graph is licensed under the Apache License 2.0 from
+v1.0.5.post1 forward.** The previous declared license was MIT (as
+recorded in `pyproject.toml`'s `license = { text = "MIT" }` and
+the matching `License :: OSI Approved :: MIT License` classifier
+through v1.0.5). v1.0.5.post1 normalizes the declaration to the
+SPDX identifier `Apache-2.0`, ships the canonical Apache 2.0
+license text at the repository root for the first time, and adds
+the Apache-convention `NOTICE` file naming the copyright holder.
+
+### Pre-flip license-state finding
+
+A read-only diagnosis pass before this release surfaced that the
+framework had declared MIT in `pyproject.toml` and `README.md`
+through twelve milestones but had never shipped a `LICENSE` file
+at the repository root. This release is the first to land a
+canonical license text. The framing is therefore "switch the
+declared license to Apache 2.0 and ship the canonical text," not
+"replace existing MIT license text with Apache text" — there was
+no MIT text to replace.
+
+### Why Apache 2.0 over MIT
+
+Three reasons, each load-bearing for a framework about to be
+flipped public:
+
+1. **Explicit patent grant (§3 of the license).** MIT does not
+   include a patent grant. Active Graph's architecture carries
+   novel material — event-sourced reactive graph runtime, relation
+   behaviors, the binding-moment validation discipline locked
+   across v1.0.2 / v1.0.2.post1, the pack format. A framework
+   whose primitives are themselves the contribution surface needs
+   the patent grant to be unambiguous, both for the framework's
+   contributors and for downstream adopters building on its
+   abstractions.
+2. **Institutional standard for foundation-shaped projects.**
+   The Apache Software Foundation, CNCF, and LF AI all standardize
+   on Apache 2.0 for their hosted projects. Enterprise legal review
+   processes are calibrated against Apache 2.0; MIT often requires
+   a one-off justification pass at the same desks. The release
+   surface a contributor sees should match the license review
+   surface their employer's counsel expects.
+3. **Legal precision on trademark, contribution, and notice.**
+   Apache 2.0 §6 (Trademarks), §5 (Submission of Contributions),
+   and §4(d) (NOTICE file mechanics) name the boundaries that
+   MIT leaves implicit. The framework's discipline lives in named
+   boundaries — Standing Rule §1's append-vs-modify rule, Standing
+   Rule §2's contract-anchored tests. A license that names its
+   boundaries explicitly fits that discipline better than one
+   that does not.
+
+### Contribution licensing
+
+From v1.0.5.post1 forward, contributions submitted to Active
+Graph are received under Apache License 2.0 per Apache 2.0 §5
+("Submission of Contributions"). `CONTRIBUTING.md` carries the
+explicit inbound-equals-outbound statement at its License section.
+The implicit-by-§5 default is reinforced by the contributor-facing
+prose so a contributor reading either document arrives at the same
+licensing posture.
+
+The release deliberately does NOT add a CLA (Contributor License
+Agreement) or DCO (Developer Certificate of Origin) requirement.
+The Apache 2.0 §5 implicit grant is the contract; ceremony beyond
+that is filed for a v1.1 candidate if contribution volume ever
+makes the question concrete.
+
+### Repository-root metadata shape
+
+The new license surface lands as four files at the repo root:
+
+- **`LICENSE`** — the canonical Apache 2.0 text from
+  `https://www.apache.org/licenses/LICENSE-2.0.txt`, prefixed
+  with a single-line copyright header (`Copyright 2026 Yohei
+  Nakajima`). The text below the header is byte-identical to the
+  Apache Foundation's canonical plain-text version.
+- **`NOTICE`** — the Apache 2.0 §4(d) convention. Two lines:
+  the project name (`Active Graph`) and the copyright line
+  (`Copyright 2026 Yohei Nakajima`). The NOTICE file is the
+  attribution carrier that downstream redistributors must
+  preserve per §4(d).
+- **`pyproject.toml`** — the `[project]` table's `license =
+  { text = "MIT" }` becomes `license = "Apache-2.0"` (SPDX
+  identifier per PEP 639); the `License :: OSI Approved :: MIT
+  License` classifier is removed (PEP 639 mandates removal of
+  `License ::` classifiers when the SPDX form is used). The
+  setuptools build backend on `>=68` (already declared) supports
+  the SPDX form.
+- **`README.md`** — the `## License` section's "MIT." line
+  becomes the Apache 2.0 reference. One sentence; the LICENSE
+  file carries the legal text.
+
+### Contribution policy and issue templates
+
+Coupled deliverables under the same release:
+
+- **`CONTRIBUTING.md`** — issues-first contribution policy for
+  the framework's early public phase. Issues are open; code PRs
+  are maintainer-only with an issue-first discussion gate;
+  documentation PRs may be opened directly. Names the policy as a
+  pre-launch posture that relaxes as the contributor community
+  matures, not as a permanent stance. The community-tooling
+  paragraph references planned community-management
+  infrastructure built on Active Graph itself without committing
+  to a specific URL or launch date — those details land when the
+  tooling ships.
+- **`.github/ISSUE_TEMPLATE/bug_report.md`**,
+  **`feature_request.md`**, **`question.md`** — three structured
+  templates that prompt for the information that makes a triage
+  pass deterministic (reproduction, framework version, Python
+  version, OS for bugs; problem statement and current workaround
+  for feature requests; what-tried and what-expected for
+  questions). Each template heads with a one-line pointer to
+  `docs.activegraph.ai` and `CONTRIBUTING.md` so a contributor
+  who opens a template still hits the docs and policy surface
+  before filing.
+- **`.github/ISSUE_TEMPLATE/config.yml`** — disables blank
+  issues (`blank_issues_enabled: false`) and surfaces the docs
+  site as a contact link. Forces every issue through one of the
+  three templates; fits the project's discipline-first voice.
+
+### Tests (Standing Rule §2)
+
+`tests/test_license.py` is the contract anchor for v1.0.5.post1 #1.
+The test anchors on the boundary the amendment names ("Active
+Graph is licensed under Apache 2.0 from v1.0.5.post1 forward") by
+asserting the joint state of every surface the claim binds:
+
+1. **`LICENSE` carries Apache 2.0 canonical text** — asserts the
+   `Apache License` + `Version 2.0, January 2004` heading lines
+   appear in `LICENSE`, plus the §3 ("Grant of Patent License")
+   section header. The patent-grant assertion is load-bearing
+   because the patent grant is the named reason for the switch;
+   a future LICENSE that loses the patent-grant section would
+   silently violate the contract claim.
+2. **`NOTICE` carries the project name and copyright line** —
+   asserts both `Active Graph` and the `Copyright 2026 Yohei
+   Nakajima` line appear, per the Apache 2.0 §4(d) convention.
+3. **`pyproject.toml`'s license field reads SPDX `Apache-2.0`**
+   — asserts the `[project]` table's `license` key resolves to
+   the SPDX string. Any drift back to `{ text = "MIT" }` or to
+   another SPDX identifier breaks this anchor.
+4. **No `License :: OSI Approved ::` classifier remains in
+   `pyproject.toml`** — PEP 639 requires removal of `License ::`
+   classifiers when the SPDX form is used; the assertion guards
+   against a re-introduction.
+5. **`README.md`'s license section names Apache 2.0** —
+   asserts the `## License` section body references `Apache
+   License 2.0` and `LICENSE`. Catches a documentation drift back
+   to "MIT" in the public-facing surface.
+
+The test does not enumerate every byte of LICENSE because the
+contract claim is "the framework ships under Apache 2.0," not "the
+LICENSE file is byte-identical to the canonical Apache text." A
+future trailing-newline adjustment or copyright-header rewording
+should not fail the gate; a license-identity change should.
+
+### Migration
+
+Forward-compatible for downstream users. The runtime API is
+unchanged. The PyPI metadata reports `Apache-2.0` for v1.0.5.post1
+onward; redistributors should update their license-tracking
+metadata accordingly.
+
+## v1.0.5.post1 deliberately does NOT touch
+
+The pre-launch foundation pass is bounded. Out of scope:
+
+- **No CLA or DCO requirement.** Apache 2.0 §5's implicit grant
+  is the contract. Filed as a v1.1 candidate if contribution
+  volume makes the question concrete.
+- **No `CODE_OF_CONDUCT.md`.** The contact channel that
+  Contributor Covenant (the standard choice) requires for
+  reporting is not yet established. Filed as a v1.1 candidate
+  paired with the contact-channel decision.
+- **No relicensing of historical commits.** All commits through
+  v1.0.5 were authored by the project owner or by Claude on the
+  project owner's instruction (no third-party contributions have
+  shipped). The license change is forward-effective from
+  v1.0.5.post1; pre-existing source carries the new license under
+  the standard owner-relicensing-own-work pattern. Documented
+  here so a future external audit of the commit history finds the
+  relicensing event named.
+- **No per-source-file license header.** Apache 2.0 §4 does not
+  require per-file headers; the LICENSE + NOTICE pair at the
+  repo root carries the attribution. Per-file headers can be
+  added in a mechanical pass later if downstream redistribution
+  patterns require them; the boundary the contract claim names
+  is "the framework is licensed under Apache 2.0," and the
+  repo-root pair satisfies that boundary.
+- **No changes to the framework runtime, public API, error
+  hierarchy, doc-site content, or any code under `activegraph/`.**
+- **No reshape of any locked decision below v1.0.5.** Every
+  surface from v1.0 through v1.0.5 stays byte-identical.
+
+### v1.1 candidates surfaced by v1.0.5.post1
+
+Restated here for `v1.1-plan.md`'s backlog:
+
+1. **CLA / DCO decision.** Apache 2.0 §5's implicit grant covers
+   the contract today; if contribution volume grows past the
+   maintainer-review bandwidth or if enterprise legal desks
+   request the ceremony, decide between a CLA (with a signing
+   workflow) and a DCO (the `Signed-off-by:` discipline). v1.1
+   work, not v1.0.5.post1.
+2. **`CODE_OF_CONDUCT.md` paired with a contact channel.**
+   Contributor Covenant v2.1 is the standard text; the missing
+   piece is the contact channel for reports. v1.1 picks both up
+   together — the document and the inbox.
+3. **Relax the issues-first contribution policy.** The
+   CONTRIBUTING.md policy is explicitly a pre-launch posture; the
+   v1.1 milestone owns the decision to broaden it based on actual
+   contribution patterns observed during v1.0.x's public window.
+
+
 # v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
 
 **Review status (2026-05-19):** RELOCATED. The post-v1.0.3 contract

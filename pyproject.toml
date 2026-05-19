@@ -1,21 +1,24 @@
 [build-system]
-requires = ["setuptools>=68"]
+# setuptools >= 77.0.3 is required for PEP 639 SPDX license metadata
+# (`license = "Apache-2.0"`, `license-files = [...]`). v1.0.5.post1
+# switches to the SPDX form per CONTRACT v1.0.5.post1 #1.
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "activegraph"
-version = "1.0.5"
+version = "1.0.5.post1"
 description = "An event-sourced reactive graph runtime for long-running, auditable, agentic systems."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Active Graph contributors" }]
 keywords = ["graph", "agents", "event-sourcing", "runtime"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Development Status :: 3 - Alpha",
 ]

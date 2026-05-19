@@ -239,13 +239,17 @@ Roadmap items planned for v1.1 are tracked in
 
 ## License
 
-MIT.
+Active Graph is licensed under the Apache License 2.0. See
+[LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for
+the attribution that downstream redistributors must preserve.
 
 ## Contributing
 
-The core runtime stays small and sharp. Contributions to packs,
-backends, and LLM integrations are especially welcome. Open an issue
-before large changes — the abstractions are still settling.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the current contribution
+policy. The framework is in its early public phase: issues are open,
+documentation PRs are welcome, code PRs are maintainer-only with an
+issue-first discussion gate (the abstractions are still settling).
+The policy relaxes as the contributor community matures.
 
 **Test discipline:** tests must remain deterministic. No live network
 calls in CI. LLM and tool tests use recorded fixtures
