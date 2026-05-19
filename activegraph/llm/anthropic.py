@@ -257,7 +257,13 @@ def _message_to_anthropic(m: LLMMessage) -> dict[str, Any]:
 
     For role="tool", Anthropic wants a "user" message with a
     `tool_result` content block. For role in {"user","assistant"} the
-    standard {role, content: str} shape works.
+    standard {role, content: str} shape works — except for the
+    multi-turn tool-use case (v1.0.3 #4), where an assistant message
+    that triggered tool_use must echo back its full content blocks
+    (text + tool_use) so the subsequent user tool_result blocks
+    reference matching tool_use_ids in the preceding assistant turn.
+    Direct Anthropic API access tolerated raw_text-only echo; the
+    Vertex AI proxy enforces the spec strictly and 400s without it.
     """
     if m.role == "tool":
         return {
@@ -270,6 +276,20 @@ def _message_to_anthropic(m: LLMMessage) -> dict[str, Any]:
                 }
             ],
         }
+    if m.role == "assistant" and m.tool_calls:
+        blocks: list[dict[str, Any]] = []
+        if m.content:
+            blocks.append({"type": "text", "text": m.content})
+        for tc in m.tool_calls:
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": dict(tc.args),
+                }
+            )
+        return {"role": "assistant", "content": blocks}
     return {"role": m.role, "content": m.content}
 
 

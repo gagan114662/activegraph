@@ -1043,14 +1043,22 @@ class Runtime:
                 break
 
             # Tool calls. Append the assistant turn to messages, then
-            # dispatch each tool. Anthropic's assistant turn that
-            # triggers tool_use carries the model's reasoning text plus
-            # the tool_use blocks; we approximate by including raw_text
-            # (may be empty) — the providers' adapters handle the rest.
-            if turn_response.raw_text:
-                running_messages.append(
-                    LLMMessage(role="assistant", content=turn_response.raw_text)
+            # dispatch each tool. v1.0.3 #4: the assistant turn must
+            # carry both the text and the tool_use blocks. Anthropic
+            # requires every following tool_result block to reference
+            # a tool_use_id from the preceding assistant message; the
+            # Vertex AI proxy enforces this strictly (HTTP 400 without
+            # matching blocks), and the direct API tolerates the raw-
+            # text-only form for now but is expected to tighten. The
+            # provider adapter reconstructs the wire-format content
+            # blocks from `tool_calls`.
+            running_messages.append(
+                LLMMessage(
+                    role="assistant",
+                    content=turn_response.raw_text or "",
+                    tool_calls=tuple(response_tool_calls),
                 )
+            )
             for call in response_tool_calls:
                 # CONTRACT v0.7 #6: budget enforcement BEFORE invocation
                 # so an exhausted budget fails the behavior, doesn't

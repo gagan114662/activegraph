@@ -43,12 +43,20 @@ class LLMMessage:
     CONTRACT v0.7: a `role="tool"` message echoes a tool result back to
     the model. `tool_use_id` ties it to the originating tool_use block
     from the previous assistant turn.
+
+    CONTRACT v1.0.3 #4: when an assistant message echoes a turn that
+    triggered tool_use, the originating ToolCall objects travel
+    alongside the raw text via `tool_calls`. The provider adapter
+    reconstructs the wire-format content blocks on the way out. None
+    on every other message shape — single-turn fixtures and zero-tool
+    assistant messages keep their byte-identical serialization.
     """
 
     role: Role
     content: str
     tool_use_id: Optional[str] = None
     tool_name: Optional[str] = None
+    tool_calls: Optional[tuple["ToolCall", ...]] = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"role": self.role, "content": self.content}
@@ -56,6 +64,10 @@ class LLMMessage:
             out["tool_use_id"] = self.tool_use_id
         if self.tool_name is not None:
             out["tool_name"] = self.tool_name
+        # v1.0.3 #4: only emit `tool_calls` when present so recorded-
+        # fixture hashes for single-turn flows stay byte-identical.
+        if self.tool_calls is not None:
+            out["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
         return out
 
 
