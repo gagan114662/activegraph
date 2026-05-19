@@ -457,6 +457,53 @@ Pure documentation pass; CONTRACT prose preserved underneath.
 
 **Estimated scope**: small.
 
+### v1.0.4 #6 — Append a proper `### v1.0.2.post1` amendment section to CONTRACT
+
+**Source**: Section 7 #1 (discipline finding); the CONTRACT banner
+also names this as the retroactive case for Standing rule §1
+("amendments append, never modify").
+
+The v1.0.2.post1 release corrected the v1.0.2 #1(b) validation
+boundary (lazy → both binding moments). The CHANGELOG carries a
+dated `[v1.0.2.post1]` entry. The CONTRACT did not — v1.0.2.post1
+revised v1.0.2 #1(b)'s prose in place without appending a new
+section.
+
+This review added two interim breadcrumbs (a retroactive-revision
+note at the top of v1.0.2 #1; an in-place marker at §(b)).
+v1.0.4 #6 lands the proper fix: append a `### v1.0.2.post1`
+amendment section to CONTRACT, sitting between v1.0.2 and v1.0.3,
+that records:
+
+- The boundary correction (registration-time → both binding
+  moments: `Runtime(...)` construction AND `@llm_behavior` /
+  `register()` decoration when one or more Runtimes are alive
+  via the `weakref.WeakSet`).
+- Why the original was wrong (the boundary the contract named
+  was not the boundary the implementation fired at).
+- The `_live.py` module that factored the single-behavior
+  validator out of the bulk path.
+- A back-pointer to the in-place revision discipline gap
+  (Standing rule §1) so the discipline note has its own home in
+  CONTRACT, not just in this review document.
+- A reference to the post1 tests in
+  `tests/test_llm_default_model.py` Section (g) as the
+  canonical model for boundary-anchored tests under
+  Standing rule §2.
+
+After the section lands, the two interim breadcrumbs (the
+retroactive-revision note at the top of v1.0.2 #1, the in-place
+marker at §(b)) update to point at the new section directly. The
+corrected `(b)` prose itself does not change — it carries the
+post1-correct text already.
+
+This is a documentation-only change. Pure addition; no code
+moves; no other amendment touched. Lands before v1.0.4 ships so
+the archeological record is restored before the next public
+release.
+
+**Estimated scope**: small.
+
 ---
 
 ## Section 6 — New v1.1 candidates surfaced
@@ -646,5 +693,7 @@ cycles since v1.0 final have not undone the discipline; they have
 extended it. The findings here are the next iteration's input,
 not a verdict on the cycle so far.
 
-Next: v1.0.4 (the five candidates in Section 5), then a fresh
-session decides v1.1 scope using `v1.1-plan.md`.
+Next: v1.0.4 (the six candidates in Section 5, including the
+§7 #1 retroactive-revision follow-on appended after this review's
+post-draft pass), then a fresh session decides v1.1 scope using
+`v1.1-plan.md`.

@@ -13,19 +13,77 @@ review produced two companion deliverables:
   bodies; each deferral reads "Filed in v1.1-plan.md" and points at
   one entry.
 
-The review did **not** rewrite this document. It added:
+### Document semantics: this banner is a status overlay, not a rewrite
+
+The review added, but did not rewrite, the following:
 
 - This preamble banner.
-- Per-section status markers immediately after each milestone
-  header (`Review status:`) summarizing the audit outcome at that
-  level. The default outcome is **STILL ACCURATE**; departures are
-  surfaced inline.
+- Per-milestone `Review status:` markers immediately after each
+  milestone header. The default outcome is **STILL ACCURATE**;
+  departures are surfaced inline.
 - One in-place marker at v1.0.2 #1(b) recording that the prose was
-  revised by v1.0.2.post1 (see the findings document §7 #1 for the
-  discipline note on in-place revisions).
+  revised by v1.0.2.post1 (see standing rule §1 below).
+
+**Pre-banner content is the original archeological record** — every
+amendment from v0 through v1.0.3 reads as it did when locked
+(modulo the v1.0.2 #1(b) in-place revision that this review
+flagged). **Post-banner annotations are the May 2026 review
+overlay** — `Review status:` markers and "Filed in v1.1-plan.md"
+pointers were appended, never substituted in for prior prose.
+
+A future reader should treat the two layers separately. The
+archeology answers "what was decided when"; the overlay answers
+"how does that decision read now."
+
+### Standing rules adopted by this review
+
+The review surfaced two process gaps that are now standing rules
+for every future amendment cycle. These are framework-discipline
+rules, not project-management rules; they apply to every
+CONTRACT amendment from this banner forward.
+
+**Standing rule §1 — Amendments append, never modify.** When a
+post-release amendment changes or corrects an earlier amendment's
+wording, the amendment is appended as a new dated section under
+(or alongside) the original — never folded in by editing the
+prior section's prose. Editing in place destroys the boundary
+record: a future reader of the contract alone cannot reconstruct
+when the change happened or what was changed. The CHANGELOG carries
+shipping dates; CONTRACT carries decision provenance. Both
+matter; neither replaces the other.
+
+This rule is retroactive in one specific case: v1.0.2 #1(b) was
+revised in place by v1.0.2.post1. A v1.0.4 candidate (review §5
+#6) appends a proper `### v1.0.2.post1` section to CONTRACT to
+restore the archeological record without rewriting the corrected
+prose. The in-place marker added by this review is the
+interim measure.
+
+**Standing rule §2 — Tests anchor on the boundary the contract
+names, not the implementation's path.** When an amendment locks a
+boundary ("at registration time," "before any state mutation," "on
+load," "at decoration time," "after the pack is loaded"), the
+test suite for that amendment must exercise the boundary the
+contract names — not whatever path the implementation happens to
+take through that boundary. Two boundary-mismatch bugs have shipped
+under this gap (v0.5 #8's `_requeue_unfired`; v1.0.2 #1(b)'s lazy
+validation); the v1.0.2.post1 tests in
+`tests/test_llm_default_model.py` Section (g) are the canonical
+model. The future-proof shape: every test naming a binding moment
+in its name AND asserting the contract behavior fires at that
+specific moment.
+
+A spec-vs-impl drift gate (v1.1 candidate D-1 / D-2) is the
+mechanical complement to this discipline. Automated checking
+catches what amendment-cycle discipline alone cannot.
+
+### What this review did not change
 
 No code changed in this pass. Code-shaped findings are filed as
 v1.0.4 candidates (review §5) or v1.1 candidates (`v1.1-plan.md`).
+No amendment was retired. No amendment was rewritten to make a
+different claim than its original; "STILL ACCURATE" is the
+overwhelming verdict.
 
 ---
 
@@ -4275,6 +4333,26 @@ credibility hits on the v1.0.1 announcement; the default-model
 mismatch is.
 
 ## v1.0.2 #1. `@llm_behavior(model=)` defaults to the provider's default model
+
+> **Retroactive revision note (added 2026-05-19 by the post-v1.0.3
+> contract review).** This section's prose was revised in place by
+> v1.0.2.post1 (CHANGELOG dated 2026-05-19) when an external
+> spot-check discovered the v1.0.2 implementation fired the
+> validation lazily at first `run_goal()` rather than at
+> registration time as the original v1.0.2 #1(b) text claimed. The
+> "both binding moments" wording carried in §(b) below is the
+> post1-corrected form, not the original v1.0.2 lock.
+>
+> The CHANGELOG carries the dated v1.0.2.post1 entry with the full
+> boundary-correction record. v1.0.4 candidate §5 #6 (review) will
+> append a proper `### v1.0.2.post1` amendment section to CONTRACT
+> so the archeology is restored without further rewriting the
+> corrected prose. Until that lands, this note is the breadcrumb;
+> the in-place marker under §(b) is the second breadcrumb at the
+> specific revision site.
+>
+> Standing rule §1 (banner) prevents this pattern from recurring:
+> amendments append, never modify.
 
 The `LLMProvider` Protocol gains two additive surfaces. v1.0.1 #5
 locked "additions are non-breaking"; v1.0.2 #1 invokes that clause
