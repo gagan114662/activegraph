@@ -129,6 +129,104 @@ def test_query_alias_still_works_with_positional_arg():
     assert {o.type for o in g.query("claim")} == {"claim"}
 
 
+# v1.0.4 #1: graph.relations(source=, target=, type=) as the canonical
+# filter API, decomposing the v0 get_relations(object_id=, direction=)
+# axis into separate source/target slots. The contract claim is the
+# eight filter combinations enumerated in CONTRACT v1.0.4 #1; the tests
+# anchor on each combination directly, not on equivalence to the alias.
+# The alias-still-works check is its own test.
+
+
+def _three_node_graph():
+    g = _g()
+    a = g.add_object("task", {"k": "a"})
+    b = g.add_object("task", {"k": "b"})
+    c = g.add_object("task", {"k": "c"})
+    rel_ab_dep = g.add_relation(a.id, b.id, "depends_on")
+    rel_ac_dep = g.add_relation(a.id, c.id, "depends_on")
+    rel_bc_blk = g.add_relation(b.id, c.id, "blocks")
+    rel_ba_dep = g.add_relation(b.id, a.id, "depends_on")
+    return g, a, b, c, rel_ab_dep, rel_ac_dep, rel_bc_blk, rel_ba_dep
+
+
+def test_relations_no_kwargs_returns_every_relation():
+    # Contract row 1: (None, None, None) -> every relation.
+    g, _, _, _, *rels = _three_node_graph()
+    out = g.relations()
+    assert {r.id for r in out} == {r.id for r in rels}
+
+
+def test_relations_source_only_returns_outgoing_from_source():
+    # Contract row 2: (A, None, None) -> relations where source == A.
+    g, a, b, c, rel_ab, rel_ac, _, _ = _three_node_graph()
+    out = g.relations(source=a.id)
+    assert {r.id for r in out} == {rel_ab.id, rel_ac.id}
+    assert all(r.source == a.id for r in out)
+
+
+def test_relations_target_only_returns_incoming_to_target():
+    # Contract row 3: (None, B, None) -> relations where target == B.
+    g, a, b, c, rel_ab, _, _, _ = _three_node_graph()
+    out = g.relations(target=b.id)
+    assert {r.id for r in out} == {rel_ab.id}
+    assert all(r.target == b.id for r in out)
+
+
+def test_relations_source_and_target_returns_intersection():
+    # Contract row 4: (A, B, None) -> relations from A to B.
+    g, a, b, c, rel_ab, _, _, rel_ba = _three_node_graph()
+    out = g.relations(source=a.id, target=b.id)
+    assert {r.id for r in out} == {rel_ab.id}
+    # Not the reverse direction.
+    assert rel_ba.id not in {r.id for r in out}
+
+
+def test_relations_type_only_returns_every_relation_of_type():
+    # Contract row 5: (None, None, T) -> every relation of type T.
+    g, *_, rel_bc_blk, _ = _three_node_graph()
+    out = g.relations(type="blocks")
+    assert {r.id for r in out} == {rel_bc_blk.id}
+    assert all(r.type == "blocks" for r in out)
+
+
+def test_relations_source_and_type_returns_outgoing_of_type():
+    # Contract row 6: (A, None, T) -> relations from A of type T.
+    g, a, _, _, rel_ab, rel_ac, _, _ = _three_node_graph()
+    out = g.relations(source=a.id, type="depends_on")
+    assert {r.id for r in out} == {rel_ab.id, rel_ac.id}
+
+
+def test_relations_target_and_type_returns_incoming_of_type():
+    # Contract row 7: (None, B, T) -> relations to B of type T.
+    g, a, b, _, rel_ab, _, _, _ = _three_node_graph()
+    out = g.relations(target=b.id, type="depends_on")
+    assert {r.id for r in out} == {rel_ab.id}
+
+
+def test_relations_source_target_and_type_most_specific():
+    # Contract row 8: (A, B, T) -> relations from A to B of type T.
+    g, a, b, _, rel_ab, _, _, rel_ba = _three_node_graph()
+    out = g.relations(source=a.id, target=b.id, type="depends_on")
+    assert {r.id for r in out} == {rel_ab.id}
+    # Different-direction same-type relation is excluded.
+    assert rel_ba.id not in {r.id for r in out}
+    # Wrong-type from A->B does not exist; sanity check empty for a wrong type.
+    assert g.relations(source=a.id, target=b.id, type="blocks") == []
+
+
+def test_get_relations_alias_still_works():
+    # Backward-compat: the v0 shape continues to work byte-identically.
+    # This is the alias relationship, not the contract claim — kept as
+    # its own test per CONTRACT v1.0.4 #1's Standing Rule §2 carve-out.
+    g, a, b, c, rel_ab, rel_ac, _, rel_ba = _three_node_graph()
+    out = g.get_relations(object_id=a.id, direction="outgoing")
+    assert {r.id for r in out} == {rel_ab.id, rel_ac.id}
+    incoming = g.get_relations(object_id=a.id, direction="incoming")
+    assert {r.id for r in incoming} == {rel_ba.id}
+    both = g.get_relations(object_id=a.id, direction="both")
+    assert {r.id for r in both} == {rel_ab.id, rel_ac.id, rel_ba.id}
+
+
 def test_neighborhood_walks_to_depth():
     g = _g()
     a = g.add_object("task", {})
