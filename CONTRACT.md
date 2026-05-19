@@ -4228,11 +4228,23 @@ deserialize cleanly (string values still load); behaviors freshly
 decorated at v1.0.2 get `None` until the runtime stamps a default.
 
 `LLMBehavior.build_prompt(event, graph)` keeps its v0.6 #20
-contract: pure, no I/O, cheap. If a caller invokes it on a
-behavior whose `model` is still `None` (no runtime registration
-happened yet), it raises a clear `ValueError` naming the cause —
-"Pass `Runtime(..., llm_provider=...)` to resolve the default, or
-set `behavior.model='...'` explicitly before calling build_prompt."
+contract: pure, no I/O, cheap, callable without a Runtime. When
+called on a behavior whose `model` is still `None`, it falls back
+to the v1.0.1 hardcoded default (`"claude-sonnet-4-5"`) for
+inspection-time hash stability. Real LLM calls always flow through
+Runtime, which resolves the configured provider's `default_model`
+*before* prompt assembly — so the inspection-time fallback only
+shows up when there's no Runtime to consult. Pre-v1.0.2 snapshot
+tests that asserted `prompt.model == "claude-sonnet-4-5"` keep
+passing.
+
+The fallback in `build_prompt` is documented behavior, not a
+hidden coupling: a user inspecting `build_prompt(...)` output to
+preview what would be sent in production should construct the
+Runtime they actually use first, so the inspection sees the
+resolved model. The fallback exists so the v0.6 #20 "callable
+without a Runtime" contract still holds for snapshot-testing and
+debugging flows that don't construct one.
 
 ### (d) Why this is a Protocol widening, not a v0.6 #3 amendment
 

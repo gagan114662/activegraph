@@ -147,7 +147,7 @@ def llm_behavior(
     on: Optional[list[str]] = None,
     where: Optional[dict[str, Any]] = None,
     description: str = "",
-    model: str = "claude-sonnet-4-5",
+    model: Optional[str] = None,
     output_schema: Optional[type] = None,
     view: Optional[dict[str, Any]] = None,
     creates: Optional[list[str]] = None,
@@ -176,6 +176,19 @@ def llm_behavior(
 
     Keyword-only on purpose — `@llm_behavior` carries enough
     parameters that positional binding would be a footgun.
+
+    ``model=`` is optional (v1.0.2 #1). Omitted, the runtime resolves
+    it to the configured provider's ``default_model`` at registration
+    time — ``"claude-sonnet-4-5"`` for ``AnthropicProvider``,
+    ``"gpt-4o-mini"`` for ``OpenAIProvider``. Passing an explicit
+    model string still works byte-identically; the runtime additionally
+    validates the name against the configured provider's
+    ``recognizes_model()`` and raises
+    :class:`InvalidRuntimeConfiguration` at registration time if the
+    name belongs to a different shipped provider's family (e.g.
+    ``model="gpt-4o-mini"`` on a runtime configured with
+    ``AnthropicProvider``). Names no shipped provider recognizes
+    (custom or fine-tuned models) pass through silently.
 
     `prompt_template=` is the only escape hatch from the
     runtime-assembled prompt. It is a `str.format`-style template that

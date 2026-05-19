@@ -40,6 +40,14 @@ class ScriptedProvider:
     call_log: list[dict] = field(default_factory=list)
     token_count_log: list[dict] = field(default_factory=list)
     fixed_cost: Decimal = Decimal("0.0012")
+    # v1.0.2 #1: tests that omit model= on @llm_behavior get this default.
+    # Match the historical default so snapshots stay byte-identical.
+    default_model: str = "claude-sonnet-4-5"
+
+    def recognizes_model(self, name: str) -> bool:
+        # Permissive: test provider claims any name so cross-provider
+        # validation doesn't fire on test fixtures with arbitrary names.
+        return True
 
     def complete(
         self,
@@ -110,6 +118,12 @@ class FailingProvider:
 
     Lets tests exercise the network/rate-limit/parse failure mappings.
     """
+
+    # v1.0.2 #1: see ScriptedProvider above.
+    default_model: str = "claude-sonnet-4-5"
+
+    def recognizes_model(self, name: str) -> bool:
+        return True
 
     def __init__(self, exc: BaseException, *, count_tokens_raises: bool = False):
         self.exc = exc
