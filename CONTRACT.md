@@ -4344,12 +4344,13 @@ mismatch is.
 > post1-corrected form, not the original v1.0.2 lock.
 >
 > The CHANGELOG carries the dated v1.0.2.post1 entry with the full
-> boundary-correction record. v1.0.4 candidate §5 #6 (review) will
-> append a proper `### v1.0.2.post1` amendment section to CONTRACT
-> so the archeology is restored without further rewriting the
-> corrected prose. Until that lands, this note is the breadcrumb;
-> the in-place marker under §(b) is the second breadcrumb at the
-> specific revision site.
+> boundary-correction record. CONTRACT now carries the dated
+> `### v1.0.2.post1` section below (appended retroactively in
+> v1.0.4 #6), sibling to §(a)–§(d); the archeology is restored
+> there without further rewriting the corrected prose. This
+> top-of-section note remains as the breadcrumb; the in-place
+> marker under §(b) is the second breadcrumb at the specific
+> revision site.
 >
 > Standing rule §1 (banner) prevents this pattern from recurring:
 > amendments append, never modify.
@@ -4497,6 +4498,104 @@ because Protocol attribute checks against `runtime_checkable` only
 consider members that don't have `default` implementations in the
 Protocol body. The new members are declared as optional attribute
 + method shapes; runtime call sites guard with getattr.
+
+### v1.0.2.post1 — validation boundary correction (appended retroactively 2026-05-19 in v1.0.4 #6)
+
+v1.0.2 #1(b) above (post1-corrected form) names "both binding
+moments" as the boundary at which cross-provider model validation
+fires. That phrasing did not appear in the original v1.0.2 lock —
+the original (b) text said "at registration time," and the v1.0.2
+implementation fired the validation lazily at first `run_goal()` /
+`run_until_idle()` / `run_until()` via `Runtime._ensure_registry()`.
+Both the contract's boundary name and the implementation's boundary
+were wrong: the contract said one thing, the code did another, and
+the v1.0.2 test suite covered the lazy-firing path the implementation
+took rather than the registration-time boundary the contract
+claimed. An external spot-check during v1.0.2 caught the gap.
+
+v1.0.2.post1 (CHANGELOG dated 2026-05-19, PR #16) corrected the
+boundary in the code. The error class, the structured error
+message, and the reason were left byte-identical to v1.0.2 — only
+the firing boundary moved. This appended section documents the
+boundary correction in CONTRACT form. Standing Rule §1 from the
+post-v1.0.3 review banner codified the discipline this section
+embodies: amendments append, never modify. The (b) prose above
+carries the post1-corrected text by virtue of having been revised
+in place at v1.0.2.post1 time, before Standing Rule §1 was
+established; this appended section is the proper archeological
+record that should have landed alongside the post1 release.
+
+**The boundary correction.** Validation fires at both binding
+moments — whichever sees both the provider and the behavior present
+first — rather than lazily at first `run_goal`:
+
+1. **`Runtime(graph, llm_provider=...)` construction** validates
+   against every behavior currently in the global registry, every
+   explicit `behaviors=[...]` argument, and every pack behavior
+   loaded subsequently via `runtime.load_pack(...)`. This catches
+   the import-then-construct pattern: decorators run on import,
+   `Runtime(...)` is constructed afterwards.
+2. **`@llm_behavior` decoration and `register()`** validate against
+   every live Runtime's provider via a module-level
+   `weakref.WeakSet` in `activegraph/runtime/_live.py`. This catches
+   the construct-then-decorate pattern: `Runtime(...)` is
+   constructed first against an empty registry, decorators run
+   afterwards — the README quickstart shape.
+
+Both moments invoke the same single-behavior cross-provider
+validator factored into `_live.py`. The lazy-at-first-run path
+inside `Runtime._ensure_registry()` remains as a defensive
+double-check for code paths that bypass both binding moments above
+(notably pack-loaded behaviors registered after Runtime
+construction, which fall through to first-run validation; filed as
+a v1.1 candidate under Theme B in `v1.1-plan.md`).
+
+**The `weakref.WeakSet` pattern.** Live Runtimes are tracked in a
+module-level `WeakSet` declared in `_live.py`. A Runtime that goes
+out of scope without an explicit `close()` is silently removed on
+the next GC pass — no `Runtime.close()` method is added; the
+framework's Runtime lifecycle stays as it was at v1.0. Validation
+runs *before* the new Runtime is added to the WeakSet, so a
+construction that raises `InvalidRuntimeConfiguration` never leaks
+into the live-set (matters for pytest exception-traceback
+strong-refs, which would otherwise keep a failed Runtime visible
+to subsequent `@llm_behavior` decorations in the same test
+process).
+
+**Why this section appends rather than revising further.** The
+original v1.0.2 #1(b) text said "at registration time" and the
+v1.0.2 implementation fired lazily. v1.0.2.post1 revised the (b)
+prose in place to read "at both binding moments" so the contract
+claim matched the corrected code. In-place revision destroyed the
+boundary record — a reader of CONTRACT alone could not see when
+the change happened or what it was correcting. Standing Rule §1
+(banner) was adopted by the post-v1.0.3 contract review to
+prevent this pattern from recurring; this appended section is the
+retroactive restoration the rule explicitly names.
+
+**Tests anchor on each binding moment by name.** The post1 test
+suite at `tests/test_llm_default_model.py` Section (g) exercises
+each binding moment separately. The seven scenarios — decorator-
+after-Runtime raises at decoration time, register-after-Runtime
+raises at register time, Runtime construction validates against
+the registry, failed construction does not leak into the
+live-set, two Runtimes with different providers both participate,
+fork inherits parent provider as a no-op on the happy path, and
+the README construct-then-decorate quickstart pattern — together
+form the canonical model for Standing Rule §2: each test's name
+carries the binding moment; each assertion exercises the boundary
+the contract claim names; the suite would fail under the v1.0.2
+lazy-firing implementation regardless of whether the lazy path's
+own tests passed.
+
+**What this section does not change.** The
+`InvalidRuntimeConfiguration` error class, the structured message
+format, the naming of both providers in the diagnostic, the
+recognition predicates
+(`AnthropicProvider.recognizes_model` / `OpenAIProvider.recognizes_model`),
+and `LLMBehavior.model`'s `Optional[str]` type are byte-identical
+to v1.0.2 #1. v1.0.2's error message was correct; only its firing
+boundary was wrong.
 
 ## v1.0.2 deliberately does NOT touch
 
@@ -4965,6 +5064,391 @@ Restated here for the post-v1.0.3 consolidation pass:
 A contract-review work item after v1.0.3 ships consolidates these
 into a single v1.1 scope section alongside the existing v1.1
 #1–#4 entries below.
+
+
+# v1.0.4 — pre-launch foundation cleanup (six findings from post-v1.0.3 contract review)
+
+The post-v1.0.3 contract review (see banner above and
+`CONTRACT-review-findings.md` §5 for the audit record) surfaced six
+small findings:
+
+- Three documentation corrections — #2 per-error-page footers, #3
+  WARNING-log field-name divergence, #5 stale forward-pointer
+  prose.
+- One additive API method mirroring v1.0.3 #1's pattern — #1
+  `graph.relations()` canonical form.
+- One test addition for a contract claim that shipped without a
+  boundary-anchored test — #4 `_requeue_unfired` zero-subscriber.
+- One CONTRACT archeology restoration — #6 appended
+  `### v1.0.2.post1` section.
+
+v1.0.4 absorbs all six. This release does not change abstractions,
+does not add new runtime capability, does not reshape any locked
+decision below v1.0.4, and does not introduce a new CI gate. Each
+finding is small, mechanical, and independently reviewable.
+
+The discipline that kept v1.0.1 / v1.0.2 / v1.0.3 small applies in
+amplified form here — v1.0.4 is the pre-launch foundation cleanup
+pass, not a new feature milestone. The two Standing Rules adopted
+by the contract review banner are visible in every finding:
+
+- **Standing Rule §1** (amendments append, never modify). Each
+  v1.0.4 amendment below appends as its own dated section. The one
+  authorized in-place edit is the forward-pointer in v1.0.2 #1's
+  existing top-of-section breadcrumb, updated by #6 to point at
+  the newly-appended `### v1.0.2.post1` section.
+- **Standing Rule §2** (tests anchor on the contract boundary).
+  Tests added for #1 (eight filter combinations of
+  `graph.relations`) and #4 (the zero-subscriber requeue set)
+  anchor on the contract claim, not on the implementation's
+  symptom or on the alias's behavior. Test shape is named per
+  finding below.
+
+## v1.0.4 #1. `graph.relations(source=, target=, type=)` is the canonical filter API
+
+External users reach for `graph.relations(source=claim_id)`
+naturally — `docs/concepts/graph.md:43` advertised that shape
+since v0, and the decomposition of an edge into (source, target,
+type) reads identically to the natural user mental model. The
+framework shipped `graph.get_relations(object_id=, type=,
+direction=)` instead: different name, and the `object_id +
+direction` pair collapsed what users decompose into `source` and
+`target`. The broken doc reference has stood across every release
+— users hit `AttributeError` the first time they try the
+documented form.
+
+Same shape as v1.0.3 #1's `graph.objects(type=...)` fix, with one
+extension: `graph.relations` introduces a `source`/`target`
+decomposition that `get_relations` did not have, because the
+`direction="outgoing"|"incoming"|"both"` axis is what the
+decomposition replaces.
+
+### The canonical form
+
+**`Graph.relations(source=None, target=None, type=None) -> list[Relation]`**.
+Filter kwargs compose by AND semantics:
+
+| `source` | `target` | `type` | Returned                                            |
+|----------|----------|--------|-----------------------------------------------------|
+| None     | None     | None   | every relation in the graph                         |
+| A        | None     | None   | relations whose `source == A` (outgoing from A)     |
+| None     | B        | None   | relations whose `target == B` (incoming to B)       |
+| A        | B        | None   | relations from A to B                               |
+| None     | None     | T      | every relation of type T                            |
+| A        | None     | T      | relations from A of type T                          |
+| None     | B        | T      | relations to B of type T                            |
+| A        | B        | T      | relations from A to B of type T                     |
+
+No-kwarg call returns every relation — same shape as
+`View.relations()` (core/view.py:39) and the v1.0.3 #1 no-kwarg
+shape of `graph.objects()`. The eight combinations above are the
+contract claim; tests anchor on each combination.
+
+### The decomposition versus `get_relations`
+
+`graph.get_relations(object_id=X, direction="outgoing")` is
+`graph.relations(source=X)`. `get_relations(object_id=X,
+direction="incoming")` is `relations(target=X)`. The `"both"`
+direction in `get_relations` (matches when `object_id` is either
+the source or the target) does not have a single-call equivalent
+in the new form; callers needing symmetric-endpoint lookup either
+call `relations()` twice (once per slot, taking the union) or keep
+using `get_relations(direction="both")`. v1.1's Graph/View
+harmonization pass (Theme A in `v1.1-plan.md`) may add an
+`endpoint=` convenience for symmetric lookup; v1.0.4 stays small.
+
+### The alias
+
+**`Graph.get_relations(object_id=None, type=None, direction="both")`**
+stays as a backward-compatible alias. No deprecation warning in
+v1.0.4 — the older shape keeps `examples/`, internal callers, and
+any pre-v1.0.4 user code working. v1.1 or later revisits
+deprecation as part of the broader Graph/View harmonization pass.
+
+**`Graph.all_relations()`** stays as is. Same carve-out reasoning
+as v1.0.3 #1 kept `all_objects()`: distinct intent (no-filter
+inspection), broad internal use, removing it would be churn
+without payoff.
+
+### Documentation
+
+`graph.relations(source=, target=, type=)` becomes the form shown
+in `docs/concepts/graph.md`. The line-43 broken reference resolves.
+The alias gets one line of documentation under the same heading.
+
+### Why not deprecate `graph.get_relations` in v1.0.4
+
+Same logic as v1.0.3 #1's parallel decision for `graph.query`. A
+deprecation warning costs every existing caller a stderr line. The
+framework has shipped `get_relations` in every release. v1.0.4's
+scope is "absorb six findings from the contract review," not
+"reshape the relations surface." Keeping the alias silent for one
+release lets the docs and ecosystem migrate; v1.1 Theme A owns the
+deprecation decision in the broader harmonization context.
+
+### Tests (Standing Rule §2)
+
+Tests anchor on the contract claim above — what
+`graph.relations(...)` returns for each of the eight filter
+combinations — not on whether the new method's output equals the
+alias's output. The alias-still-works test is a separate
+backward-compatibility test that asserts
+`get_relations(object_id=A, direction="outgoing")` continues to
+return what it returned in v1.0.3.
+
+## v1.0.4 #2. Per-error pages link to `failure-model.md` observability section
+
+A user landing on `docs/reference/errors/llm-behavior-error.md`
+from the `More:` URL in a WARNING log line learns what the error
+class means but does not learn that they can iterate `rt.errors`
+for structured inspection of every `behavior.failed` event, or
+filter the graph's event log for the same. The canonical
+observability surface (`Runtime.errors`, the `BehaviorFailure`
+NamedTuple, the relevant section of
+`docs/concepts/failure-model.md`) is one click away on the doc
+site but not linked from any per-error page.
+
+The fix: a one-line footer at the bottom of every per-error page
+whose error surfaces via `behavior.failed`. The footer text is
+fixed:
+
+> See [Observing failures in caller code](../concepts/failure-model.md#observing-failures-in-caller-code)
+> for `Runtime.errors` and the `BehaviorFailure` shape.
+
+### Which pages get the footer
+
+Pages whose errors emit via `behavior.failed` get the footer.
+Pages whose errors are raised at registration time or at framework
+setup do NOT — those errors never become `behavior.failed` events
+because they fire before any behavior runs. The audit identifies
+behavior-emission per page by tracing each error class's raise
+sites; uncertain cases are filed as v1.1 follow-on rather than
+guessed (Standing Rule §2 discipline applied to the documentation
+pass).
+
+This is documentation only. No code change. No amendment to the
+v1.0 #4 `ActiveGraphError` hierarchy or the v0.6 #11 reason-code
+taxonomy.
+
+## v1.0.4 #3. WARNING-log field names diverge from `BehaviorFailure` field names — documented
+
+CONTRACT v1.0.3 #3 added two surfaces for inspecting
+`behavior.failed` events: a WARNING-level structured log line, and
+the `Runtime.errors` property returning `list[BehaviorFailure]`.
+Both surfaces carry the same values under different field names:
+
+| Field meaning            | WARNING log key | `BehaviorFailure` attribute |
+|--------------------------|------------------|------------------------------|
+| Exception class name     | `error_type`     | `exception_type`             |
+| Exception message string | `error_message`  | `message`                    |
+
+The log keys follow CONTRACT v0.8 #6's structured-logging schema
+(operator-facing, grep-friendly across all framework log lines and
+log-shipping pipelines). The `BehaviorFailure` attribute names
+follow Python convention (matches `traceback.format_exception` and
+stdlib naming). Both names are correct in their layer.
+
+The divergence was intentional in v1.0.3 #3 — each surface picks
+the convention appropriate to its consumer — but was not
+documented. A user grepping logs for `error_type` finds the log
+output; a user reaching for `.exception_type` on a
+`BehaviorFailure` finds the structured object. The values are
+identical; only the field names differ.
+
+The fix: one sentence appended to
+`docs/concepts/failure-model.md`'s "Observing failures in caller
+code" section, naming the divergence and stating the values are
+the same. No code change. The contract anchors for both
+field-name sets stay where they were locked: v0.8 #6 for the log
+schema; v1.0.3 #3 for the NamedTuple.
+
+## v1.0.4 #4. Boundary-anchored test for `_requeue_unfired` zero-subscriber case
+
+CONTRACT v0.5 #8's locked claim: "on load, events with NO
+`behavior.started` referencing them are re-queued; events that any
+behavior started on are NOT re-queued." The implementation through
+v1.0-rc1 used the false reverse-implication that "no
+`behavior.started` ⟹ event still in queue"; events with zero
+subscribers (popped-and-discarded from the queue without any
+`behavior.started`) were falsely requeued on every `Runtime.load`.
+CHANGELOG v1.0-rc2 fixed the implementation by using the last
+`runtime.idle` / `runtime.budget_exhausted` lifecycle event as the
+high-water mark; the contract claim itself was correct since v0.5.
+
+`tests/test_requeue_unfired.py` (added in v1.0-rc2) locks the
+regression vector. It exercises the zero-subscriber case — the
+fixture builds a run where `downstream.no_subscribers` events have
+no subscribed behavior — and asserts `queue_depth == 0` on a
+freshly loaded cleanly-drained run. That assertion catches the
+bug shape, but anchors on the implementation's symptom
+(`queue_depth`) rather than directly on the contract's boundary
+claim ("NOT re-queued").
+
+The fix adds a boundary-anchored sibling assertion: inspect the
+requeue set that `_requeue_unfired` decided to put back in the
+queue on load, and verify the zero-subscriber event IDs are
+absent. The contract anchor: "on `Runtime.load`" (the boundary)
+and "events with NO `behavior.started` … are re-queued; …
+zero-subscriber events are popped-and-discarded … are NOT
+re-queued" (the claim).
+
+The new test's name carries the boundary; the assertion exercises
+the contract claim's exact subject (the requeue set itself, not
+its summary); the test would fail under the v0.5–v1.0-rc1 bug
+shape regardless of whether `queue_depth` happened to summarize
+the failure correctly. Standing Rule §2 shape.
+
+No code change. No CONTRACT amendment to v0.5 #8 itself — the
+contract claim was correct since v0.5; the tests catch up.
+
+## v1.0.4 #5. Review-overlay markers on three sites of stale forward-pointer prose
+
+Three CONTRACT sections carry forward-pointer prose that became
+archaic when the referenced deferral shipped:
+
+- **v0 #11** (`token_budget`): "`token_budget` is parsed but
+  ignored until v0.6." Honored from v0.6 onward via view
+  assembly; the unqualified clause reads as if v0.6 has not
+  shipped.
+- **v0 #16** ("Out of scope for v0"): the list (SQLite, LLM
+  behaviors, Cypher patterns, packs, etc.) is historical — every
+  item shipped in a subsequent milestone.
+- **v0.8 #19** ("What v0.8 deliberately does not add"): same
+  shape — packs and other items have since shipped.
+
+Per Standing Rule §1 (banner), amendment prose is not rewritten in
+place. The clarifications append using an explicit overlay-marker
+pattern consistent with the banner's other annotations
+(per-milestone `Review status:` markers, the v1.0.2 #1(b) in-place
+marker, and the appended `### v1.0.2.post1` section landed by
+v1.0.4 #6).
+
+### The marker syntax
+
+> `[review overlay 2026-05-19: …]`
+
+Greppable by date, attributed to the post-v1.0.3 review layer,
+visually distinct from amendment prose. Each of the three sites
+receives one marker added immediately after the stale clause —
+preserving the original prose verbatim and adding the up-to-date
+status alongside.
+
+### Standing Rule §1 compatibility
+
+Standing Rule §1 prohibits silent in-place rewrites that destroy
+the boundary record. Explicit dated overlays preserve the layer
+boundary — a future reader sees "this clarification was added by
+the 2026-05-19 review" alongside the original locked prose. The
+banner's existing overlay annotations use the same mechanical
+pattern; v1.0.4 #5 formalizes the pattern for forward-pointer
+prose specifically.
+
+No code change. CONTRACT-only.
+
+## v1.0.4 #6. Appended `### v1.0.2.post1` section restores archeological record
+
+v1.0.2.post1 (CHANGELOG dated 2026-05-19, PR #16) corrected the
+validation boundary for v1.0.2 #1(b): cross-provider model
+validation moved from lazy-at-first-`run_goal` to firing at both
+binding moments — `Runtime(graph, llm_provider=...)` construction
+AND `@llm_behavior` / `register()` decoration when one or more
+Runtimes are alive (tracked via the `weakref.WeakSet` in
+`activegraph/runtime/_live.py`).
+
+The CHANGELOG carried the dated `[v1.0.2.post1]` entry. CONTRACT
+did not — v1.0.2.post1 revised v1.0.2 #1(b)'s prose in place
+rather than appending a dated amendment section. CONTRACT's
+amendment history showed v1.0.2 #1 followed directly by v1.0.3,
+with no trace of post1 having shipped between them.
+
+Standing Rule §1 from the post-v1.0.3 contract review banner
+codified the discipline that this pattern violated: amendments
+append, never modify. The rule is retroactively invoked here.
+
+The fix lands the proper appended section as a new
+`### v1.0.2.post1` H3 placed as the fifth subsection of
+v1.0.2 #1 (sibling to §(a), §(b), §(c), §(d)). The section
+documents:
+
+- The boundary the original v1.0.2 #1(b) named (registration-time)
+  vs. the boundary the v1.0.2 implementation fired at (lazy).
+- The correction: validation fires at both binding moments;
+  `Runtime.__init__` validates against the registry,
+  `@llm_behavior` and `register()` validate against the
+  `weakref.WeakSet` of live Runtimes.
+- The `activegraph/runtime/_live.py` module that factored the
+  single-behavior validator out of the bulk path.
+- A back-pointer to Standing Rule §1 establishing why this
+  section appended retroactively rather than the original prose
+  being further revised.
+- The post1 test suite at `tests/test_llm_default_model.py`
+  Section (g) (seven scenarios, each anchoring on one binding
+  moment by name) as the canonical model for Standing Rule §2.
+
+After the appended section lands, the existing top-of-section
+breadcrumb in v1.0.2 #1 updates its forward pointer from "v1.0.4
+candidate §5 #6 (review) will append" to past tense — "the
+`### v1.0.2.post1` section below (appended retroactively in
+v1.0.4 #6)." This in-place breadcrumb edit is explicitly
+authorized by the contract review (the only in-place edit
+Standing Rule §1 permits in v1.0.4) and is mechanically the
+forward-pointer update the breadcrumb was written to anticipate.
+The corrected `(b)` prose itself does not change — it already
+carries the post1-correct text.
+
+This finding is CONTRACT-documentation only. No code change.
+The appended section is the archeological record being restored,
+not a new contract claim.
+
+## v1.0.4 deliberately does NOT touch
+
+The v1.0.4 cleanup pass is bounded. Out of scope:
+
+- No abstraction changes. Each finding is a small additive API
+  method, a documentation correction, or a CONTRACT amendment.
+  Findings whose diagnosis surfaced abstraction work were split
+  to v1.1 — full Graph/View harmonization (Theme A), drift gates
+  (Theme D), CONTRACT modularization (DOC-1).
+- No reshape of any locked decision below v1.0.4. The one
+  exception is the v1.0.2 #1 breadcrumb forward-pointer update
+  in #6, which the contract review explicitly authorized as the
+  single in-place edit Standing Rule §1 permits in this release.
+- No new CI gate. All four existing gates stay green.
+- No new public class. The only new public method is
+  `Graph.relations(...)` per #1.
+- No new runtime capability, no new event type, no new reason
+  code, no new error class.
+- No changes to `LLMProvider` Protocol (last widened at
+  v1.0.2 #1).
+- No changes to `behavior.failed` event payload, the WARNING log
+  format, or the `BehaviorFailure` shape (all v1.0.3 #3 surfaces
+  remain byte-identical).
+
+### v1.1 candidates surfaced or restated by v1.0.4
+
+Restated here for `v1.1-plan.md`'s backlog:
+
+1. **Deprecation pass on `graph.get_relations`, `graph.query`,
+   and the `object_type=` kwarg.** Part of Theme A — Graph/View
+   harmonization. v1.0.4 #1 kept the new alias silent for one
+   release; v1.1 owns the deprecation decision.
+2. **Full Graph/View surface harmonization** (Theme A). Includes
+   the method-vs-property `graph.events` asymmetry,
+   `all_objects()` / `all_relations()` carve-outs, and a possible
+   `endpoint=` convenience for `graph.relations(...)` covering
+   the symmetric-endpoint lookup case (the only `direction=`
+   shape that does not have a single-call equivalent in the
+   new form).
+3. **Spec-vs-impl drift gate** (Theme D — D-1 / D-2). The
+   mechanical complement to Standing Rule §2: automated checking
+   that tests' boundary names match contract amendment boundary
+   names. v1.0.4 #4 closes the v0.5 #8 gap by hand; the gate
+   would have caught it.
+4. **CONTRACT modularization or executive-summary preambles**
+   (DOC-1). CONTRACT.md is now over 6000 lines; navigation is
+   becoming a usability concern. v1.0.4 #5's inline overlay
+   markers and v1.0.4 #6's appended section add to the length
+   but do not address the underlying readability.
 
 
 # v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
