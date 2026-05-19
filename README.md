@@ -167,6 +167,13 @@ in [`docs/concepts/relations.md`](https://docs.activegraph.ai/concepts/relations
   per-error catalog.
 - **[10-minute tutorial](https://docs.activegraph.ai/quickstart/)** — install
   to a working custom behavior, including fork-and-diff.
+- **AI coding assistants** — the docs are machine-readable at
+  [docs.activegraph.ai/llms.txt](https://docs.activegraph.ai/llms.txt)
+  (structured index) and
+  [docs.activegraph.ai/llms-full.txt](https://docs.activegraph.ai/llms-full.txt)
+  (concatenated full content), generated from the same source markdown
+  as the rendered site. Built for AI agents evaluating the framework
+  via Claude Code, Cursor, Replit, and similar tooling.
 - **[CHANGELOG.md](CHANGELOG.md)** — every release, with per-version
   migration notes.
 - **[CONTRACT.md](CONTRACT.md)** — locked design decisions, version
