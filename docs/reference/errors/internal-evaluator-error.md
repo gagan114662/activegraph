@@ -99,3 +99,9 @@ principle.
 - [GitHub Issues](https://github.com/yoheinakajima/activegraph/issues/new)
   — file framework-bug reports here. The error message carries
   everything the issue needs.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.
