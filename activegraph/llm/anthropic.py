@@ -23,12 +23,12 @@ keeps the surface narrow on purpose.
 from __future__ import annotations
 
 import json
-import re
 import time
 from decimal import Decimal
 from typing import Any, Mapping, Optional
 
 from activegraph.llm.errors import LLMBehaviorError
+from activegraph.llm.parsing import parse_structured_response as _parse_structured
 from activegraph.llm.provider import LLMProvider
 from activegraph.llm.types import LLMMessage, LLMResponse, ToolCall
 
@@ -263,57 +263,6 @@ def _message_to_anthropic(m: LLMMessage) -> dict[str, Any]:
             ],
         }
     return {"role": m.role, "content": m.content}
-
-
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.DOTALL)
-_BRACE_RE = re.compile(r"(\{.*\}|\[.*\])", re.DOTALL)
-
-
-def _parse_structured(text: str, schema: type) -> Any:
-    """Parse JSON out of an LLM response and validate against `schema`.
-
-    Strategy: try direct JSON first; on failure, extract a fenced
-    ```json``` block; on failure, grab the first {...}/[...] span.
-    Two distinct failure modes flow back as `LLMBehaviorError`:
-
-      reason=llm.parse_error      — no JSON found / json.loads failed
-      reason=llm.schema_violation — JSON found but Pydantic rejected it
-    """
-
-    candidate = text.strip()
-    obj: Any = None
-    parse_err: Optional[Exception] = None
-    try:
-        obj = json.loads(candidate)
-    except Exception as e:
-        parse_err = e
-    if obj is None:
-        m = _FENCED_JSON_RE.search(text) or _BRACE_RE.search(text)
-        if m:
-            try:
-                obj = json.loads(m.group(1))
-                parse_err = None
-            except Exception as e:
-                parse_err = e
-    if obj is None:
-        raise LLMBehaviorError(
-            "llm.parse_error",
-            f"no JSON found in response: {parse_err}",
-            payload_extras={"raw_text": text, "underlying": str(parse_err)},
-        )
-
-    try:
-        return schema.model_validate(obj)
-    except Exception as e:
-        raise LLMBehaviorError(
-            "llm.schema_violation",
-            f"response did not match schema {schema.__name__}: {e}",
-            payload_extras={
-                "raw_text": text,
-                "schema": schema.__name__,
-                "validation_errors": str(e),
-            },
-        ) from e
 
 
 def _classify_provider_exception(e: Exception) -> str:
