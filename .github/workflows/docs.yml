@@ -49,17 +49,27 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install mkdocs
-        # Pulls mkdocs + mkdocs-material + mkdocstrings[python] from
-        # the `docs` extra in pyproject.toml. Keeping the dep list in
-        # pyproject (not hardcoded here) means adding a new mkdocs
-        # plugin updates one place, not two — the same pattern every
-        # other workflow already follows. The pre-rc3-amendment shape
+        # Pulls mkdocs + mkdocs-material + mkdocstrings[python] +
+        # mkdocs-llmstxt (v1.0.5 #1) from the `docs` extra in
+        # pyproject.toml. Keeping the dep list in pyproject (not
+        # hardcoded here) means adding a new mkdocs plugin updates
+        # one place, not two — the same pattern every other workflow
+        # already follows. The pre-rc3-amendment shape
         # ("pip install mkdocs mkdocs-material") drifted from
         # mkdocs.yml's `plugins:` block since the doc-site phase and
         # was the silent failure v1.1 #9 caught on its first run.
-        run: pip install -e ".[docs]"
+        run: pip install -e ".[docs]" pytest
       - name: Build site
         run: mkdocs build
+      - name: Verify llms.txt generation (CONTRACT v1.0.5 #1)
+        # The gate asserts site/llms.txt and site/llms-full.txt
+        # exist after the build, carry the expected H1 + blockquote
+        # summary + nav-anchor coverage. Runs against the build
+        # output produced one step above; reuses that artifact via
+        # a fresh `mkdocs build` into a temp dir so the test stays
+        # self-contained (Standing Rule §2 — anchors on the
+        # contract claim, not on the path that produced site/).
+        run: pytest -m slow tests/test_llms_txt.py -v
       - name: Upload pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
