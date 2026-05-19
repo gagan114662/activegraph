@@ -3871,6 +3871,143 @@ polish, and remember that adoption-surface work is a different skill
 from runtime engineering.
 
 
+# v1.0.1 — first external user-test patch
+
+The first external user-test produced three small findings, all on
+the "X is confusing" UX side of the heuristic in HANDOFF.md, none
+architectural. The framework's shape held; the polish around three
+edges did not. v1.0.1 ships the three fixes as a patch release — no
+public-API renames, no CONTRACT amendments to v1.0's own decisions,
+no new runtime capability.
+
+## v1.0.1 #1. Public `register()` + `clear_registry()` returns the list
+
+Multi-run scripts that called `clear_registry()` between runs had
+no public way to re-populate the registry — the test conftest works
+because each test re-imports its own behaviors inline, but scripts
+that iterate hypotheses against a captured set of behaviors had to
+reach into `activegraph.behaviors.decorators._REGISTRY` directly.
+Private-attribute access in user code is the smell.
+
+Fix:
+
+- `clear_registry()` now returns `list[Behavior | RelationBehavior]`
+  in registration order — the behaviors that were cleared. v1.0
+  returned `None`; callers that ignored the return still work.
+- `register(behavior_obj)` is new — appends an already-constructed
+  behavior to the global registry. Validates the argument is a
+  `Behavior` / `RelationBehavior` / `LLMBehavior` instance.
+- `docs/cookbook/multi-run-scripts.md` is new — the recipe is the
+  canonical home for the pattern; `clear_registry` and `register`
+  docstrings both reference it by name (no hardcoded docs URL —
+  the version-sync gate forbids that and the cookbook page name is
+  stable across the domain cutover).
+
+The list-return on `clear_registry` is a `None` → `list` API change,
+but since the v1.0 signature never returned a meaningful value, no
+caller depended on `None`. Documented in the v1.0.1 CHANGELOG entry.
+
+## v1.0.1 #2. LLM auto-instruction includes an example instance
+
+`@llm_behavior(output_schema=SomeModel)` embedded the model's JSON
+Schema in the system prompt. The user-test surfaced a failure mode
+that v1.0's design didn't anticipate: some models — particularly
+smaller / older / non-tool-trained ones — interpret a bare schema as
+"return this shape" and echo the schema definition back as their
+response. The framework refuses (the schema definition isn't a valid
+instance of itself for most schemas), `llm.schema_violation` fires,
+and the trace shows the model returning `{"type": "object",
+"properties": ...}` where the actual fields should be.
+
+Fix: the system prompt now embeds three things in the schema block
+rather than one:
+
+1. The schema (unchanged from v1.0).
+2. A synthesized example instance — `example_instance_from_schema`
+   walks the JSON Schema and produces a deterministic placeholder
+   instance (`"<string>"` for strings, `0` for ints, first variant
+   for enums, etc.). The example is content-stable across runs so
+   the prompt-hash cache key stays stable across identical inputs.
+3. Explicit "Return an INSTANCE that conforms to this schema, NOT
+   the schema itself" language. Capitalized for emphasis; the
+   doc-site entry explains the failure mode for users who hit it
+   despite the prompt fix.
+
+`build_instruction` (the single-sentence task at the end of the
+user message) also gains "(NOT the schema definition itself — see
+the example above)" so the framing appears in two places.
+
+The prompt-hash changes (the system prompt is longer), but no JSON
+LLM fixtures exist on disk so no replay-divergence risk. The
+quickstart snapshot's `tokens_in~NNNN` values bump by ~70-130 tokens
+per call to absorb the new block; that snapshot was rebaselined
+in the v1.0.1 commit.
+
+## v1.0.1 #3. `SQLiteEventStore()` constructor hints at `persist_to=`
+
+The user-test surfaced that `SQLiteEventStore()` with missing or
+partial args produced a bare Python `TypeError: missing 1 required
+positional argument: 'run_id'`. The user-test reader didn't know
+`run_id` was something to mint vs. something to look up vs. something
+the framework would generate — three different shapes of next step,
+all gated on first looking up "what is a run_id." The framework's
+own answer is `Runtime(graph, persist_to='path/to/trace.sqlite')`,
+which handles the `run_id` automatically.
+
+Fix: the constructor signature is now
+`SQLiteEventStore(path=None, run_id=None)` with a hand-raised
+`TypeError` when either is missing:
+
+    SQLiteEventStore requires a run_id. For most cases, use
+    Runtime(graph, persist_to='path/to/trace.sqlite') instead,
+    which handles run_id automatically. If you need a per-run
+    handle (migration, conformance test, trace inspection), pass
+    both explicitly: SQLiteEventStore('path/to/trace.sqlite',
+    run_id='run_...').
+
+The two-line hint points at the higher-level API for the common
+case and names the rare cases where direct construction is the
+right answer.
+
+## v1.0.1 #4. `prompt_template=` docstring names what each placeholder contains
+
+The `@llm_behavior(prompt_template=...)` escape hatch was
+documented as "accepts `{system}`, `{view}`, `{event}`, and
+`{instruction}`" without saying what each placeholder rendered to.
+The v1.0.1 #2 doc-site entry needs to reference the same
+placeholders by name to recommend `prompt_template=` as the
+fallback for schemas the auto-example can't render usefully, so
+the decorator docstring grows a four-bullet list naming what
+content each placeholder carries (system block content, view
+content, event content, instruction content). Concrete enough to
+let a reader compose a custom template without first opening
+`activegraph/llm/prompt.py`.
+
+## What v1.0.1 deliberately does NOT touch
+
+The CONTRACT v1.0 ban on new runtime capability still applies —
+v1.0.1 is a patch release on the adoption-surface milestone, not
+the start of v1.1. Specifically:
+
+- No changes to the public class hierarchy. `register()` is a new
+  function on `activegraph`; it doesn't change any existing class.
+- No CONTRACT amendments to v1.0 decisions. The schema-block change
+  is inside the v0.6 #6 prompt-assembly contract (which already
+  allowed the system prompt's content to evolve as long as the
+  source order and hash-stability properties held).
+- No widening of the SQLiteEventStore API. The signature change
+  (`Optional[str] = None`) is internal — every existing caller
+  passes both args positionally or by keyword.
+- No new CI gate. The four v1.0 gates (mypy --strict, docstring
+  coverage, broken-link, version-sync) plus the two rc3 gates
+  (wheel-completeness, deploy-verification) all continue to gate;
+  v1.0.1 doesn't add a seventh.
+
+CONTRACT v1.1 still owns the broader v1.1 scope (CLI flags, type
+completeness, docstring completeness, the v0.5 in-flight loss
+follow-ons, etc.). v1.0.1 doesn't reshape that backlog.
+
+
 # v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
 
 The first v1.1 items that came from real user-facing work, not from

@@ -68,6 +68,67 @@ The full provider response is in the `behavior.failed` event's
 activegraph inspect <store> --event <behavior.failed-id>
 ```
 
+#### `llm.schema_violation` — "the model returned the schema, not an instance"
+
+A specific shape of `llm.schema_violation` worth naming: the
+provider response is the JSON Schema definition itself, echoed back
+verbatim, rather than an instance that conforms to the schema. In
+`payload_extras["raw_response"]` the symptom is unmistakeable —
+top-level keys like `"properties"`, `"type": "object"`, and `"$defs"`
+appear where the schema's actual fields should appear:
+
+```json
+{
+  "type": "object",
+  "properties": {"claims": {"type": "array", ...}},
+  "required": ["claims"]
+}
+```
+
+instead of:
+
+```json
+{"claims": [{"speaker": "...", "statement": "...", "confidence": 0.9}]}
+```
+
+**Root cause:** the model treated the schema definition shown in the
+prompt as the requested output shape rather than as a contract its
+output should satisfy. Smaller / older / non-tool-trained models hit
+this more often.
+
+**Fix in v1.0.1+ (automatic):** the runtime now assembles the system
+prompt with both the schema AND a synthesized example instance,
+plus explicit "return an INSTANCE, not the schema" language. Most
+schema-echo failures stop firing without any code change on your
+end.
+
+**If it still fires in v1.0.1+:** the schema is too abstract for the
+auto-derived example to be useful (deeply nested generics, large
+`anyOf` unions, schemas with no `properties` at the top level). In
+those cases, override the prompt assembly with a `prompt_template=`
+that bakes in a real example from your domain:
+
+```python
+@llm_behavior(
+    output_schema=ClaimList,
+    prompt_template=(
+        "{system}\n\n"
+        "{view}\n\n"
+        "Example response (this is the shape — substitute real values):\n"
+        '{{"claims": [{{"speaker": "CFO", "statement": "Revenue grew 28%.", '
+        '"confidence": 0.92}}]}}\n\n'
+        "{event}\n\n"
+        "{instruction}"
+    ),
+)
+def extract_claims(event, graph, ctx, llm_output): ...
+```
+
+See `@llm_behavior`'s `prompt_template=` docstring for what each
+placeholder contains. If the model never recovers even with a real
+example, switch to a tool-trained model (the small models that echo
+schemas back rarely come from the tool-trained families).
+
 ### Failures from fork/replay: re-record
 
 `llm.fixture_missing`. You're running against `RecordedLLMProvider`

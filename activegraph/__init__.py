@@ -9,6 +9,7 @@ from activegraph.behaviors.decorators import (
     clear_registry,
     get_registry,
     llm_behavior,
+    register,
     relation_behavior,
 )
 from activegraph.core.clock import Clock, FrozenClock, TickingClock
@@ -215,8 +216,9 @@ __all__ = [
     "migrate",
     "open_store",
     "parse_store_url",
+    "register",
     "relation_behavior",
     "tool",
 ]
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"

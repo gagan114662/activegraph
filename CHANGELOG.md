@@ -18,6 +18,139 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 Nothing yet. v1.1 scope is tracked in
 [CONTRACT.md § v1.1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md).
 
+## [v1.0.1] — 2026-05-19
+
+The first-external-user-test patch. v1.0 final shipped on
+2026-05-18; the first developer outside the maintainer's loop ran
+the install / quickstart / tutorial path on the day-of, and three
+small UX findings surfaced before v1.0.1 publish. All three fit the
+"X is confusing" shape on HANDOFF.md's user-test heuristic (none
+"X doesn't compose with Y the way I expected" — architectural shape
+held). No CONTRACT amendments to v1.0's own decisions, no public-API
+renames, no new runtime capability. CONTRACT v1.0.1 records the
+three fixes; this entry is the shipping changelog.
+
+### Added
+
+- **`activegraph.register(behavior_obj)`** — public function for
+  appending an already-constructed behavior to the global registry.
+  Pairs with `clear_registry()` for multi-run scripts that capture
+  the registry once and re-register per run, replacing the v1.0
+  pattern of reaching into the private
+  `activegraph.behaviors.decorators._REGISTRY` list. Validates the
+  argument is a `Behavior` / `RelationBehavior` / `LLMBehavior`
+  instance and raises `TypeError` otherwise. CONTRACT v1.0.1 #1.
+- **`docs/cookbook/multi-run-scripts.md`** — new cookbook recipe
+  covering the capture-once-re-register-per-run pattern, when to
+  use it (hypothesis sweeps, A/B comparisons inside one process,
+  batch jobs that want per-input graph isolation without per-input
+  process startup), and when not (single-runtime scripts don't need
+  any of this). Wired into the mkdocs nav under the Cookbook
+  section. CONTRACT v1.0.1 #1.
+- **`activegraph.llm.prompt.example_instance_from_schema`** — new
+  helper that walks a JSON Schema and produces a deterministic
+  placeholder instance. Used by `build_system_prompt` to render an
+  example alongside the schema in the LLM system prompt; exported
+  for tests and for prompt-debugging tools. CONTRACT v1.0.1 #2.
+
+### Changed
+
+- **`@llm_behavior(output_schema=...)` system prompt now embeds an
+  example instance and explicit "instance, not schema" language.**
+  The first external user-test surfaced a failure mode v1.0's
+  prompt-assembly didn't anticipate: some models echo the JSON
+  Schema definition back as their response instead of an instance
+  that conforms to it. The framework refused with
+  `llm.schema_violation`, the user had to reverse-engineer the
+  cause from the raw response. v1.0.1 changes the system-prompt
+  schema block to three parts — the schema (unchanged), a
+  synthesized example instance, and explicit "Return an INSTANCE
+  that conforms to this schema, NOT the schema itself" language.
+  `build_instruction` (the user-message task sentence) also gains
+  "NOT the schema definition itself" so the framing appears in
+  two places. The example generator handles `type`, `properties`,
+  `items`, `enum`, `const`, `anyOf`/`oneOf` (picks the non-null
+  variant), and `$ref` to `$defs`/`definitions`; unrecognized
+  shapes fall back to `null`. The synthesized example is
+  deterministic across runs so the prompt-hash cache key stays
+  stable. CONTRACT v1.0.1 #2. See the expanded
+  [`llm-behavior-error`](https://docs.activegraph.ai/errors/llm-behavior-error/)
+  reference page for the failure mode and the `prompt_template=`
+  override pattern when the auto-derived example isn't useful.
+- **`SQLiteEventStore()` constructor error points at the higher-
+  level `Runtime(graph, persist_to=...)` API.** v1.0 raised a bare
+  Python `TypeError: missing 1 required positional argument:
+  'run_id'`; the user-test reader had to first look up "what is a
+  run_id" before they could decide how to recover. v1.0.1
+  hand-raises a TypeError with a structured hint:
+
+  ```
+  SQLiteEventStore requires a run_id. For most cases, use
+  Runtime(graph, persist_to='path/to/trace.sqlite') instead,
+  which handles run_id automatically. If you need a per-run
+  handle (migration, conformance test, trace inspection), pass
+  both explicitly: SQLiteEventStore('path/to/trace.sqlite',
+  run_id='run_...').
+  ```
+
+  The signature change (`Optional[str] = None` for both args) is
+  internal — every existing caller passes both args positionally
+  or by keyword. CONTRACT v1.0.1 #3.
+- **`clear_registry()` returns the cleared list.** v1.0 returned
+  `None`; v1.0.1 returns `list[Behavior | RelationBehavior]` in
+  registration order. Callers that ignored the return value still
+  work unchanged. The shape pairs with the new `register()` for
+  the multi-run pattern. CONTRACT v1.0.1 #1.
+- **`@llm_behavior` decorator docstring names what each
+  `prompt_template=` placeholder contains.** v1.0 documented the
+  four placeholders by name (`{system}`, `{view}`, `{event}`,
+  `{instruction}`) but didn't say what each one rendered to. The
+  v1.0.1 doc-site entry for the schema-echo failure mode points
+  readers at `prompt_template=` as a fallback for schemas the
+  auto-example can't render usefully, so the decorator docstring
+  grows a four-bullet list naming the content of each placeholder.
+  Concrete enough to compose a custom template without first
+  opening `activegraph/llm/prompt.py`. CONTRACT v1.0.1 #4.
+
+### Fixed
+
+- **First external user-test, finding 1** — multi-run scripts had
+  no public-API path to re-populate the registry after
+  `clear_registry()`. See "Added: `activegraph.register`" and
+  "Changed: `clear_registry()` returns the cleared list" above.
+- **First external user-test, finding 2** — models occasionally
+  returned the JSON Schema definition as their response instead of
+  an instance, triggering `llm.schema_violation`. See "Changed:
+  `@llm_behavior(output_schema=...)` system prompt now embeds an
+  example instance" above.
+- **First external user-test, finding 3** — `SQLiteEventStore()`
+  with missing args produced a bare Python `TypeError` instead of
+  hinting at the higher-level `persist_to=` API. See "Changed:
+  `SQLiteEventStore()` constructor error" above.
+
+### Migration from v1.0
+
+Additive. The three changes are forward-compatible:
+
+```bash
+pip install --upgrade activegraph==1.0.1
+```
+
+- `clear_registry()` now returns a list; v1.0 callers that ignored
+  the return continue to work unchanged.
+- `register()` is new; nothing existing calls it.
+- `SQLiteEventStore("/path", run_id="r")` (the v1.0 supported
+  shape) keeps working; the new error fires only on missing-arg
+  call sites, which are by construction unmigrated.
+- LLM prompt-hash values change because the system prompt got
+  longer. No on-disk LLM fixtures exist in the framework's tests,
+  so no replay-divergence risk for in-tree code; user code that
+  saved fixtures from a v1.0 live run will see a fresh
+  `llm.fixture_missing` against v1.0.1 prompts and needs a
+  re-record pass. Same shape as any v0.6+ prompt-assembly change;
+  see [`llm-behavior-error`](https://docs.activegraph.ai/errors/llm-behavior-error/)'s
+  re-record recipe.
+
 ## [v1.0] — 2026-05-18
 
 v1.0 final. The lighter-weight verification pass against v1.0-rc3
