@@ -27,6 +27,54 @@ from activegraph.behaviors.base import (
 _REGISTRY: list[Union[Behavior, RelationBehavior]] = []
 
 
+def _validate_output_schema(output_schema: Any) -> None:
+    """Strict-validate ``output_schema=`` at @llm_behavior time.
+
+    CONTRACT v1.0.3 #2. Accepts ``None`` (output_schema is optional)
+    or a Pydantic ``BaseModel`` subclass. Anything else — a dict, a
+    string, an instance instead of a class — raises ``TypeError``
+    with a structured message naming what was passed and showing the
+    correct form as a code example.
+
+    Dict-form output_schema support (JSON-schema dict) is a v1.1
+    candidate per the CONTRACT amendment; the rationale and the
+    fix the user wants live there.
+    """
+    if output_schema is None:
+        return
+    # Import lazily so the framework can still be imported in
+    # environments without Pydantic (e.g., pack metadata tooling).
+    # All real @llm_behavior callsites already require Pydantic
+    # transitively via LLMBehavior.output_schema.
+    try:
+        from pydantic import BaseModel
+    except ImportError:  # pragma: no cover — Pydantic is a hard dep at runtime
+        return
+    if isinstance(output_schema, type) and issubclass(output_schema, BaseModel):
+        return
+    passed = (
+        type(output_schema).__name__
+        if not isinstance(output_schema, type)
+        else f"{output_schema.__name__} (a class, but not a BaseModel subclass)"
+    )
+    raise TypeError(
+        f"output_schema must be a Pydantic BaseModel subclass, not "
+        f"{passed}.\n"
+        f"\n"
+        f"Example:\n"
+        f"    from pydantic import BaseModel\n"
+        f"\n"
+        f"    class MyOutput(BaseModel):\n"
+        f"        result: str\n"
+        f"\n"
+        f"    @llm_behavior(output_schema=MyOutput)\n"
+        f"    def my_behavior(event, graph, ctx, out): ...\n"
+        f"\n"
+        f"Dict-form output_schema (e.g., JSON Schema as a dict) is\n"
+        f"filed as a v1.1 candidate. See CONTRACT v1.0.3 #2."
+    )
+
+
 def clear_registry() -> list[Union[Behavior, RelationBehavior]]:
     """Empty the global behavior registry and return what was cleared.
 
@@ -226,6 +274,12 @@ def llm_behavior(
     delay_n: Optional[int] = None
     if activate_after is not None:
         delay_n = _parse_aa(activate_after)
+
+    # v1.0.3 #2: strict-validate output_schema= at decoration time.
+    # Users who passed a JSON-schema dict previously hit a silent
+    # behavior.failed with reason=llm.schema_violation at first LLM
+    # call; failing here names the cause at the @llm_behavior line.
+    _validate_output_schema(output_schema)
 
     def wrap(fn: Callable) -> LLMBehavior:
         b = LLMBehavior(

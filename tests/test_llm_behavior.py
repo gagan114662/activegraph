@@ -9,6 +9,8 @@ reflect the handler's mutations.
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 from activegraph import (
     Graph,
     Runtime,
@@ -229,3 +231,104 @@ def test_build_prompt_is_callable_without_api_call():
     assert "ClaimList" in prompt.system
     assert "## Graph context" in prompt.messages[0].content
     assert prompt.hash() == prompt.hash()  # stable across calls
+
+
+# v1.0.3 #2: strict-validate output_schema= at decoration time.
+# Users who passed a JSON-schema dict previously hit a silent
+# behavior.failed at first LLM call with reason=llm.schema_violation
+# (caught isinstance() check inside _invoke_llm); the framework now
+# fails fast at the @llm_behavior(...) line with a structured message
+# that includes the correct form as a code example.
+
+
+def test_output_schema_dict_raises_at_decoration_time():
+    import pytest
+
+    with pytest.raises(TypeError) as excinfo:
+        @llm_behavior(
+            name="bad",
+            on=["x.created"],
+            output_schema={"type": "object", "properties": {}},
+        )
+        def _bad(event, graph, ctx, llm_output):
+            pass
+
+    msg = str(excinfo.value)
+    # The actual type passed is named so users distinguish dict /
+    # string / None / instance-instead-of-class.
+    assert "not dict" in msg
+    # The example is the operational fix — it matters more than the
+    # prose, per the user's refinement on the message shape.
+    assert "from pydantic import BaseModel" in msg
+    assert "class MyOutput(BaseModel)" in msg
+    assert "@llm_behavior(output_schema=MyOutput)" in msg
+    # v1.1 candidate is referenced so users searching for "dict
+    # support" find the right backlog entry.
+    assert "CONTRACT v1.0.3 #2" in msg
+
+
+def test_output_schema_string_raises_at_decoration_time():
+    import pytest
+
+    with pytest.raises(TypeError) as excinfo:
+        @llm_behavior(
+            name="bad", on=["x.created"], output_schema="MyOutput"
+        )
+        def _bad(event, graph, ctx, llm_output):
+            pass
+
+    assert "not str" in str(excinfo.value)
+
+
+def test_output_schema_basemodel_instance_raises():
+    """Passing an instance instead of the class — common typo."""
+    import pytest
+
+    class Out(BaseModel):
+        x: int = 0
+
+    with pytest.raises(TypeError) as excinfo:
+        @llm_behavior(name="bad", on=["x.created"], output_schema=Out())
+        def _bad(event, graph, ctx, llm_output):
+            pass
+
+    assert "not Out" in str(excinfo.value)
+
+
+def test_output_schema_unrelated_class_raises():
+    """A class that isn't a BaseModel subclass — the message
+    distinguishes 'is a class' from 'not a class' so the fix is clear."""
+    import pytest
+
+    class NotAModel:
+        pass
+
+    with pytest.raises(TypeError) as excinfo:
+        @llm_behavior(
+            name="bad", on=["x.created"], output_schema=NotAModel
+        )
+        def _bad(event, graph, ctx, llm_output):
+            pass
+
+    msg = str(excinfo.value)
+    assert "NotAModel" in msg
+    assert "not a BaseModel subclass" in msg
+
+
+def test_output_schema_pydantic_basemodel_subclass_works():
+    class Good(BaseModel):
+        x: int
+
+    @llm_behavior(name="good", on=["x.created"], output_schema=Good)
+    def _good(event, graph, ctx, llm_output):
+        pass
+
+    assert _good.output_schema is Good
+
+
+def test_output_schema_none_is_allowed():
+    @llm_behavior(name="raw", on=["x.created"])
+    def _raw(event, graph, ctx, llm_output):
+        pass
+
+    assert _raw.output_schema is None
