@@ -100,6 +100,8 @@ class TestLogSchema:
             "reason",
             "error_type",
             "error_message",
+            # v1.0.3 #3 addition.
+            "doc_url",
         )
 
 

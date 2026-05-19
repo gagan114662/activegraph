@@ -55,7 +55,7 @@ from activegraph.runtime.exec_errors import (
     RuntimeContextRequiredError,
 )
 from activegraph.runtime.patterns import UnsupportedPatternError
-from activegraph.runtime.runtime import Runtime
+from activegraph.runtime.runtime import BehaviorFailure, Runtime
 from activegraph.store import (
     CorruptedEventPayloadError,
     DuplicateEventError,
@@ -125,6 +125,7 @@ __all__ = [
     "AmbiguousToolError",
     "ApprovalNotFoundError",
     "Behavior",
+    "BehaviorFailure",
     "BehaviorNotFoundError",
     "Budget",
     "Clock",
@@ -221,4 +222,4 @@ __all__ = [
     "tool",
 ]
 
-__version__ = "1.0.2.post1"
+__version__ = "1.0.3"

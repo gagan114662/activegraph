@@ -41,6 +41,10 @@ LOG_FIELDS: tuple[str, ...] = (
     "reason",
     "error_type",
     "error_message",
+    # v1.0.3 #3: behavior.failed WARNING log carries the More: URL
+    # for the failure reason's documentation page. Operators tail
+    # logs and click through to the reason's doc-page from the URL.
+    "doc_url",
 )
 
 # Reserved attributes on every LogRecord (stdlib internals). Any

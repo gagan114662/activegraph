@@ -51,7 +51,7 @@ from typing import Any, Optional
 
 from activegraph.llm.errors import LLMBehaviorError
 from activegraph.llm.provider import LLMProvider
-from activegraph.llm.types import LLMMessage, LLMResponse
+from activegraph.llm.types import LLMMessage, LLMResponse, ToolCall
 
 
 def _now_iso() -> str:
@@ -188,6 +188,21 @@ def _response_from_fixture(
     cost = rdata.get("cost_usd", "0")
     if not isinstance(cost, Decimal):
         cost = Decimal(str(cost))
+    # v1.0.3 #4: reconstruct tool_calls from the fixture so multi-turn
+    # tool-use exchanges replay correctly. Pre-v1.0.3 fixtures and
+    # non-tool-using fixtures have no tool_calls key (or null) and
+    # round-trip to None — backward compatible.
+    tool_calls_raw = rdata.get("tool_calls")
+    tool_calls: Optional[list[ToolCall]] = None
+    if tool_calls_raw:
+        tool_calls = [
+            ToolCall(
+                id=tc.get("id", ""),
+                name=tc.get("name", ""),
+                args=dict(tc.get("args") or {}),
+            )
+            for tc in tool_calls_raw
+        ]
     return LLMResponse(
         raw_text=rdata.get("raw_text", ""),
         parsed=parsed,
@@ -200,6 +215,7 @@ def _response_from_fixture(
         seed=rdata.get("seed"),
         cache_hit=False,
         provider_meta=dict(rdata.get("provider_meta", {}) or {}),
+        tool_calls=tool_calls,
     )
 
 

@@ -205,19 +205,39 @@ class Graph:
             [self._relations[i] for i in seen_rels if i in self._relations],
         )
 
-    def query(
+    def objects(
         self,
-        object_type: Optional[str] = None,
+        type: Optional[str] = None,
         where: Optional[dict[str, Any]] = None,
     ) -> list[Object]:
+        """Return objects matching `type` and/or `where`.
+
+        v1.0.3 #1: the canonical query API on `Graph`, mirroring
+        `View.objects(type=...)` so call sites read the same inside
+        and outside behaviors. `Graph.query(object_type=...)` is kept
+        as a backward-compatible alias.
+        """
         out: list[Object] = []
         for o in self._objects.values():
-            if object_type is not None and o.type != object_type:
+            if type is not None and o.type != type:
                 continue
             if where and not _eval_where_on_object(where, o):
                 continue
             out.append(o)
         return out
+
+    def query(
+        self,
+        object_type: Optional[str] = None,
+        where: Optional[dict[str, Any]] = None,
+    ) -> list[Object]:
+        """Backward-compatible alias for :meth:`objects`. v1.0.3 #1.
+
+        New code should use ``graph.objects(type=...)`` — the kwarg
+        ``type`` matches :meth:`View.objects` so the call reads the
+        same in and out of behaviors.
+        """
+        return self.objects(type=object_type, where=where)
 
     def has_object_of_type(self, type_: str) -> bool:
         return any(o.type == type_ for o in self._objects.values())

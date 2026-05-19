@@ -68,6 +68,67 @@ def test_query_filters_by_type_and_where():
     assert high[0].data["text"] == "x"
 
 
+# v1.0.3 #1: graph.objects(type=...) as the canonical query API,
+# matching View.objects(type=...) so call sites read the same inside
+# and outside behaviors. graph.query(object_type=...) stays as a
+# backward-compatible alias.
+
+
+def test_objects_filters_by_type():
+    g = _g()
+    g.add_object("claim", {"text": "x"})
+    g.add_object("claim", {"text": "y"})
+    g.add_object("task", {"title": "t"})
+
+    claims = g.objects(type="claim")
+    assert {o.data["text"] for o in claims} == {"x", "y"}
+    assert all(o.type == "claim" for o in claims)
+
+
+def test_objects_filters_by_where():
+    g = _g()
+    g.add_object("claim", {"text": "x", "confidence": 0.9})
+    g.add_object("claim", {"text": "y", "confidence": 0.4})
+
+    high = g.objects(type="claim", where={"confidence": {">": 0.5}})
+    assert len(high) == 1
+    assert high[0].data["text"] == "x"
+
+
+def test_objects_with_no_kwargs_returns_every_object():
+    # Same semantics as View.objects() with no args: full slice.
+    # graph.objects() is a strict superset of graph.all_objects()
+    # (which is kept for callers that prefer the explicit-no-filter
+    # name and for backward compat).
+    g = _g()
+    g.add_object("claim", {"text": "x"})
+    g.add_object("task", {"title": "t"})
+
+    assert {o.id for o in g.objects()} == {o.id for o in g.all_objects()}
+
+
+def test_objects_and_query_return_the_same_results():
+    g = _g()
+    g.add_object("claim", {"text": "x", "confidence": 0.9})
+    g.add_object("claim", {"text": "y", "confidence": 0.4})
+    g.add_object("task", {"title": "t"})
+
+    new = g.objects(type="claim", where={"confidence": {">": 0.5}})
+    old = g.query(object_type="claim", where={"confidence": {">": 0.5}})
+    assert [o.id for o in new] == [o.id for o in old]
+
+
+def test_query_alias_still_works_with_positional_arg():
+    # External code that passed the type positionally to query()
+    # continues to work — the alias keeps the (object_type=, where=)
+    # kwarg shape and the parameter order from v1.0.2.
+    g = _g()
+    g.add_object("claim", {"text": "x"})
+    g.add_object("task", {"title": "t"})
+
+    assert {o.type for o in g.query("claim")} == {"claim"}
+
+
 def test_neighborhood_walks_to_depth():
     g = _g()
     a = g.add_object("task", {})

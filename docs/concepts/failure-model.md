@@ -82,6 +82,61 @@ discriminator code so downstream code can branch on the failure mode
 without parsing prose. The codes are documented in
 [Reference: Events](../reference/events/).
 
+## Observing failures in caller code
+
+The framework gives you two surfaces for noticing failures without
+subscribing a `@behavior` to `behavior.failed`:
+
+**1. The WARNING log line.** Every `behavior.failed` emission produces
+one log line at `WARNING` level on the `activegraph.runtime` logger:
+
+```
+WARNING activegraph.runtime: behavior failed: my_behavior (reason=llm.network_error)
+```
+
+The structured log record carries `behavior`, `event_id`, `reason`,
+`error_type`, `error_message`, and a `doc_url` pointing at the reason's
+documentation page. Operators tail logs and click through to the
+doc-page from the URL.
+
+Opt out via the standard Python logging API:
+
+```python
+import logging
+logging.getLogger("activegraph.runtime").setLevel(logging.ERROR)
+```
+
+**2. The `Runtime.errors` property.** After a run, inspect failures
+programmatically without parsing event payloads:
+
+```python
+rt.run_goal("...")
+for err in rt.errors:
+    if err.reason == "llm.network_error":
+        retry_with_backoff(err.event_id)
+```
+
+Each `err` is a `BehaviorFailure` named tuple with five fields plus
+the `behavior.failed` event id:
+
+| Field | Meaning |
+| --- | --- |
+| `behavior` | the failing behavior's name |
+| `event_id` | the triggering event's id |
+| `reason` | the v0.6 #11 reason code (None for raw exceptions) |
+| `exception_type` | the Python exception class name |
+| `message` | the exception's `str(...)` |
+| `failed_event_id` | the `behavior.failed` event's id |
+
+The property reads from the graph's event log on each access — the
+events are the source of truth and the property is a structured
+projection. No caching, no listeners, no new runtime state.
+
+The two surfaces are *additive* and don't change the failure model:
+events stay the durable record, behaviors that fail still don't raise
+out of `run_goal()`, and existing code subscribing to `behavior.failed`
+keeps working unchanged.
+
 ## "When in doubt, an event"
 
 If you're writing a behavior and you're about to raise an exception

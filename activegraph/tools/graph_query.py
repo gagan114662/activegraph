@@ -68,7 +68,7 @@ def make_graph_query_tool(graph) -> Tool:
     """
 
     def fn(args: GraphQueryInput, ctx: ToolContext) -> GraphQueryOutput:
-        results = graph.query(object_type=args.object_type, where=args.where)
+        results = graph.objects(type=args.object_type, where=args.where)
         truncated = len(results) > args.limit
         results = results[: args.limit]
         return GraphQueryOutput(

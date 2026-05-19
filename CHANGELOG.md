@@ -17,13 +17,182 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 
 Nothing yet. v1.1 scope is tracked in
 [CONTRACT.md § v1.1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md).
+v1.0.3 surfaces multiple v1.1 candidates (dict-form `output_schema=`,
+`on_failure=` callback on `run_goal()`, OpenAI tool-use translation,
+fire-once-on-condition aggregation triggers, pack-load-time
+cross-provider validation); a contract-review work item handles v1.1
+backlog consolidation.
 
-Two additional v1.0.1 user-test findings remain pending and are
-scheduled for v1.0.3 / v1.1: `output_schema=` accepting plain dicts
-vs Pydantic models, and silent `behavior.failed` UX when no handler
-observes the event. Both need design consideration and are tracked
-in the HANDOFF working notes for the next session rather than this
-changelog.
+## [v1.0.3] — 2026-05-19
+
+Comprehensive response to two user-test reports. Four findings span
+the framework's user-facing API surface, the largest single release
+since v1.0.1. The framing — patch release on the adoption-surface
+milestone, one commit per finding for independent review — matches
+v1.0.1 / v1.0.2. The two prior user-test findings carried forward
+into this release (`output_schema=` UX and silent `behavior.failed`
+UX) are addressed in #2 and #3.
+
+### The four findings
+
+  v1.0.3 #1 — graph.objects(type=...) as canonical query API
+  v1.0.3 #2 — @llm_behavior(output_schema=) strict-validates at
+              decoration time (dict-form filed as v1.1 candidate)
+  v1.0.3 #3 — WARNING log + Runtime.errors property for behavior.failed
+  v1.0.3 #4 — multi-turn tool-use messages carry full content blocks
+
+### Added
+
+- **`Graph.objects(type=..., where=...)` (v1.0.3 #1).** Canonical
+  query API on `Graph`, mirroring `View.objects(type=...)` so call
+  sites read the same inside and outside behaviors. External users
+  who reached for the natural form previously hit `AttributeError`;
+  the docs even showed the call. `Graph.query(object_type=...)`
+  stays as a backward-compatible alias — no deprecation in v1.0.3.
+- **`Runtime.errors -> list[BehaviorFailure]` (v1.0.3 #3).** A
+  read-only property projecting `behavior.failed` events from the
+  graph's event log into structured named-tuples. Five fields per
+  failure (`behavior`, `event_id`, `reason`, `exception_type`,
+  `message`) plus `failed_event_id` for callers that want the full
+  payload. The events stay the source of truth; the property is a
+  view.
+- **`BehaviorFailure` (v1.0.3 #3).** New `NamedTuple` exported from
+  the top-level `activegraph` namespace. Distinct from Python's
+  builtin `RuntimeError` — the name was chosen so it doesn't shadow.
+- **`LLMMessage.tool_calls` (v1.0.3 #4).** Additive field
+  (`Optional[tuple[ToolCall, ...]]`, default `None`) carrying the
+  originating `ToolCall` objects on assistant messages that
+  triggered tool_use. The provider adapter reconstructs the
+  wire-format content blocks from this field.
+- **`doc_url` in the structured log schema (v1.0.3 #3).** The JSON
+  log formatter now emits `doc_url` (when present). The
+  `behavior.failed` WARNING log carries the URL pointing at the
+  reason's class-level documentation page so operators tailing
+  logs can click through.
+
+### Changed
+
+- **`@llm_behavior(output_schema=)` strict-validates at decoration
+  time (v1.0.3 #2).** Passing anything that isn't `None` or a
+  Pydantic `BaseModel` subclass raises `TypeError` from the
+  decorator with a structured message that names the actual type
+  passed and inlines a copy-pasteable code example of the correct
+  form. Previously, a JSON-schema dict raised a `TypeError`
+  internally and the runtime caught it as a generic exception,
+  producing a `behavior.failed` event with reason
+  `llm.schema_violation` and no diagnostic naming the cause.
+  Dict-form `output_schema=` support is a v1.1 candidate.
+- **`Runtime._emit_behavior_failed` emits a WARNING log line
+  (v1.0.3 #3).** Every `behavior.failed` emission produces exactly
+  one log line at `WARNING` level on the `activegraph.runtime`
+  logger. The line carries `behavior`, `event_id`, `reason`,
+  `error_type`, `error_message`, and `doc_url`. The function- and
+  relation-behavior exception handlers now route through this
+  centralized emitter rather than calling `_emit_lifecycle`
+  directly, removing a duplicate `ERROR` log on the function path.
+  Users opt out via standard Python logging configuration.
+- **Multi-turn tool-use message construction (v1.0.3 #4).** When
+  the LLM returns `tool_use` blocks, the runtime appends an
+  `LLMMessage(role="assistant", content=raw_text or "",
+  tool_calls=tuple(response_tool_calls))` to the message history,
+  not just the raw text. The Anthropic provider adapter's
+  `_message_to_anthropic` reconstructs the wire-format content
+  blocks (text + tool_use) on the way out. Single-turn flows and
+  zero-tool assistant messages keep their byte-identical wire
+  serialization. Hashing-stability invariant: `LLMMessage.to_dict()`
+  only emits the `tool_calls` key when non-None, so existing
+  single-turn fixture prompt hashes are unchanged.
+
+### Fixed
+
+- **First user-test report, finding A** —
+  `graph.objects(type="x")` `AttributeError`'d when called on a
+  `Graph` instance. Users who'd been writing
+  `ctx.view.objects(type="x")` inside behaviors hit the gap
+  immediately when trying the equivalent outside a behavior.
+  Fixed by adding `Graph.objects` as the canonical form. See
+  "Added: `Graph.objects(...)`".
+- **First user-test report, finding B** —
+  `@llm_behavior(output_schema={"type": "object", ...})` silently
+  produced zero results: the dict raised `TypeError` internally,
+  the runtime emitted `behavior.failed` with
+  `reason="llm.schema_violation"`, and the diagnostic carried no
+  hint that the user had passed a dict instead of a Pydantic
+  class. Fixed by failing at the `@llm_behavior(...)` line with a
+  structured message + code example. See "Changed:
+  `@llm_behavior(output_schema=)` strict-validates".
+- **First user-test report, finding C** — `runtime.run_goal()`
+  returned cleanly with zero results when behaviors failed,
+  leaving users no signal short of inspecting `graph._events`.
+  Fixed by emitting a WARNING log line and exposing
+  `Runtime.errors`. See "Added: `Runtime.errors`" and "Changed:
+  `_emit_behavior_failed` emits a WARNING log line".
+- **Second user-test report, finding D** — multi-turn tool-use
+  exchanges through the Vertex AI proxy returned HTTP 400 because
+  the runtime appended only `raw_text` to the message history after
+  a tool_use turn, dropping the tool_use blocks Anthropic's spec
+  requires for matching subsequent tool_result blocks. Fixed by
+  carrying `ToolCall` objects on the assistant message and
+  reconstructing the content blocks in `_message_to_anthropic`.
+  See "Added: `LLMMessage.tool_calls`" and "Changed: multi-turn
+  tool-use message construction".
+
+### Examples
+
+No example changes in this release. The bundled Diligence pack and
+the BabyAGI example continue to run unchanged against the new
+surfaces; their tool-using behaviors exercise v1.0.3 #4's fix
+through the existing fixture path.
+
+### Documentation
+
+- **`docs/concepts/graph.md`** already showed
+  `graph.objects(type="claim")` as the canonical form; v1.0.3 #1
+  makes that documentation match the implementation. No prose
+  change required.
+- **`docs/concepts/failure-model.md`** gains an "Observing
+  failures in caller code" section documenting the WARNING log
+  line and the `Runtime.errors` property as the two user-facing
+  surfaces (v1.0.3 #3).
+- **`docs/reference/`** picks up the new `BehaviorFailure`
+  NamedTuple shape and the `Runtime.errors` property.
+
+### Migration from v1.0.2.post1
+
+Forward-compatible. No code changes required.
+
+```bash
+pip install --upgrade activegraph==1.0.3
+```
+
+- `graph.query(object_type=...)` keeps working byte-identically;
+  new code uses `graph.objects(type=...)`.
+- `@llm_behavior(output_schema=SomeBaseModel)` keeps working
+  byte-identically. Callers passing a JSON-schema dict will see a
+  `TypeError` at the decorator line instead of a silent
+  `behavior.failed` at first LLM call — the error names what they
+  passed and shows the correct form.
+- `runtime.run_goal()` keeps working byte-identically; the new
+  WARNING log line is opt-out via stdlib logging configuration.
+  Code that inspected `graph._events` for `behavior.failed`
+  continues to work; the new `Runtime.errors` property is the
+  ergonomic alternative.
+- Multi-turn tool-use exchanges send extra content blocks on the
+  wire now. Direct Anthropic API access keeps working;
+  Vertex-AI-proxy users stop hitting HTTP 400.
+
+### Provider non-promises in v1.0.3
+
+Inheriting v1.0.2 / v1.0.1 #5 (c). Specifically unchanged:
+
+- `LLMProvider.complete()` / `estimate_cost()` / `count_tokens()`
+  signatures stay locked at v0.6 #3 / v0.7. v1.0.2's additive
+  members (`default_model`, `recognizes_model`) are unchanged.
+- The closed CONTRACT v0.6 #11 reason taxonomy is unchanged.
+- OpenAI tool-use translation stays a v1.1 candidate per
+  v1.0.1 #5 (c) clause 2.
+- The pack format, the exception hierarchy, and the failure model
+  are unchanged.
 
 ## [v1.0.2.post1] — 2026-05-19
 
