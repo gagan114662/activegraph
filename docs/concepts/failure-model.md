@@ -132,6 +132,12 @@ The property reads from the graph's event log on each access — the
 events are the source of truth and the property is a structured
 projection. No caching, no listeners, no new runtime state.
 
+The two surfaces use different field names for the same values:
+the WARNING log line uses the v0.8 #6 structured-logging schema
+keys (`error_type` / `error_message`), while `BehaviorFailure`
+uses Python-conventional attribute names (`exception_type` /
+`message`). The values are identical — only the names differ.
+
 The two surfaces are *additive* and don't change the failure model:
 events stay the durable record, behaviors that fail still don't raise
 out of `run_goal()`, and existing code subscribing to `behavior.failed`
