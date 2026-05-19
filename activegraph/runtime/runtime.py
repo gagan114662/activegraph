@@ -65,7 +65,7 @@ def _monotonic() -> float:
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable, Iterable, Optional, Union
+from typing import Any, Callable, Iterable, NamedTuple, Optional, Union
 
 from activegraph.behaviors.base import Behavior, LLMBehavior, RelationBehavior
 from activegraph.behaviors.decorators import get_registry
@@ -168,6 +168,58 @@ class Context:
         return self._runtime._add_pending_approval(
             object_type=object_type, data=data, reason=reason
         )
+
+
+class BehaviorFailure(NamedTuple):
+    """Structured view of a ``behavior.failed`` event for
+    :attr:`Runtime.errors`. CONTRACT v1.0.3 #3.
+
+    Five fields capture the operationally important parts of a
+    failure: which behavior, which event triggered it, the v0.6 #11
+    reason code (when present), the Python exception class name, and
+    the exception message. ``failed_event_id`` ties the structured
+    view back to the underlying ``behavior.failed`` event so callers
+    that want the full payload (traceback, payload extras) can
+    re-read it from ``runtime.graph._events``.
+
+    Not exposed as a class users construct — it's a projection of
+    the events the runtime emits, and the runtime is the only writer.
+    Distinct from Python's builtin ``RuntimeError``; named
+    ``BehaviorFailure`` to avoid the shadow.
+    """
+
+    behavior: str
+    event_id: str
+    reason: Optional[str]
+    exception_type: str
+    message: str
+    failed_event_id: str
+
+
+# Map v0.6 #11 reason-code prefixes to the framework error class's
+# doc-page slug. Used by the WARNING log emitted from
+# `_emit_behavior_failed` so the log line carries a More: URL the
+# operator can open. The slugs are class-level (the v1.0 #4 More:
+# URL convention) — a per-reason slug doesn't exist today.
+_REASON_PREFIX_TO_DOC_SLUG: tuple[tuple[str, str], ...] = (
+    ("llm.", "llm-behavior-error"),
+    ("tool.", "tool-error"),
+    ("budget.", "budget-exhausted"),
+)
+
+
+def _doc_url_for_reason(reason: str) -> str:
+    """Return the More: doc-page URL for a v0.6 #11 reason code.
+
+    Defaults to the generic execution-error page when no prefix
+    matches (covers ``exception.*`` reasons from generic catches).
+    """
+    from activegraph.errors import DOCS_BASE_URL
+
+    for prefix, slug in _REASON_PREFIX_TO_DOC_SLUG:
+        if reason.startswith(prefix):
+            return f"{DOCS_BASE_URL}/errors/{slug}"
+    return f"{DOCS_BASE_URL}/errors/execution-error"
 
 
 class Runtime:
@@ -325,6 +377,38 @@ class Runtime:
     @property
     def run_id(self) -> str:
         return self.graph.run_id
+
+    @property
+    def errors(self) -> list[BehaviorFailure]:
+        """Accumulated ``behavior.failed`` events as structured tuples.
+
+        v1.0.3 #3. Reads from ``self.graph._events`` on each access —
+        the events are the source of truth and this property is a
+        projection. No caching, no listener registration, no new
+        state. Callers can inspect failures programmatically without
+        reaching into ``graph._events`` or parsing payload dicts.
+
+        Each :class:`BehaviorFailure` carries five operationally
+        useful fields plus the underlying ``behavior.failed`` event
+        id for callers that want to re-read the full payload (e.g.,
+        traceback, LLM payload extras).
+        """
+        out: list[BehaviorFailure] = []
+        for e in self.graph._events:
+            if e.type != "behavior.failed":
+                continue
+            p = e.payload
+            out.append(
+                BehaviorFailure(
+                    behavior=p.get("behavior", ""),
+                    event_id=p.get("event_id", ""),
+                    reason=p.get("reason"),
+                    exception_type=p.get("exception_type", ""),
+                    message=p.get("message", ""),
+                    failed_event_id=e.id,
+                )
+            )
+        return out
 
     # ---------- listener ----------
 
@@ -661,27 +745,12 @@ class Runtime:
                 "activegraph_behaviors_failed_total",
                 {"behavior": b.name, "reason": f"exception.{type(e).__name__}"},
             )
-            self._log.error(
-                "behavior failed",
-                extra=runtime_log_extra(
-                    run_id=self.graph.run_id,
-                    event_id=event.id,
-                    behavior=b.name,
-                    reason=f"exception.{type(e).__name__}",
-                    error_type=type(e).__name__,
-                    error_message=str(e),
-                ),
-            )
-            self._emit_lifecycle(
-                "behavior.failed",
-                {
-                    "behavior": b.name,
-                    "event_id": event.id,
-                    "exception_type": type(e).__name__,
-                    "message": str(e),
-                    "traceback": traceback.format_exc(),
-                },
-            )
+            # v1.0.3 #3: route through _emit_behavior_failed so the
+            # WARNING log line and the event emission stay in one
+            # place. The previous ERROR log is removed — the
+            # centralized emitter handles logging at WARNING for
+            # every behavior.failed.
+            self._emit_behavior_failed(b.name, event.id, e)
             return
 
         self.metrics.histogram(
@@ -1411,6 +1480,14 @@ class Runtime:
     ) -> None:
         """Centralized behavior.failed emission. CONTRACT #13 plus
         v0.6 #11 (optional `reason` + LLM-specific extras).
+
+        v1.0.3 #3: emits a WARNING log line so callers running
+        ``runtime.run_goal()`` see failures without subscribing to
+        ``behavior.failed`` or inspecting ``graph._events``. Users
+        opt out via standard ``logging.getLogger('activegraph.runtime')``
+        configuration. Every ``behavior.failed`` emission routes
+        through this method so exactly one log line is produced per
+        failure at one consistent level.
         """
 
         tb_str = "".join(
@@ -1429,6 +1506,24 @@ class Runtime:
             for k, v in extras.items():
                 if k not in payload:
                     payload[k] = v
+        # v1.0.3 #3: WARNING log with doc_url pointing at the reason's
+        # documentation page. Slug is class-level (the v1.0 #4 More:
+        # URL convention) — LLMBehaviorError for llm.*, ToolError for
+        # tool.*, ConfigurationError for budget.*, else the generic
+        # execution-error page.
+        log_reason = reason or f"exception.{type(exc).__name__}"
+        self._log.warning(
+            f"behavior failed: {behavior_name} (reason={log_reason})",
+            extra=runtime_log_extra(
+                run_id=self.graph.run_id,
+                event_id=event_id,
+                behavior=behavior_name,
+                reason=log_reason,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                doc_url=_doc_url_for_reason(log_reason),
+            ),
+        )
         self._emit_lifecycle("behavior.failed", payload)
 
     def _invoke_relation(
@@ -1470,16 +1565,10 @@ class Runtime:
         try:
             b.run(relation, event, bgraph, ctx)
         except Exception as e:
-            self._emit_lifecycle(
-                "behavior.failed",
-                {
-                    "behavior": b.name,
-                    "event_id": event.id,
-                    "exception_type": type(e).__name__,
-                    "message": str(e),
-                    "traceback": traceback.format_exc(),
-                },
-            )
+            # v1.0.3 #3: route through _emit_behavior_failed so
+            # relation-behavior failures go through the same WARNING
+            # log + event emission path as function and LLM behaviors.
+            self._emit_behavior_failed(b.name, event.id, e)
             return
 
         self._emit_lifecycle(
