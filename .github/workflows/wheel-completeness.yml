@@ -27,11 +27,18 @@ on:
       - "tests/test_wheel_completeness.py"
       - ".github/workflows/wheel-completeness.yml"
   pull_request:
-    paths:
-      - "activegraph/**"
-      - "pyproject.toml"
-      - "tests/test_wheel_completeness.py"
-      - ".github/workflows/wheel-completeness.yml"
+    # No paths: filter. The gate is a required status check on
+    # main; a paths-filtered pull_request trigger silently skips
+    # the job on PRs that don't touch the filtered paths (docs-
+    # only PRs, workflow-file-only PRs, etc.), and a missing
+    # check is not a passing check — the merge is blocked with
+    # no recourse short of pushing a no-op code change. Running
+    # the gate on every PR is slightly redundant on docs-only
+    # PRs (the wheel hasn't changed; the gate passes trivially)
+    # but it produces a green check that the branch protection
+    # rule can match against, which is what the rule requires.
+    # Push trigger keeps its paths filter — only the PR-side gate
+    # needs to run unconditionally.
   workflow_dispatch:
 
 jobs:
