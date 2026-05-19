@@ -181,6 +181,33 @@ class Graph:
             out.append(r)
         return out
 
+    def relations(
+        self,
+        source: Optional[str] = None,
+        target: Optional[str] = None,
+        type: Optional[str] = None,
+    ) -> list[Relation]:
+        """Return relations filtered by ``source``, ``target``, and/or ``type``.
+
+        v1.0.4 #1: the canonical filter API on ``Graph``. Decomposes the
+        v0 ``get_relations(object_id=, direction=)`` axis into separate
+        ``source`` and ``target`` slots so the call reads the way users
+        already write it (matches ``docs/concepts/graph.md``). Filter
+        kwargs compose by AND; calling with no kwargs returns every
+        relation. ``Graph.get_relations(object_id=, type=, direction=)``
+        stays as a backward-compatible alias.
+        """
+        out: list[Relation] = []
+        for r in self._relations.values():
+            if source is not None and r.source != source:
+                continue
+            if target is not None and r.target != target:
+                continue
+            if type is not None and r.type != type:
+                continue
+            out.append(r)
+        return out
+
     def neighborhood(self, object_id: str, depth: int = 1) -> tuple[list[Object], list[Relation]]:
         if object_id not in self._objects:
             return ([], [])

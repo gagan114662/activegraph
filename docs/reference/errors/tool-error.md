@@ -137,3 +137,9 @@ the audit trail records what happened.
 - [`failure-model`](../../concepts/failure-model.md) — why
   `tool.responded` carries failures as structured events rather
   than escaping exceptions.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

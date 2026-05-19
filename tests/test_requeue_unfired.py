@@ -128,6 +128,70 @@ class TestRequeueUnfiredDoesNotFalselyRequeue:
                 except FileNotFoundError:
                     pass
 
+    def test_zero_subscriber_event_ids_are_absent_from_requeue_set_on_load(self):
+        """Boundary-anchored sibling to the queue_depth assertion above.
+
+        CONTRACT v0.5 #8 names the boundary as `Runtime.load` and the
+        subject as the requeue set itself: "events with NO
+        `behavior.started` referencing them are re-queued; events that
+        any behavior started on are NOT re-queued." A zero-subscriber
+        event has no `behavior.started` referencing it but is
+        popped-and-discarded by the runtime loop — so the contract
+        carve-out is that zero-subscriber events are NOT in the
+        requeue set on load.
+
+        The sibling test above asserts `queue_depth == 0` (the
+        implementation's symptom). This test asserts directly on the
+        boundary the contract names: it identifies the zero-subscriber
+        event IDs from the saved log, reloads, and verifies those IDs
+        are absent from `rt._queue` after `_requeue_unfired` ran on
+        load. Anchors on what the contract says, not on whether the
+        post-load queue depth happens to be zero (CONTRACT v1.0.4 #4,
+        Standing Rule §2).
+        """
+        _register_subscriber_for_goal_only()
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            path = f.name
+        os.remove(path)
+        try:
+            g = Graph()
+            rt = Runtime(g, persist_to=path)
+            rt.run_goal("test_goal")
+            rt.save_state()
+
+            zero_subscriber_event_ids = {
+                e.id for e in rt.graph.events
+                if e.type == "downstream.no_subscribers"
+            }
+            assert zero_subscriber_event_ids, (
+                "Fixture is supposed to produce at least one "
+                "downstream.no_subscribers event. Without it, the "
+                "contract claim's specific subject (the zero-"
+                "subscriber carve-out) isn't being exercised."
+            )
+
+            _register_subscriber_for_goal_only()
+            rt2 = Runtime.load(path, run_id=rt.run_id)
+
+            requeued_event_ids = {e.id for e in rt2._queue._q}  # noqa: SLF001
+            falsely_requeued = zero_subscriber_event_ids & requeued_event_ids
+            assert not falsely_requeued, (
+                f"CONTRACT v0.5 #8 carve-out: zero-subscriber events are "
+                f"popped-and-discarded with no behavior.started emitted, "
+                f"so on Runtime.load they must NOT appear in the requeue "
+                f"set. The following zero-subscriber event IDs were "
+                f"falsely requeued: {sorted(falsely_requeued)}. This is "
+                f"the v0.5 #8 boundary the contract names; failure here "
+                f"means the requeue set itself violates the contract "
+                f"regardless of what queue_depth summarizes."
+            )
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.remove(path + suffix)
+                except FileNotFoundError:
+                    pass
+
 
 class TestRequeueUnfiredPreservesCrashRecovery:
     """The fix narrows the requeue scope to events after the last drain.

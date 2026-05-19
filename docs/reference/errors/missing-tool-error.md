@@ -107,3 +107,9 @@ broader principle.
 - [`tool-not-found-error`](tool-not-found-error.md) — fires at
   explicit `rt.get_tool(name)` lookups (operator-side, not
   registration-side).
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

@@ -100,3 +100,9 @@ broader principle.
 - `activegraph.IDGen` — the canonical id generator. Use it instead
   of hand-constructing ids in test fixtures unless you need fixed
   ids for a specific reason.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

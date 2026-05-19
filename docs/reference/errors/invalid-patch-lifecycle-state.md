@@ -113,3 +113,9 @@ principle.
   primitive outside its intended context."
 - [`failure-model`](../../concepts/failure-model.md) — why patch
   lifecycle violations are exceptions, not events.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

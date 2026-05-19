@@ -109,3 +109,9 @@ where silently doing nothing would corrupt the audit trail.
   are exceptions, not events.
 - [`concepts/policies`](../../concepts/policies.md) — the approval
   lifecycle that `ctx.propose_object` participates in.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

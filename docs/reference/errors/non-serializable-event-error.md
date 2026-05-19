@@ -96,3 +96,9 @@ broader principle.
   the decode-time sibling. Fires when stored JSON bytes don't parse.
 - `activegraph/store/serde.py` — the canonical adapter clauses. Add
   new types there if they should serialize framework-wide.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

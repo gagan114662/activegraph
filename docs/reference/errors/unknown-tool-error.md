@@ -134,3 +134,9 @@ broader principle.
   `@llm_behavior` declares a tool that isn't registered.
 - [`llm-behavior-error`](llm-behavior-error.md) — the LLM-side
   failure carrier; covers the parse/schema/network reasons.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

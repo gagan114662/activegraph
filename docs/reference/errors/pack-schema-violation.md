@@ -155,3 +155,9 @@ broader principle.
 - [Authoring packs](../../guides/authoring-packs.md) — the
   canonical reference for declaring `ObjectType` and `RelationType`
   schemas in a pack.
+
+
+---
+
+See [Observing failures in caller code](../../concepts/failure-model.md#observing-failures-in-caller-code)
+for `Runtime.errors` and the `BehaviorFailure` shape.

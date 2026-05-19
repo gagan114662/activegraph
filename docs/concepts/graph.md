@@ -38,11 +38,20 @@ pages link here for it:
 You can read the graph state at any time:
 
 ```python
-graph.all_objects()                 # every object
-graph.objects(type="claim")         # filtered by type
-graph.relations(source=claim_id)    # outgoing edges
-graph.get_object(object_id)         # by id
+graph.all_objects()                       # every object
+graph.objects(type="claim")               # filtered by type
+graph.relations(source=claim_id)          # outgoing edges
+graph.relations(target=claim_id)          # incoming edges
+graph.relations(type="depends_on")        # by edge type
+graph.get_object(object_id)               # by id
 ```
+
+`graph.relations(source=, target=, type=)` is the canonical filter
+API on `Graph`; all three kwargs compose by AND, and calling with
+no kwargs returns every relation.
+`graph.get_relations(object_id=, type=, direction=)` is an alias
+preserved for backward compatibility; new code should use
+`graph.relations(...)`.
 
 But you can't mutate it except through events. There's no
 `graph.objects["x"] = ...` setter; every mutation goes through a
