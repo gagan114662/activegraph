@@ -18,13 +18,19 @@ Each step is a subscription, not a function call, so the loop runs as
 long as new task objects keep landing on the graph. The trace records
 every mutation; the frame carries the objective into every LLM call.
 
-Run it:
+Run it (defaults to Anthropic):
 
     export ANTHROPIC_API_KEY='your-key-here'
     python examples/babyagi.py "Plan a 3-day intro to Rust"
+
+Switch providers with --provider openai (CONTRACT v1.0.1 #5):
+
+    export OPENAI_API_KEY='your-key-here'
+    python examples/babyagi.py --provider openai "Plan a 3-day intro to Rust"
 """
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from datetime import datetime, timezone
@@ -40,7 +46,7 @@ from activegraph import (
     llm_behavior,
     register,
 )
-from activegraph.llm import AnthropicProvider
+from activegraph.llm import AnthropicProvider, OpenAIProvider
 
 
 # Edit to taste — these ride along on every LLM call as frame constraints.
@@ -48,6 +54,13 @@ DEFAULT_CONSTRAINTS = [
     "Be specific and actionable — avoid vague generalities.",
     "Build incrementally on previous results rather than repeating them.",
 ]
+
+# Per-provider model defaults. Both are fast, cheap members of each
+# family; override at the call site if you want bigger models.
+PROVIDER_DEFAULTS = {
+    "anthropic": {"env": "ANTHROPIC_API_KEY", "model": "claude-haiku-4-5"},
+    "openai": {"env": "OPENAI_API_KEY", "model": "gpt-4o-mini"},
+}
 
 
 class TaskResult(BaseModel):
@@ -78,7 +91,6 @@ def initializer(event, graph, ctx):
         "You are the EXECUTION agent in a BabyAGI loop. Carry out the task "
         "concretely. Do NOT plan further steps — another behavior handles that."
     ),
-    model="claude-haiku-4-5",
     output_schema=TaskResult,
     creates=["result"],
 )
@@ -102,7 +114,6 @@ def executor(event, graph, ctx, llm_output: TaskResult):
         "result and the overall objective, propose 0-4 follow-ups. Return "
         "an empty list ONLY when the objective is fully accomplished."
     ),
-    model="claude-haiku-4-5",
     output_schema=NewTasks,
     creates=["task"],
 )
@@ -117,6 +128,7 @@ def task_creator(event, graph, ctx, llm_output: NewTasks):
 def run_babyagi(
     objective: str,
     *,
+    provider: str = "anthropic",
     constraints: list[str] | None = None,
     max_events: int = 100,
     max_seconds: int = 60,
@@ -127,12 +139,20 @@ def run_babyagi(
     for b in (initializer, executor, task_creator):
         register(b)
 
+    # Pin model on the LLM behaviors per provider. Both decorators left
+    # their `model=` unset above so the choice happens here, downstream
+    # of the --provider flag.
+    model = PROVIDER_DEFAULTS[provider]["model"]
+    executor.model = model
+    task_creator.model = model
+    llm_provider = OpenAIProvider() if provider == "openai" else AnthropicProvider()
+
     os.makedirs("traces", exist_ok=True)
     trace_path = f"traces/babyagi-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.sqlite"
     runtime = Runtime(
         Graph(),
         frame=Frame(goal=objective, constraints=list(constraints or DEFAULT_CONSTRAINTS)),
-        llm_provider=AnthropicProvider(),
+        llm_provider=llm_provider,
         budget={"max_events": max_events, "max_seconds": max_seconds},
         persist_to=trace_path,
     )
@@ -141,15 +161,24 @@ def run_babyagi(
 
 
 def main() -> int:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    parser = argparse.ArgumentParser(description="BabyAGI on Active Graph.")
+    parser.add_argument("objective", nargs="?",
+                        default="Plan a 3-day intro to Rust programming")
+    parser.add_argument("--provider", choices=["anthropic", "openai"],
+                        default="anthropic",
+                        help="LLM provider; defaults to anthropic")
+    args = parser.parse_args()
+
+    env = PROVIDER_DEFAULTS[args.provider]["env"]
+    if not os.environ.get(env):
         print(
-            "ANTHROPIC_API_KEY environment variable not set. Set it with:\n"
-            "  export ANTHROPIC_API_KEY='your-key-here'",
+            f"{env} environment variable not set. Set it with:\n"
+            f"  export {env}='your-key-here'",
             file=sys.stderr,
         )
         return 1
-    objective = sys.argv[1] if len(sys.argv) > 1 else "Plan a 3-day intro to Rust programming"
-    trace_path = run_babyagi(objective)
+
+    trace_path = run_babyagi(args.objective, provider=args.provider)
     print(f"\ntrace: {trace_path}")
     print(f"inspect with: activegraph inspect {trace_path}")
     return 0
