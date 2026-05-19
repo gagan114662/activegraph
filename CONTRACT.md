@@ -4321,6 +4321,437 @@ HANDOFF for the next session, not in this CONTRACT entry — they
 need design before they're locked.
 
 
+# v1.0.3 — comprehensive response to two user-test reports
+
+v1.0.2.post1 corrected the validation boundary for v1.0.2 #1
+(cross-provider model validation now fires at both binding moments,
+not lazily). Two independent user-test reports surfaced four more
+findings spanning the framework's user-facing API surface. v1.0.3
+addresses all four in one release.
+
+The framing — patch release on the adoption-surface milestone —
+matches v1.0.1 / v1.0.2. The scope is broader: this is the largest
+single release since v1.0.1 (four findings vs. one or three). The
+discipline that kept earlier patches small still applies: each
+finding gets its own clearly-scoped commit so review is independent
+per finding, no CONTRACT amendments below v1.0 are reopened, and
+all four CI gates stay green.
+
+Backlog note: v1.0.3 surfaces several v1.1 candidates (dict-form
+`output_schema=`, OpenAI tool translation, behavior-level aggregation
+triggers for fire-once-on-condition semantics, the on-failure
+callback parameter for `run_goal()`). Combined with the existing
+v1.1 entries filed in v1.0.1 #5 (c), v1.0.2 #1 (b) (pack-load-time
+validation), and the original v1.1 #1–#4 section below, the v1.1
+backlog is now real and scattered. v1.0.3 does **not** consolidate
+it; a contract-review work item handles backlog consolidation after
+v1.0.3 ships. Each v1.0.3 amendment that defers work names the v1.1
+candidate explicitly so the consolidation pass can sweep them up.
+
+## v1.0.3 #1. `graph.objects(type=...)` is the canonical query API
+
+External users reach for `graph.objects(type="x")` naturally —
+`ctx.view.objects(type="x")` exists and behaves that way inside
+behaviors (CONTRACT #11), and the consistency between view-time and
+graph-time forms is the path of least surprise. The framework
+shipped `graph.query(object_type="x")` instead: different name and
+different parameter name. External users hit `AttributeError`
+immediately when trying the natural form on a `Graph` object.
+
+The fix is additive and small:
+
+- **`Graph.objects(type=None, where=None) -> list[Object]`** is the
+  canonical form. Same kwargs and semantics as `View.objects`
+  (core/view.py:27): filter by `type` and by a `where` dict, return
+  a list. Calling with no arguments returns every object — the
+  behavior `View.objects()` already exhibits — which makes
+  `graph.objects()` a strict superset of `graph.all_objects()`
+  rather than a near-duplicate.
+- **`Graph.query(object_type=None, where=None)`** stays as a
+  backward-compatible alias. No deprecation warning in v1.0.3; the
+  alias keeps `tools/graph_query.py` and any external code working.
+  v1.1 or later can revisit whether to deprecate.
+- **`Graph.all_objects()`** stays as is. Distinct intent
+  (no-filter, mirror of `events` / `relations` properties); kept
+  to avoid breaking the ~10 internal callsites and the documented
+  inspection-debugging pattern.
+
+The naming choice — `objects` not `query` — follows the v0.6
+`View.objects` precedent. The kwarg choice — `type` not
+`object_type` — matches `View.objects`'s parameter name. Both
+surfaces now read the same in user code regardless of whether the
+call site is inside or outside a behavior.
+
+### Why not deprecate `graph.query` in v1.0.3
+
+A deprecation warning costs every existing caller a stderr line.
+The framework has shipped `graph.query` in three releases (v1.0,
+v1.0.1, v1.0.2). The internal tool `tools/graph_query.py` calls it.
+Pack examples and notebook tutorials in the wild may call it. The
+v1.0.3 release is "patch release based on user-test findings," not
+"reshape the query surface." Keeping the alias silent for one
+release lets the docs and ecosystem migrate; v1.1 or later locks
+the decision.
+
+### Documentation
+
+`graph.objects(type=...)` becomes the form shown in
+`docs/concepts/graph.md` and `docs/reference/`. The alias is
+documented once (under the same heading) as
+"`graph.query(object_type=...)` is an alias for backward
+compatibility; new code should use `graph.objects(type=...)`."
+
+## v1.0.3 #2. `@llm_behavior(output_schema=)` strict-validates at decoration time
+
+Users reasonably pass JSON-schema dicts to `output_schema=` because
+that's the de facto cross-provider format for structured output.
+The framework's docstring types it `Optional[type]` — implicit
+"Pydantic BaseModel subclass." The runtime silently fails on dict
+input: the `isinstance()` check inside `_invoke_llm` raises
+`TypeError`, which is caught as a generic exception and emitted as
+a `behavior.failed` event with `reason="llm.schema_violation"`.
+The user sees zero results with no diagnostic naming the cause.
+
+The decision: **strict-validate at decoration time**, not accept
+dicts via conversion. The cause is named at the line where the
+mistake lives (the `@llm_behavior(...)` decorator), no LLM call
+burns budget, and the message hands the user the correct form
+verbatim as a code example.
+
+### Validation shape
+
+`@llm_behavior(output_schema=X)`'s `wrap()` checks, before
+constructing the `LLMBehavior` instance:
+
+- `X is None` → pass (output_schema is optional).
+- `isinstance(X, type) and issubclass(X, BaseModel)` → pass.
+- Anything else → `TypeError` with a structured message naming the
+  actual type passed (`type(X).__name__` for non-None) and an
+  inline code example of the correct form.
+
+Example shape:
+
+```
+TypeError: output_schema must be a Pydantic BaseModel subclass, not dict.
+
+Example:
+    from pydantic import BaseModel
+
+    class MyOutput(BaseModel):
+        result: str
+
+    @llm_behavior(output_schema=MyOutput)
+    def my_behavior(event, graph, ctx, out): ...
+
+Dict-form output_schema (e.g., JSON Schema as a dict) is filed
+as a v1.1 candidate. See CONTRACT v1.0.3 #2.
+```
+
+The "names the actual type" piece matters: passing a dict vs.
+passing `None` accidentally vs. passing a string all want different
+fixes. The error tells the user what they passed.
+
+### Why not accept dicts via conversion
+
+Three reasons accepting dicts via runtime conversion was rejected:
+
+1. JSON-schema → Pydantic conversion at runtime has no first-class
+   Pydantic API. Hand-rolling one adds a feature with its own bug
+   surface in a patch release.
+2. The user's pain (silent failure with confusing
+   `llm.schema_violation` diagnostic) is *fully* addressed by
+   failing early with a clear message. Conversion would close the
+   same pain plus add ergonomics; the marginal gain is a v1.1
+   design pass, not a patch.
+3. Dict-form schema support as an opt-in second form is cleaner
+   as a v1.1 design pass — possibly via a
+   `LLMProvider.recognizes_schema_dict()` method or a separate
+   `output_schema_dict=` keyword — where it can carry its weight
+   rather than being squeezed in here.
+
+**v1.1 candidate.** "Accept JSON-schema dicts as `output_schema=`,
+either via a runtime converter or via a dedicated
+`output_schema_dict=` kwarg. Design pass needed: which providers'
+structured-output APIs accept dicts natively, what the equivalence
+contract between dict-form and Pydantic-form schemas is, what the
+prompt-hash treatment is for fixtures."
+
+### What this is not
+
+- Not a Protocol change. `LLMProvider.complete()` and the rest of
+  the v0.6 #3 / v0.7 / v1.0.2 #1 surface stay locked.
+- Not a behavior-failure reason code change. The v0.6 #11
+  taxonomy is closed; the TypeError surfaces *before* the behavior
+  runs, so no `behavior.failed` event with a new reason code is
+  emitted.
+- Not a runtime-side check. The check lives in the decorator
+  where the mistake happens; the runtime's existing
+  `isinstance(output_schema, type)` callsites stay as a defensive
+  second line.
+
+## v1.0.3 #3. `behavior.failed` carries a user-facing log signal
+
+CONTRACT v0.6 #11 makes failures-as-events a deliberate design
+choice. That stays correct and unchanged in v1.0.3. The gap the
+user-test surfaced is a UX gap, not an architecture gap: the
+current implementation has no user-facing signal when behaviors
+fail during a run. `runtime.run_goal()` returns cleanly with zero
+results; users have to know to inspect `graph._events` for
+`behavior.failed` entries.
+
+The fix is two additive affordances:
+
+### (a) WARNING log on each `behavior.failed` emission
+
+The centralized `Runtime._emit_behavior_failed` (runtime.py:1403)
+gains a `WARNING`-level log line before emission. The function
+behavior path at runtime.py:664 already logs at `ERROR` for the
+exception-escape case; v1.0.3 #3 unifies the surface by logging at
+`WARNING` from the centralized emitter and removing the
+duplicate `ERROR` log so every `behavior.failed` produces exactly
+one log line at one consistent level.
+
+Log shape:
+- Level: `WARNING`.
+- Message: `"behavior failed: <behavior_name> (reason=<reason>)"`.
+- Extra fields via the existing `runtime_log_extra` helper:
+  `behavior`, `event_id`, `reason`, `exception_type`, `message`,
+  plus `doc_url` pointing at the reason's documentation page
+  (`https://docs.activegraph.ai/errors/llm-behavior-error` for
+  `llm.*` reasons; the class-level slug, not a per-reason slug —
+  consistent with the v1.0 #4 More: URL convention).
+
+Users opt out via standard Python logging configuration
+(`logging.getLogger("activegraph.runtime").setLevel(logging.ERROR)`
+or any other filter). Existing code that already captures the
+framework's logger sees the new line at the same logger name.
+
+### (b) `Runtime.errors` property
+
+A new read-only property on `Runtime` exposes accumulated
+`behavior.failed` events from the runtime's graph in a structured
+form:
+
+```python
+runtime.errors  # -> list[RuntimeError]
+```
+
+where each `RuntimeError` (a `NamedTuple`, distinct from Python's
+builtin `RuntimeError`, exported under a non-conflicting name —
+the locked name is `BehaviorFailure`) carries:
+
+- `behavior: str` — the failing behavior's name.
+- `event_id: str` — the triggering event id.
+- `reason: Optional[str]` — the reason code from v0.6 #11 (None
+  for generic exception escapes that have no structured reason).
+- `exception_type: str` — the Python exception class name.
+- `message: str` — the exception's `str(...)`.
+- `failed_event_id: str` — the `behavior.failed` event's id.
+
+The property reads from `runtime.graph._events` on each access
+(cheap; the event list is already in memory). No caching, no
+listener registration, no new state — the events are the source
+of truth and the property is a structured projection.
+
+Users inspect failures programmatically without reaching into
+`graph._events` or parsing payload dicts:
+
+```python
+rt.run_goal("...")
+for err in rt.errors:
+    if err.reason == "llm.network_error":
+        retry(err.event_id)
+```
+
+### What this is not
+
+- **Not** an `on_failure=` callback parameter on `run_goal()` /
+  `run_until_idle()` / `run_until()`. That's a larger affordance
+  and a v1.1 candidate (filed below).
+- **Not** a change to `behavior.failed` event emission. The new
+  log line and the property are *additive*; the event payload,
+  ordering, and listener semantics stay as v0.6 #11 / v1.0
+  locked.
+- **Not** an exception escape. Behaviors that fail still don't
+  raise out of `run_goal()`. The failure-model principle
+  (`docs/concepts/failure-model.md`) is unchanged.
+
+**v1.1 candidate.** "`Runtime.run_goal(..., on_failure=callback)`
+as a first-class affordance for callers who want to react to
+behavior failures without subscribing a `@behavior` to
+`behavior.failed`. Design pass needed: synchronous vs. async
+callback shape, whether the callback can suppress the
+`behavior.failed` event entirely (probably no — events are the
+audit trail), whether `on_failure=` composes with explicit
+`@behavior(on=['behavior.failed'])` subscribers."
+
+### Documentation
+
+`docs/concepts/failure-model.md` gains a "Observing failures in
+caller code" section documenting the WARNING log line and the
+`Runtime.errors` property as the two user-facing surfaces.
+`docs/reference/` gains the `BehaviorFailure` NamedTuple shape.
+
+## v1.0.3 #4. Multi-turn tool-use messages carry full content blocks
+
+The runtime's tool-use turn loop (runtime.py:976-984) appends
+*only* the LLM's `raw_text` to the message history after a
+`tool_use`-bearing assistant turn. Anthropic's API specification
+requires every `tool_result` block in a subsequent user message to
+have a matching `tool_use` block in the preceding assistant
+message. Appending raw_text alone drops the `tool_use` blocks and
+produces messages that violate the spec.
+
+Direct Anthropic API access apparently tolerates the violation
+(responds with a successful follow-up turn). The Vertex AI proxy
+enforces the spec strictly and returns HTTP 400. Any user routing
+Anthropic through Vertex AI hits this bug. Future tightening of
+the direct API to match the proxy would surface the same failure
+for direct users.
+
+This is a bug fix in a hot path. CONTRACT v0.7 / v1.0 didn't lock
+the multi-turn message shape explicitly; v1.0.3 #4 locks it.
+
+### The fix
+
+`LLMMessage` (llm/types.py:35) gains one additive field:
+
+```python
+@dataclass(frozen=True)
+class LLMMessage:
+    role: Role
+    content: str
+    tool_use_id: Optional[str] = None
+    tool_name: Optional[str] = None
+    tool_calls: Optional[tuple[ToolCall, ...]] = None  # v1.0.3 #4
+```
+
+When the runtime appends an assistant message that carried
+`tool_use` blocks, it includes the originating `ToolCall` objects
+alongside the text:
+
+```python
+running_messages.append(
+    LLMMessage(
+        role="assistant",
+        content=turn_response.raw_text or "",
+        tool_calls=tuple(response_tool_calls),
+    )
+)
+```
+
+Provider adapters reconstruct the wire-format content blocks on
+the way out:
+
+- `_message_to_anthropic` (llm/anthropic.py:255) gains an
+  `assistant + tool_calls` branch that emits a content-block list:
+  `{"type": "text", "text": m.content}` (when non-empty) followed
+  by `{"type": "tool_use", "id": tc.id, "name": tc.name, "input":
+  dict(tc.args)}` for each `tc` in `m.tool_calls`.
+- Non-tool-use assistant messages keep the string-content shape;
+  the new branch only fires when `m.tool_calls` is a non-empty
+  tuple. Existing single-turn tool-using behaviors and zero-tool
+  assistant messages are byte-identical on the wire.
+
+### Backward compatibility — prompt hash
+
+`LLMMessage.to_dict()` (used by `_canonical_prompt_payload` in
+recorded.py to compute the prompt hash) only emits the
+`tool_calls` key when non-None. Existing single-turn fixtures
+keep their hashes; new multi-turn fixtures include the field in
+the hash, which is correct — the prompt shape *did* change at the
+wire level for those.
+
+The hashing-stability invariant is locked by an explicit test:
+construct a non-tool-using `LLMMessage`, serialize it, assert the
+absence of the `tool_calls` key.
+
+### Adjacent fix — `RecordedLLMProvider` response roundtripping
+
+`_response_from_fixture` (llm/recorded.py:179) previously dropped
+`tool_calls` when reconstructing an `LLMResponse` from a fixture.
+That meant multi-turn tool-use fixtures were unreachable via the
+recorded provider: even if a recording captured a tool-using
+assistant turn, the replay returned an `LLMResponse` with
+`tool_calls=None`, the runtime's `response_tool_calls` branch
+saw nothing, and the loop exited as if the model had returned a
+final response.
+
+v1.0.3 #4 reconstructs `tool_calls` from the fixture dict in the
+same commit as the runtime fix. Without it, no test of the
+runtime fix is possible through the recorded-provider path.
+Filed as an adjacent fix in the same commit because the two
+together are the unit of testable behavior; splitting them ships
+the runtime fix with no test coverage.
+
+### OpenAI tool support is out of scope
+
+CONTRACT v1.0.1 #5 (c) clause 2 documented OpenAI tool support as
+a v1.1 candidate. v1.0.3 #4 fixes the documented Anthropic tool
+path; it does **not** add OpenAI tool translation. The new
+`LLMMessage.tool_calls` field is invisible to
+`OpenAIProvider._message_to_openai` (the OpenAI path doesn't
+consume it), so the field addition is non-breaking for the
+OpenAI provider.
+
+**v1.1 candidate** (already filed in v1.0.1 #5 (c) clause 2;
+restated here for the v1.1 backlog consolidation pass): "OpenAI
+tool-use translation. `OpenAIProvider.complete()` doesn't accept
+tools or reshape `LLMMessage.tool_calls` for the OpenAI
+`tool_calls` wire format. Design pass needed: response-extraction
+shape (OpenAI returns `tool_calls` on `choice.message`, not as
+content blocks), tool-result message shape (OpenAI's `role='tool'`
+with `tool_call_id`, which `_message_to_openai` already handles
+for the v0.7 single-direction case)."
+
+## v1.0.3 deliberately does NOT touch
+
+The patch scope is the four findings, not more:
+
+- **Finding E** from the second user-test report — fire-once-on-
+  condition semantics for LLM behaviors that subscribe to
+  high-volume event streams. The user worked around with a "gate
+  behavior" pattern (a Python `@behavior` creates a control
+  object exactly once when conditions are met; the LLM behavior
+  subscribes to the control object). Real v1.1 design work; not
+  attempted in v1.0.3. Filed as a v1.1 candidate (see backlog
+  note below).
+- No CONTRACT amendments to v1.0 decisions or earlier; v1.0.3
+  amendments only.
+- No changes to `LLMProvider` Protocol beyond the v1.0.2 #1
+  additive widening (`default_model`, `recognizes_model`).
+- No changes to `behavior.failed` event payload, ordering, or
+  listener semantics.
+- No changes to the closed v0.6 #11 reason-code taxonomy.
+- No new public class beyond `BehaviorFailure` (the NamedTuple
+  for `Runtime.errors`).
+- No new CI gate.
+
+### v1.1 backlog candidates surfaced by v1.0.3
+
+Restated here for the post-v1.0.3 consolidation pass:
+
+1. **Dict-form `output_schema=` support.** Design pass needed
+   per v1.0.3 #2.
+2. **`on_failure=` callback on `run_goal()` and siblings.** Design
+   pass needed per v1.0.3 #3.
+3. **OpenAI tool-use translation.** Restated from v1.0.1 #5 (c)
+   clause 2 per v1.0.3 #4; design pass needed.
+4. **Fire-once-on-condition aggregation triggers for LLM
+   behaviors.** Finding E per v1.0.3's scope discipline; current
+   workaround is the gate-behavior pattern (Python `@behavior`
+   creates a control object that gates the expensive LLM
+   behavior).
+5. **Pack-load-time cross-provider validation.** Already filed in
+   v1.0.2 #1 (b); pack behaviors loaded after Runtime
+   construction currently fall through to first-run validation
+   rather than load-pack-time validation.
+
+A contract-review work item after v1.0.3 ships consolidates these
+into a single v1.1 scope section alongside the existing v1.1
+#1–#4 entries below.
+
+
 # v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
 
 The first v1.1 items that came from real user-facing work, not from
