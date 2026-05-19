@@ -211,6 +211,10 @@ v0 view spec keys: `around` (path expression), `depth` (BFS), `include_types`
 (list[str]), `recent_events` (int). `token_budget` is parsed but ignored
 until v0.6.
 
+`[review overlay 2026-05-19: honored from v0.6 onward via view assembly;
+the "until v0.6" clause above is the original deferral, preserved as
+written. See v1.0.4 #5 for the overlay-marker pattern.]`
+
 ## 12. Patch atomicity
 
 A patch targets exactly one object. Multi-object changes are multiple
@@ -293,6 +297,12 @@ Import direction: `core/` knows nothing about `runtime/` or `behaviors/`.
 - UI / server / HTTP.
 
 If a v0 PR drifts toward any of these, reject.
+
+`[review overlay 2026-05-19: historical scope statement; every listed
+item has shipped in a subsequent milestone (SQLite at v0.5, LLM
+behaviors at v0.6, Cypher at v0.7, fork/diff at v0.5, packs at v1.0).
+Async / threading / distribution and UI / server / HTTP remain out of
+scope. Preserved as archeology; see v1.0.4 #5.]`
 
 ## 17. API-first development
 
@@ -1731,6 +1741,12 @@ produces false confidence; we don't.
 
 Stay scoped. v0.8 is less exciting than v0.6 and v0.7 by design; it
 is what makes the framework deployable.
+
+`[review overlay 2026-05-19: packs shipped at v1.0 (the only listed
+item that has since landed). Web UI / HTTP server / websocket
+subscriptions / distributed runtime / multi-model routing / streaming
+LLM responses remain out of scope as of v1.0.4. Preserved as
+archeology; see v1.0.4 #5.]`
 
 ---
 
