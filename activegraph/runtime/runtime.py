@@ -303,6 +303,23 @@ class Runtime:
         self._pack_behaviors: list = []
         self._pack_tools: list = []
 
+        # ---- v1.0.2.post1 #1 (b): eager cross-provider validation ----
+        # First run the bulk validation pass against whatever's already
+        # in the registry; only if it passes do we add this Runtime to
+        # the live-set. Failed constructions stay out of the WeakSet so
+        # they can't influence subsequent register() / @llm_behavior
+        # validation calls. The lazy path inside _ensure_registry()
+        # stays as a defensive double-check.
+        if self.llm_provider is not None:
+            source = (
+                self._explicit_behaviors
+                if self._explicit_behaviors is not None
+                else get_registry()
+            )
+            _resolve_and_validate_llm_models(source, self.llm_provider)
+        from activegraph.runtime._live import track_runtime
+        track_runtime(self)
+
     # ---------- public surface ----------
 
     @property
@@ -2190,11 +2207,12 @@ def _resolve_and_validate_llm_models(source, provider) -> None:
     raise InvalidRuntimeConfiguration for explicit names that belong to
     a different shipped provider. CONTRACT v1.0.2 #1.
 
-    The validation is permissive: a name no shipped provider recognizes
-    (custom or fine-tuned model) passes silently — only *recognized*
-    cross-provider mismatches fire the diagnostic.
+    The cross-provider mismatch check delegates to
+    :func:`activegraph.runtime._live._validate_one` so the same check
+    fires from both binding moments (Runtime construction here,
+    register()/decoration in ``_live.validate_behavior_against_live_runtimes``).
     """
-    from activegraph.runtime.config_errors import InvalidRuntimeConfiguration
+    from activegraph.runtime._live import _validate_one
 
     # Custom providers that pre-date v1.0.2 don't declare `default_model`.
     # Fall back to the v1.0.1 hardcoded default — keeps every pre-v1.0.2
@@ -2202,8 +2220,6 @@ def _resolve_and_validate_llm_models(source, provider) -> None:
     # byte-identically without code changes. The runtime only swaps in a
     # different default when the provider opts in by declaring one.
     provider_default = getattr(provider, "default_model", None) or "claude-sonnet-4-5"
-    provider_recognizes = getattr(provider, "recognizes_model", None)
-    provider_class = type(provider).__name__
 
     for b in source:
         if not isinstance(b, LLMBehavior):
@@ -2214,90 +2230,8 @@ def _resolve_and_validate_llm_models(source, provider) -> None:
             # declare one).
             b.model = provider_default
             continue
-
-        # b.model is an explicit string. Cross-provider validation per
-        # v1.0.2 #1 (b): if the configured provider doesn't recognize the
-        # name, ask each *other* shipped provider class whether it does.
-        # Exactly one other-provider claim ⇒ raise; otherwise pass through.
-        if provider_recognizes is None or provider_recognizes(b.model):
-            continue
-        claimed_by = _which_shipped_provider_claims(b.model, exclude=type(provider))
-        if claimed_by is None:
-            continue
-        # The model name belongs to a different shipped provider's family.
-        # This is the v1.0.1-user-test finding the v1.0.2 patch addresses:
-        # silently sending an Anthropic-family name to OpenAI 404s with no
-        # helpful diagnostic. Fire at registration time, not call time.
-        claimed_by_default = getattr(claimed_by, "default_model", "")
-        provider_default_hint = (
-            f"or remove the model= argument to use {provider_class}'s "
-            f"default ({provider_default!r})"
-            if provider_default
-            else f"or set a {provider_class}-compatible model name"
-        )
-        raise InvalidRuntimeConfiguration(
-            (
-                f"@llm_behavior(name={b.name!r}, model={b.model!r}) "
-                f"names a {claimed_by.__name__}-family model, but the "
-                f"runtime is configured with {provider_class}"
-            ),
-            what_failed=(
-                f"The behavior {b.name!r} pinned model={b.model!r}. That "
-                f"name belongs to {claimed_by.__name__}'s model family, "
-                f"but this Runtime was constructed with a "
-                f"{provider_class} instance. Sending the name to the "
-                f"wrong provider produces an HTTP 404 (or equivalent "
-                f"'unknown model' response) at first LLM call, with no "
-                f"hint that the mismatch is the cause."
-            ),
-            why=(
-                "v1.0.2 #1 validates explicit model names at registration "
-                "time against each shipped provider's recognizes_model() "
-                "method. The configured provider doesn't claim this "
-                "name, but another shipped provider does — that's a "
-                "configuration mismatch worth surfacing before the "
-                "first network call rather than after."
-            ),
-            how_to_fix=(
-                f"Either swap the provider — Runtime(graph, "
-                f"llm_provider={claimed_by.__name__}()) — "
-                f"{provider_default_hint}, or pass an explicit name "
-                f"from {provider_class}'s model families."
-            ),
-            context={
-                "behavior": b.name,
-                "model": b.model,
-                "configured_provider": provider_class,
-                "claimed_by_provider": claimed_by.__name__,
-                "claimed_by_default_model": claimed_by_default,
-            },
-        )
-
-
-def _which_shipped_provider_claims(name: str, *, exclude: type):
-    """Return the first shipped provider class that recognizes `name`,
-    excluding `exclude`. Returns None when no other shipped provider
-    claims the name (permissive default per v1.0.2 #1 (b))."""
-    from activegraph.llm.anthropic import AnthropicProvider
-    from activegraph.llm.openai import OpenAIProvider
-
-    candidates = [AnthropicProvider, OpenAIProvider]
-    for cls in candidates:
-        if cls is exclude:
-            continue
-        recognizes = getattr(cls, "recognizes_model", None)
-        if recognizes is None:
-            continue
-        # Instantiate cheaply: the providers' __init__ doesn't open the SDK.
-        try:
-            inst = cls()
-        except Exception:
-            # Defensive: if a provider's no-arg constructor ever requires
-            # real credentials, skip it for the validation lookup.
-            continue
-        if inst.recognizes_model(name):
-            return cls
-    return None
+        # v1.0.2 #1 (b): cross-provider mismatch check.
+        _validate_one(b, provider)
 
 
 def _budget_reason(name: Optional[str]) -> str:

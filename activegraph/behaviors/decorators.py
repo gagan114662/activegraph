@@ -85,6 +85,12 @@ def register(behavior_obj: Union[Behavior, RelationBehavior]) -> None:
             f"decorators to construct one."
         )
     _REGISTRY.append(behavior_obj)
+    # v1.0.2.post1 #1 (b): if any Runtime is already alive, validate the
+    # new behavior against each one's configured provider so cross-
+    # provider model mismatches fire at the @llm_behavior / register()
+    # line rather than at first run_goal.
+    from activegraph.runtime._live import validate_behavior_against_live_runtimes
+    validate_behavior_against_live_runtimes(behavior_obj)
 
 
 def behavior(
@@ -248,6 +254,12 @@ def llm_behavior(
             max_tool_turns=max_tool_turns,
         )
         _REGISTRY.append(b)
+        # v1.0.2.post1 #1 (b): validate against any live Runtime's
+        # provider. Mirrors the eager check in register() so decorated
+        # behaviors with cross-provider model names fire at the
+        # @llm_behavior line instead of at first run_goal.
+        from activegraph.runtime._live import validate_behavior_against_live_runtimes
+        validate_behavior_against_live_runtimes(b)
         return b
 
     return wrap

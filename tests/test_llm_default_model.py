@@ -108,9 +108,10 @@ def test_explicit_model_string_still_works_unchanged():
 # ---- (b) cross-provider mismatch validation ---------------------------------
 
 
-def test_claude_model_on_openai_runtime_raises_at_registration():
+def test_claude_model_on_openai_runtime_raises_at_runtime_construction():
     """The v1.0.1-user-test finding: claude-sonnet-4-5 + OpenAIProvider
-    silently 404s. v1.0.2 surfaces it at registration time instead."""
+    silently 404s. v1.0.2.post1 surfaces it at Runtime construction
+    when the behavior is already registered."""
 
     @llm_behavior(
         name="extractor",
@@ -125,10 +126,9 @@ def test_claude_model_on_openai_runtime_raises_at_registration():
     # Use a fake OpenAI client so the provider doesn't try to load the SDK.
     provider = OpenAIProvider(client=object())
     g = Graph()
-    rt = Runtime(g, llm_provider=provider)
 
     with pytest.raises(InvalidRuntimeConfiguration) as excinfo:
-        rt._ensure_registry()
+        Runtime(g, llm_provider=provider)
 
     msg = str(excinfo.value)
     assert "claude-sonnet-4-5" in msg
@@ -138,7 +138,7 @@ def test_claude_model_on_openai_runtime_raises_at_registration():
     assert "gpt-4o-mini" in msg or "OpenAIProvider's model families" in msg
 
 
-def test_gpt_model_on_anthropic_runtime_raises_at_registration():
+def test_gpt_model_on_anthropic_runtime_raises_at_runtime_construction():
     """Symmetric: gpt-4o-mini against AnthropicProvider."""
 
     @llm_behavior(
@@ -153,10 +153,9 @@ def test_gpt_model_on_anthropic_runtime_raises_at_registration():
 
     provider = AnthropicProvider(client=object())
     g = Graph()
-    rt = Runtime(g, llm_provider=provider)
 
     with pytest.raises(InvalidRuntimeConfiguration) as excinfo:
-        rt._ensure_registry()
+        Runtime(g, llm_provider=provider)
 
     msg = str(excinfo.value)
     assert "gpt-4o-mini" in msg
@@ -164,7 +163,7 @@ def test_gpt_model_on_anthropic_runtime_raises_at_registration():
     assert "OpenAIProvider" in msg
 
 
-def test_o3_model_on_anthropic_runtime_raises_at_registration():
+def test_o3_model_on_anthropic_runtime_raises_at_runtime_construction():
     """OpenAI's reasoning-model prefixes (o1-/o3-/o4-) also fire."""
 
     @llm_behavior(
@@ -179,10 +178,9 @@ def test_o3_model_on_anthropic_runtime_raises_at_registration():
 
     provider = AnthropicProvider(client=object())
     g = Graph()
-    rt = Runtime(g, llm_provider=provider)
 
     with pytest.raises(InvalidRuntimeConfiguration) as excinfo:
-        rt._ensure_registry()
+        Runtime(g, llm_provider=provider)
 
     assert "o3-mini" in str(excinfo.value)
 
@@ -301,8 +299,9 @@ def test_build_prompt_without_runtime_uses_inspection_default():
 def test_user_test_reproducer_catches_default_model_mismatch_before_call():
     """The original v1.0.1-user-test bug: a user swaps
     AnthropicProvider() for OpenAIProvider() but their @llm_behavior
-    still carries model='claude-...'. v1.0.2 fires at registration
-    time instead of producing a silent 404 on first LLM call."""
+    still carries model='claude-...'. v1.0.2.post1 fires at Runtime
+    construction — well before any run_goal — so the user sees the
+    diagnostic at setup time rather than at first network call."""
 
     @llm_behavior(
         name="extractor",
@@ -316,13 +315,13 @@ def test_user_test_reproducer_catches_default_model_mismatch_before_call():
 
     provider = OpenAIProvider(client=object())
     g = Graph()
-    rt = Runtime(g, llm_provider=provider)
 
-    # The diagnostic fires BEFORE any LLM call. No HTTP 404, no
-    # behavior.failed event with a verbatim provider message — the
-    # configuration error names the cross-provider mismatch directly.
+    # The diagnostic fires at Runtime construction, before the registry
+    # is ever exercised by a run. No HTTP 404, no behavior.failed event,
+    # no need to call run_goal — the configuration error names the
+    # cross-provider mismatch directly at the binding moment.
     with pytest.raises(InvalidRuntimeConfiguration) as excinfo:
-        rt.run_goal("seed")
+        Runtime(g, llm_provider=provider)
 
     assert "claude-sonnet-4-5" in str(excinfo.value)
     assert "OpenAIProvider" in str(excinfo.value)
