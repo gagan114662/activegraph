@@ -4127,6 +4127,161 @@ completeness, docstring completeness, the v0.5 in-flight loss
 follow-ons, etc.). v1.0.1 doesn't reshape that backlog.
 
 
+# v1.0.2 — second external user-test patch (provider-aware default model)
+
+The v1.0.1 release added `OpenAIProvider` as the second concrete
+provider and locked the provider-commitment surface (v1.0.1 #5). A
+second-round external user-test surfaced three more findings; the
+most urgent is the only one that ships in v1.0.2 — it directly
+undermines v1.0.1's provider-agnostic claim.
+
+The finding: a user who follows the README's `Runtime(Graph(),
+llm_provider=OpenAIProvider())` pattern and writes an
+`@llm_behavior` without an explicit `model=` argument gets HTTP 404
+from the OpenAI API at first LLM call. The default model on the
+decorator was `"claude-sonnet-4-5"` — an Anthropic name, sent
+verbatim to OpenAI, which 404s because it doesn't recognize the
+model. The error message that lands on `behavior.failed` is the
+provider's verbatim 404 prose; nothing in it names the
+cross-provider mismatch. The reader has to inspect the decorator,
+trace the default, and recognize the model family conflict to
+diagnose.
+
+The other two v1.0.1-round findings — `output_schema=` accepting
+plain dicts vs Pydantic models, and silent `behavior.failed` UX
+when no handler observes the event — need design work and are
+scheduled for a later release (v1.0.3 / v1.1). They aren't direct
+credibility hits on the v1.0.1 announcement; the default-model
+mismatch is.
+
+## v1.0.2 #1. `@llm_behavior(model=)` defaults to the provider's default model
+
+The `LLMProvider` Protocol gains two additive surfaces. v1.0.1 #5
+locked "additions are non-breaking"; v1.0.2 #1 invokes that clause
+with the first additive widening since the Protocol shipped at
+v0.6 #3.
+
+### (a) `LLMProvider.default_model` attribute
+
+Each concrete provider declares a `default_model: str` — the model
+name `complete()` should use when the behavior didn't pin one
+explicitly. Shipped values:
+
+- `AnthropicProvider.default_model = "claude-sonnet-4-5"`
+- `OpenAIProvider.default_model = "gpt-4o-mini"`
+
+`@llm_behavior(...)` no longer carries a hardcoded model default.
+The decorator's `model=` argument becomes optional:
+
+```python
+@llm_behavior(name="extractor", output_schema=Claim)
+def extractor(event, graph, ctx, llm_output):
+    ...
+```
+
+is equivalent to passing `model=<provider.default_model>` at
+runtime registration. Callers that pass `model="explicit-name"`
+keep working byte-identically — the additive change is opt-in by
+*omission*, not by reshaping existing call sites.
+
+The runtime resolves the default at `_ensure_registry` time (once
+per runtime construction) and stamps it onto the `LLMBehavior`
+instance, so `behavior.build_prompt(event, graph)` keeps its
+existing pure-function signature for prompt inspection.
+
+### (b) `LLMProvider.recognizes_model(name)` method
+
+Each provider implements `recognizes_model(name: str) -> bool`
+returning True if `name` belongs to a model family the provider
+serves. Shipped definitions:
+
+- `AnthropicProvider.recognizes_model(name)` — True for names
+  starting with `"claude-"`.
+- `OpenAIProvider.recognizes_model(name)` — True for names
+  starting with `"gpt-"`, `"o1-"`, `"o3-"`, or `"o4-"` (the
+  OpenAI reasoning-model prefixes that exist in 2026).
+
+The runtime uses these for cross-provider validation at
+registration time. When a behavior pins `model=` explicitly and
+the configured provider doesn't recognize the name, the runtime
+asks each shipped provider whether *it* recognizes the name. If
+exactly one *other* shipped provider claims it, the runtime
+raises `InvalidRuntimeConfiguration` with a structured error
+naming both the claimed-by provider and the configured provider
+and listing the configured provider's model families.
+
+If no shipped provider recognizes the name (custom models,
+fine-tunes, experimental names, internal-deployment names), the
+validation passes silently. This is the **permissive default**:
+unknown model names are user responsibility, only *recognized
+mismatches* fire the diagnostic.
+
+The validation fires at `Runtime._ensure_registry()` time — the
+same hook that already raises `MissingProviderError` for
+`@llm_behavior` with no provider configured (CONTRACT v0.6 #21).
+
+### (c) `LLMBehavior.model` becomes `Optional[str]`
+
+The dataclass field changes from `model: str = "claude-sonnet-4-5"`
+to `model: Optional[str] = None`. Pickled behaviors from v1.0.1
+deserialize cleanly (string values still load); behaviors freshly
+decorated at v1.0.2 get `None` until the runtime stamps a default.
+
+`LLMBehavior.build_prompt(event, graph)` keeps its v0.6 #20
+contract: pure, no I/O, cheap. If a caller invokes it on a
+behavior whose `model` is still `None` (no runtime registration
+happened yet), it raises a clear `ValueError` naming the cause —
+"Pass `Runtime(..., llm_provider=...)` to resolve the default, or
+set `behavior.model='...'` explicitly before calling build_prompt."
+
+### (d) Why this is a Protocol widening, not a v0.6 #3 amendment
+
+v1.0.1 #5 (a) read: "The Protocol is locked at v0.6 #3; v1.0.1 #5
+doesn't widen it." v1.0.2 #1 *does* widen it — but adds two
+additive members rather than reshaping the three existing ones.
+Custom providers that pre-date v1.0.2 and don't implement
+`default_model` or `recognizes_model` keep working at the
+`complete()` / `estimate_cost()` / `count_tokens()` call sites;
+the runtime uses `getattr(provider, "default_model", None)` and
+`getattr(provider, "recognizes_model", lambda _name: False)` so
+the additions are soft requirements. A custom provider that wants
+the default-model behavior implements them; one that doesn't,
+keeps requiring `model=` on every `@llm_behavior`.
+
+`runtime_checkable` Protocol semantics: `isinstance(p, LLMProvider)`
+still passes for custom providers with the three original methods,
+because Protocol attribute checks against `runtime_checkable` only
+consider members that don't have `default` implementations in the
+Protocol body. The new members are declared as optional attribute
++ method shapes; runtime call sites guard with getattr.
+
+## v1.0.2 deliberately does NOT touch
+
+Same discipline as v1.0.1's section. The patch scope is one
+finding, not three:
+
+- No changes to `LLMProvider.complete()`, `estimate_cost()`,
+  `count_tokens()` signatures. The three v0.6 #3 / v0.7 methods
+  stay locked.
+- No changes to the closed CONTRACT v0.6 #11 reason taxonomy. The
+  cross-provider validation raises a `ConfigurationError` subclass
+  at registration time, not a behavior-failure reason code.
+- No changes to the v1.0.1 #2 prompt-assembly shape (schema +
+  example instance + "instance not schema" language). The
+  schema-block layout is unchanged.
+- No changes to `output_schema=` (dict vs Pydantic — scheduled for
+  v1.0.3 / v1.1 after design pass).
+- No changes to `behavior.failed` UX (silent-failure follow-on
+  scheduled for v1.0.3 / v1.1).
+- No new CI gate.
+- No new public class.
+- No `register()` / `clear_registry()` surface changes from v1.0.1.
+
+The v1.0.2 release ships one finding. The other two are tracked in
+HANDOFF for the next session, not in this CONTRACT entry — they
+need design before they're locked.
+
+
 # v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
 
 The first v1.1 items that came from real user-facing work, not from
