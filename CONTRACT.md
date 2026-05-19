@@ -3983,6 +3983,125 @@ content, event content, instruction content). Concrete enough to
 let a reader compose a custom template without first opening
 `activegraph/llm/prompt.py`.
 
+## v1.0.1 #5. OpenAI provider + the provider-commitment surface
+
+The v1.0 framework shipped a single concrete `LLMProvider`
+implementation (`AnthropicProvider`), which made the
+provider-agnostic claim of the `LLMProvider` Protocol read as
+theoretical rather than realized. The first external user-test
+gate per CONTRACT v1.0 #C4 didn't surface this as a friction point
+the way #1–#4 did, but the implicit cost — readers seeing one
+provider and inferring a soft lock-in — is the same shape of
+adoption-surface friction the rest of v1.0.1 patches. v1.0.1 #5
+ships a second concrete provider (`OpenAIProvider`) and locks in
+three contract clauses about how providers commit to the
+framework.
+
+### (a) Providers commit through `LLMProvider`; additions are non-breaking
+
+The `LLMProvider` Protocol in `activegraph/llm/provider.py`
+(CONTRACT v0.6 #3, extended v0.7) is the framework's commitment
+surface for LLM providers. Three methods, keyword-only, narrow on
+purpose: `complete()`, `estimate_cost()`, `count_tokens()`. A new
+concrete provider is an additive change — every existing
+`@llm_behavior` keeps working unchanged, and a runtime swapping
+`AnthropicProvider()` for `OpenAIProvider()` doesn't touch any
+behavior definition.
+
+The Protocol is locked at v0.6 #3; v1.0.1 #5 doesn't widen it.
+Capabilities a single provider's API exposes but the others
+don't — OpenAI's native `response_format` mode, Anthropic's
+server-side `count_tokens` — stay inside the concrete provider's
+implementation and don't leak into the Protocol surface. New
+providers join by implementing the three methods; they don't
+negotiate the abstraction.
+
+### (b) Three-extras install pattern
+
+`pyproject.toml` extras follow a three-pattern shape:
+
+- `[llm]` pulls every shipped provider's SDK (currently
+  `anthropic>=0.40`, `openai>=1.0`, `tiktoken>=0.7`). A single line
+  for the common case where the operator wants the framework's
+  full LLM surface available.
+- `[anthropic]` pulls Anthropic only.
+- `[openai]` pulls OpenAI + `tiktoken`.
+
+The per-provider aliases keep production installs minimal for
+operators who run only one provider in deployment. The `[all]`
+roll-up includes everything from `[llm]` plus the persistence and
+metrics extras.
+
+Future providers extend `[llm]` and add their own per-provider
+alias. The pattern is the contract; the specific provider list
+grows.
+
+### (c) Explicit non-promises for v1.0.1
+
+What v1.0.1 #5 does **not** commit to. Documenting limitations as
+contract clauses rather than discovering them as user friction
+later is the same discipline as v1.0's honesty section in the
+technical essay.
+
+1. **Token counting is provider-dependent.** `AnthropicProvider`
+   uses the SDK's `messages.count_tokens` endpoint (server-side
+   roundtrip, exact counts). `OpenAIProvider` uses `tiktoken`
+   client-side when available and a `chars / 4` heuristic when
+   not, with a one-time debug log on first heuristic call.
+   Operators gating on `budget.max_cost_usd` should install
+   `tiktoken` (via `[openai]` or `[llm]`) for accurate accounting;
+   the heuristic is the offline fallback. The asymmetry is named,
+   not hidden.
+
+2. **Tool use is Anthropic-only in v1.0.1.** `Tool.to_definition()`
+   emits the Anthropic `{name, description, input_schema}` shape;
+   OpenAI's `{type:"function", function:{name, description,
+   parameters}}` shape would require translation in
+   `Tool.to_definition()` plus a parallel `tool_calls` extraction
+   path in the provider. `OpenAIProvider.complete()` accepts the
+   `tools=` kwarg for Protocol compatibility but raises
+   `LLMBehaviorError(reason="llm.network_error")` with a v1.1
+   pointer when the list is non-empty. Tool-shape translation is
+   scheduled under v1.1 #7-and-beyond.
+
+3. **Native structured-output modes are v1.1 candidates.** Both
+   providers use the framework's instruction-based structured-
+   output path: the schema and example instance are embedded in
+   the system prompt by `build_system_prompt` (v1.0.1 #2), and the
+   provider parses JSON out of the response via the shared
+   `parse_structured_response` helper. OpenAI's
+   `response_format={"type":"json_schema",...}` mode and any
+   future provider's equivalent stay v1.1 candidates — picking
+   them up would diverge the providers' latency profiles, cache-
+   key semantics, and error paths in ways that warrant their own
+   decision rather than a silent in-PR swap.
+
+4. **No new reason codes.** The closed CONTRACT v0.6 #11 taxonomy
+   (`llm.parse_error`, `llm.schema_violation`, `llm.network_error`,
+   `llm.rate_limited`, `llm.fixture_missing`,
+   `budget.cost_exhausted`) is unchanged. OpenAI auth failures
+   land in `llm.network_error` with the exception message
+   preserved verbatim — same shape Anthropic uses for the same
+   failure mode. Expanding the reason taxonomy would be a CONTRACT
+   change to v0.6 #11, out of scope for a provider addition.
+
+### Why this lands in v1.0.1, not v1.1
+
+v1.0.1's framing is "patch release based on first external user-
+test." The user-test #1–#4 fixes addressed three direct friction
+points and one doc-coverage gap. The provider lock-in finding is
+implicit (no user test step exercises it) but adoption-surface in
+the same sense: readers who scan the LLM docs see one provider and
+extrapolate. Shipping the second provider in the same release
+closes that implicit gap without bumping to v1.1.
+
+This stays consistent with "What v1.0.1 deliberately does NOT
+touch" — the closed reason taxonomy, the `LLMProvider` Protocol,
+the prompt-construction pipeline, the public class hierarchy.
+`OpenAIProvider` extends the registry of concrete providers,
+which is open by design; the Protocol surface they target stays
+locked.
+
 ## What v1.0.1 deliberately does NOT touch
 
 The CONTRACT v1.0 ban on new runtime capability still applies —
@@ -4648,6 +4767,34 @@ above):
   parent's `forked_at_event_id` (already on the runs row) and
   pre-populate the cache from the parent's events through that
   point. New runtime behavior, banned in v1.0; opens up in v1.1.
+- **OpenAI tool-shape translation in `Tool.to_definition()`** (filed
+  during v1.0.1 #5 OpenAI provider work). The shipped framework's
+  `Tool.to_definition()` emits the Anthropic tool shape
+  (`{name, description, input_schema}`); OpenAI's chat-completions
+  API expects `{type:"function", function:{name, description,
+  parameters}}`, and the response carries `tool_calls` rather than
+  `tool_use` content blocks. `OpenAIProvider.complete()` currently
+  raises `LLMBehaviorError(reason="llm.network_error")` when
+  `tools=` is non-empty, with a v1.1 pointer. v1.1 scope: provider-
+  aware tool-shape translation (either parameterize
+  `Tool.to_definition(provider="anthropic"|"openai")` or push the
+  shape into the provider's `complete()`), parallel `tool_calls`
+  extraction in `OpenAIProvider`, and parity tests across both
+  providers for the same tool-using behavior.
+- **Native structured-output modes for providers that support them**
+  (filed during v1.0.1 #5 OpenAI provider work). Both shipped
+  providers use the framework's instruction-based path: the schema
+  + example instance go into the system prompt via
+  `build_system_prompt` (CONTRACT v1.0.1 #2), the provider parses
+  JSON via `parse_structured_response`. OpenAI's
+  `response_format={"type":"json_schema",...}` mode (and analogous
+  future provider modes) would force the model to emit conforming
+  JSON natively, eliminating the schema-echo failure mode v1.0.1
+  #2 patched in the prompt. v1.1 scope: opt-in flag on
+  `@llm_behavior` (or per-provider config) toggling native mode,
+  cache-key impact analysis (prompt-hash inputs change because the
+  system prompt shrinks), and replay-determinism guarantees
+  across the mode flip.
 - Any additional v1.0-rc2 user-test findings (the lighter
   verification pass after rc2 lands).
 
