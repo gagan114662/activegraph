@@ -1,0 +1,14 @@
+# Disables the "Open a blank issue" link on the New Issue page,
+# forcing every issue through one of the three templates
+# (bug_report, feature_request, question). Fits the project's
+# discipline-first voice: every issue lands with the structure
+# triage needs.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Documentation
+    url: https://docs.activegraph.ai
+    about: Most usage and conceptual questions are answered in the docs. Check before filing an issue.
+  - name: CONTRIBUTING.md
+    url: https://github.com/yoheinakajima/activegraph/blob/main/CONTRIBUTING.md
+    about: Contribution policy — what kinds of issues and pull requests are accepted today.
