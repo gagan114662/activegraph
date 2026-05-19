@@ -55,11 +55,14 @@ DEFAULT_CONSTRAINTS = [
     "Build incrementally on previous results rather than repeating them.",
 ]
 
-# Per-provider model defaults. Both are fast, cheap members of each
-# family; override at the call site if you want bigger models.
+# Per-provider environment variable. The model name now comes from the
+# provider's `default_model` (v1.0.2 #1): "claude-sonnet-4-5" for
+# AnthropicProvider, "gpt-4o-mini" for OpenAIProvider. To pin a
+# different model on the @llm_behaviors below, pass `model="..."` on
+# the decorator — or assign `executor.model = "..."` after registration.
 PROVIDER_DEFAULTS = {
-    "anthropic": {"env": "ANTHROPIC_API_KEY", "model": "claude-haiku-4-5"},
-    "openai": {"env": "OPENAI_API_KEY", "model": "gpt-4o-mini"},
+    "anthropic": {"env": "ANTHROPIC_API_KEY"},
+    "openai": {"env": "OPENAI_API_KEY"},
 }
 
 
@@ -139,12 +142,10 @@ def run_babyagi(
     for b in (initializer, executor, task_creator):
         register(b)
 
-    # Pin model on the LLM behaviors per provider. Both decorators left
-    # their `model=` unset above so the choice happens here, downstream
-    # of the --provider flag.
-    model = PROVIDER_DEFAULTS[provider]["model"]
-    executor.model = model
-    task_creator.model = model
+    # v1.0.2 #1: the @llm_behaviors above omit model=, so the runtime
+    # resolves each provider's default_model at registration time —
+    # "claude-sonnet-4-5" for Anthropic, "gpt-4o-mini" for OpenAI. No
+    # per-provider model table needed in this example.
     llm_provider = OpenAIProvider() if provider == "openai" else AnthropicProvider()
 
     os.makedirs("traces", exist_ok=True)

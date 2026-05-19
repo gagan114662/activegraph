@@ -18,6 +18,160 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 Nothing yet. v1.1 scope is tracked in
 [CONTRACT.md § v1.1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md).
 
+Two additional v1.0.1 user-test findings remain pending and are
+scheduled for v1.0.3 / v1.1: `output_schema=` accepting plain dicts
+vs Pydantic models, and silent `behavior.failed` UX when no handler
+observes the event. Both need design consideration and are tracked
+in the HANDOFF working notes for the next session rather than this
+changelog.
+
+## [v1.0.2] — 2026-05-19
+
+Patch release addressing the most urgent of three findings from the
+second-round external user-test. The framing — patch release based
+on user-test findings — matches v1.0.1's; the scope is narrower
+(one finding, not four, plus no provider-expansion work). The
+other two findings need design consideration and are tracked for
+v1.0.3 / v1.1, not folded into this release.
+
+### The finding (v1.0.1 #5 credibility hit)
+
+v1.0.1 #5 shipped `OpenAIProvider` and locked the provider-
+commitment contract: same Protocol surface, swap one for the other
+without reshaping any `@llm_behavior`. The second-round user-test
+exercised exactly that swap and surfaced a silent default-model
+mismatch: `@llm_behavior(...)` without an explicit `model=`
+inherited the decorator's hardcoded default `"claude-sonnet-4-5"`
+— an Anthropic-family name. With `Runtime(graph,
+llm_provider=OpenAIProvider())`, that name went verbatim to
+OpenAI's `chat.completions.create` and produced an HTTP 404 with
+no hint that the cross-provider mismatch was the cause. The
+`behavior.failed` event carried the provider's verbatim 404 prose;
+diagnosis required inspecting the decorator, tracing the default,
+and recognizing the model-family conflict.
+
+This directly undermined v1.0.1's provider-agnostic claim. v1.0.2
+makes the default provider-aware and validates explicit model
+names at registration time.
+
+### Added
+
+- **`LLMProvider.default_model` attribute (additive Protocol
+  widening, CONTRACT v1.0.2 #1 (a)).** Each shipped provider
+  declares a default model:
+
+  | Provider | `default_model` |
+  | --- | --- |
+  | `AnthropicProvider` | `"claude-sonnet-4-5"` |
+  | `OpenAIProvider` | `"gpt-4o-mini"` |
+
+  `@llm_behavior(...)` with no `model=` argument now resolves to
+  the configured provider's `default_model` at registration time,
+  via `Runtime(graph, llm_provider=...)._ensure_registry()`. The
+  resolved name is stamped onto the `LLMBehavior` instance so
+  `behavior.build_prompt(...)` sees the concrete model in its
+  hash inputs.
+- **`LLMProvider.recognizes_model(name) -> bool` method (additive,
+  CONTRACT v1.0.2 #1 (b)).** Returns True when `name` belongs to
+  a model family the provider serves. Shipped providers:
+  `AnthropicProvider` recognizes `claude-*`; `OpenAIProvider`
+  recognizes `gpt-*`, `o1-*`, `o3-*`, `o4-*`.
+
+### Changed
+
+- **`@llm_behavior(model=...)` default changed from
+  `"claude-sonnet-4-5"` to `None`.** Existing call sites passing
+  `model="..."` explicitly stay byte-identical. Call sites that
+  omitted `model=` previously inherited `"claude-sonnet-4-5"` via
+  the decorator default; they now inherit the same string when
+  the configured provider is `AnthropicProvider` (whose
+  `default_model` is `"claude-sonnet-4-5"`), and the *provider-
+  appropriate* default (`"gpt-4o-mini"`) when the configured
+  provider is `OpenAIProvider`. Custom providers that don't
+  declare a `default_model` retain the v1.0.1 hardcoded fallback
+  for backward compat. CONTRACT v1.0.2 #1 (c).
+- **`LLMBehavior.model` field type changed from `str` to
+  `Optional[str]`.** v1.0.1 instances pickle/load cleanly (string
+  values still load); freshly-decorated v1.0.2 behaviors carry
+  `None` until a Runtime resolves a provider default. CONTRACT
+  v1.0.2 #1 (c).
+- **Registration-time cross-provider validation.** When a behavior
+  pins `model=` explicitly and the configured provider doesn't
+  recognize the name, the runtime checks each shipped provider's
+  `recognizes_model()` and raises
+  `InvalidRuntimeConfiguration` if a *different* shipped provider
+  claims the name. The error is structured per the v1.0 format —
+  `what_failed` / `why` / `how_to_fix` — and names both providers
+  plus the way out (swap the provider, or use the configured
+  provider's default). Permissive by default: unknown names
+  (custom deployments, fine-tunes like `ft:gpt-4o-mini:org::id`)
+  pass through silently. CONTRACT v1.0.2 #1 (b).
+- **`docs/reference/llm-providers.md`** gains a "Default model
+  resolution" section, a "Cross-provider model-name validation"
+  section, and updated rows for `default_model` and recognized
+  prefixes in the side-by-side table. The "Writing a custom
+  provider" example now shows the optional `default_model` +
+  `recognizes_model` members and notes they are additive.
+
+### Fixed
+
+- **Second external user-test, finding 1** —
+  `@llm_behavior` with no `model=` argument silently used an
+  Anthropic-family default, producing HTTP 404 at first LLM call
+  when the configured provider was `OpenAIProvider`. The
+  diagnostic message on `behavior.failed` did not name the cause.
+  See "Added: `LLMProvider.default_model`" and "Changed:
+  registration-time cross-provider validation" above.
+
+### Examples
+
+- **`examples/babyagi.py`** simplified to drop its per-provider
+  model table. The `@llm_behavior` definitions omit `model=` and
+  let `Runtime`'s provider resolution pick the right default.
+  Switching `--provider` between `anthropic` and `openai` is a
+  one-line change in the example; nothing else needs to change.
+
+### Provider non-promises in v1.0.2
+
+Inheriting the v1.0.1 #5 (c) clauses. Specifically *unchanged* in
+v1.0.2:
+
+- `LLMProvider.complete()` / `estimate_cost()` / `count_tokens()`
+  signatures stay locked at v0.6 #3 / v0.7. v1.0.2 widens the
+  Protocol additively with two members; it does not reshape the
+  three core methods.
+- The closed CONTRACT v0.6 #11 reason taxonomy is unchanged. The
+  cross-provider mismatch raises a `ConfigurationError` subclass
+  at registration time, not a new behavior-failure reason code.
+- The v1.0.1 #2 prompt-assembly shape is unchanged. Same schema
+  + example instance + "instance not schema" language.
+
+### Migration from v1.0.1
+
+Additive. Forward-compatible:
+
+```bash
+pip install --upgrade activegraph==1.0.2
+```
+
+- `@llm_behavior(model="...")` call sites that pinned an explicit
+  string keep working byte-identically.
+- `@llm_behavior(...)` call sites that omitted `model=` now
+  inherit the configured provider's `default_model`. For
+  `AnthropicProvider`, that's the same `"claude-sonnet-4-5"` the
+  v1.0.1 decorator default produced. For `OpenAIProvider`, the
+  default changes from the v1.0.1 silent-Anthropic-name to
+  `"gpt-4o-mini"`, fixing the v1.0.2 finding.
+- Custom providers that don't declare `default_model` continue to
+  use the v1.0.1 hardcoded fallback. Custom providers that want
+  the v1.0.2 default-resolution behavior add a
+  `default_model: str = "..."` class attribute (and optionally a
+  `recognizes_model()` method to participate in cross-provider
+  validation).
+- `LLMProvider` Protocol gains two additive members. Existing
+  custom-provider classes that don't implement them still pass
+  `isinstance(p, LLMProvider)` checks at the three core methods.
+
 ## [v1.0.1] — 2026-05-19
 
 The first-external-user-test patch plus the OpenAI provider
