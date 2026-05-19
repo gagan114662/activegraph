@@ -51,6 +51,87 @@ theme:
 
 plugins:
   - search
+  - llmstxt:
+      # CONTRACT v1.0.5 #1. Generates /llms.txt (structured markdown
+      # index) and /llms-full.txt (concatenated full-content) at the
+      # site root so AI coding assistants fetching docs.activegraph.ai
+      # get clean markdown instead of mkdocs-rendered HTML. Surfaced by
+      # the v1.0.4 external user-test.
+      #
+      # The plugin reads `site_name` for the H1 and `site_description`
+      # for the blockquote summary; `markdown_description` below is the
+      # short "About" paragraph that sits beneath the blockquote and
+      # gives an AI agent the framing it needs before walking the
+      # sections list.
+      #
+      # `sections:` mirrors the `nav:` block below 1:1. Per-page
+      # descriptions are one sentence each so the index reads as a
+      # navigation aid, not a duplicate of the page content. Globs
+      # cover the long lists (per-error catalog, API reference) where
+      # per-file descriptions would be churn-prone.
+      #
+      # `full_output: llms-full.txt` toggles the second file — the
+      # concatenated markdown body of every section page, sized for
+      # large-context-window AI ingestion. Per CONTRACT v1.0.5 #1's
+      # size audit the full corpus is ~100K tokens, well under the
+      # 200K target.
+      #
+      # The `tests/test_llms_txt.py` gate (CONTRACT v1.0.5 #1,
+      # Standing Rule §2) builds the site into a temp dir and asserts
+      # both files exist, are well-formed, and reference the nav-anchor
+      # pages — preventing the failure mode where the build passes but
+      # the generated files are empty or missing.
+      markdown_description: |
+        Active Graph is an event-sourced reactive graph runtime for
+        long-running, auditable, agentic systems. Behaviors react to
+        events, mutate a shared graph, and emit more events; the
+        event log is the source of truth, so every run is replayable,
+        forkable, and diff-able from its log. Install with
+        `pip install activegraph` and run `activegraph quickstart`
+        for the bundled fixture-backed demo.
+      full_output: llms-full.txt
+      sections:
+        Quickstart:
+          - quickstart.md: Ten-minute tutorial from install to a working custom behavior; ends with the fork-and-diff workflow.
+        Concepts:
+          - concepts/graph.md: Objects and typed relations forming the world the framework reasons about; the graph is a projection of the event log.
+          - concepts/events.md: The append-only history — every behavior fires in response to events and produces more events.
+          - concepts/behaviors.md: The unit of reactive code — function, class, or LLM-backed — with a per-behavior determinism contract.
+          - concepts/relations.md: Typed edges with their own behaviors; coordination logic on the edge rather than on either endpoint.
+          - concepts/patches.md: Proposed mutations with optimistic concurrency; rejections are events in their own right.
+          - concepts/views.md: Scoped reads of the graph for behavior context — type, depth, and recent-event windows.
+          - concepts/frames.md: Bounded contexts for a run — goal, constraints, budget, registered behaviors.
+          - concepts/patterns.md: Cypher-subset pattern subscriptions for subscribing to graph shapes, with `NOT EXISTS` and temporal predicates.
+          - concepts/policies.md: Approval and gating for behavior capabilities — which behaviors can call which tools, which mutations need human approval.
+          - concepts/replay.md: Re-execute a run from its event log; strict mode re-fires behaviors and fails on divergence.
+          - concepts/forking.md: Branch any run at any event into an independent fork; structurally diff the fork against the parent.
+          - concepts/failure-model.md: A behavior failure is a `behavior.failed` event, not an exception; exceptions live at runtime entry points only.
+        Guides:
+          - guides/operating-in-production.md: Running Active Graph as a production service — observability, persistence, policies, budgets.
+          - guides/authoring-packs.md: Authoring a pack — object types, behaviors, tools, prompts, and policies bundled for a domain.
+        Cookbook:
+          - cookbook/common-patterns.md: Recurring patterns — subscriptions, fork-with-set, approval flows — with copy-pasteable code.
+          - cookbook/debugging.md: Reading a trace, isolating a behavior failure, replaying a divergent run.
+          - cookbook/multi-run-scripts.md: Running many runs from one script — sweeps, A/B comparisons, batch fork-and-diff.
+          - cookbook/migration-from-v0-7.md: Upgrade runbook for code and saved runs across milestones from v0.7 onward.
+        Reference:
+          - reference/cli.md: Full `activegraph` CLI reference — `quickstart`, `run`, `inspect`, `fork`, `pack`, and every flag.
+          - reference/llm-providers.md: AnthropicProvider and OpenAIProvider side-by-side surface; recorded-fixture replay, model defaults, limitations.
+          - reference/errors.md: Catalog overview of every error class — when it fires, what triggers it, where to look.
+          - reference/errors/*.md
+          - reference/api/index.md: API reference overview — Runtime, Graph, Behaviors, Tools, Store, Packs, Errors, Observability.
+          - reference/api/runtime.md
+          - reference/api/graph.md
+          - reference/api/behaviors.md
+          - reference/api/tools.md
+          - reference/api/store.md
+          - reference/api/packs.md
+          - reference/api/errors.md
+          - reference/api/observability.md
+          - reference/api/packs/diligence.md
+        Optional:
+          - about/changelog.md: Per-release changelog v0 through v1.0.5, with migration notes.
+          - about/publishing.md: How to cut a release — version bump, tagging, PyPI publish, doc-site deploy.
   - mkdocstrings:
       # API reference rendering. CONTRACT v1.0 #C2 (tiered docstring
       # coverage) + #5 (doc-site structure). The audit script at

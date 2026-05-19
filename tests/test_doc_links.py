@@ -66,6 +66,22 @@ _DOCS_URL_RE = re.compile(
 )
 
 
+# URLs that are generated at build time and do NOT correspond to a
+# `docs/*.md` source file. These bypass the source-presence check
+# because their existence is verified by a dedicated build-time gate
+# rather than by source-tree presence.
+#
+# `/llms.txt` and `/llms-full.txt` (CONTRACT v1.0.5 #1) are emitted by
+# the `mkdocs-llmstxt` plugin during `mkdocs build`; their existence
+# and well-formedness are verified by `tests/test_llms_txt.py`. Any
+# URL added here must have a paired build-time test asserting the
+# file lands at the site root.
+_BUILD_GENERATED_URLS = frozenset({
+    "/llms.txt",
+    "/llms-full.txt",
+})
+
+
 def _strip_trailing_punct(s: str) -> str:
     """URLs in prose often end at sentence boundaries; trim trailing
     punctuation that isn't part of the URL."""
@@ -181,6 +197,10 @@ def test_every_referenced_docs_url_has_a_source_page() -> None:
     missing: dict[Path, list[tuple[str, list[Path]]]] = {}
     unmapped: list[tuple[str, list[Path]]] = []
     for url_path, sources in referenced.items():
+        if url_path in _BUILD_GENERATED_URLS:
+            # Existence guaranteed by tests/test_llms_txt.py at build
+            # time; no docs/*.md source to check.
+            continue
         expected = _url_to_source_path(url_path)
         if expected is None:
             unmapped.append((url_path, sources))

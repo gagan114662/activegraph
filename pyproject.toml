@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "activegraph"
-version = "1.0.4"
+version = "1.0.5"
 description = "An event-sourced reactive graph runtime for long-running, auditable, agentic systems."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -65,6 +65,12 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.24",
+    # v1.0.5 #1: generates /llms.txt and /llms-full.txt at the site
+    # root so AI coding assistants fetching docs.activegraph.ai get
+    # clean markdown instead of mkdocs-rendered HTML. Same maintainer
+    # as mkdocstrings; native dual-output via the `full_output:` config
+    # key. Surfaced by the v1.0.4 external user-test.
+    "mkdocs-llmstxt>=0.2",
 ]
 
 [project.scripts]

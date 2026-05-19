@@ -5467,6 +5467,198 @@ Restated here for `v1.1-plan.md`'s backlog:
    but do not address the underlying readability.
 
 
+# v1.0.5 — AI-readable docs via llms.txt support (single finding from external v1.0.4 user-test)
+
+The v1.0.4 external user-test surfaced one finding: a developer
+evaluating Active Graph in 2026 reaches the doc site through an
+AI coding assistant (Claude Code, Cursor, Replit agents) far more
+often than through a browser. The mkdocs-rendered HTML at
+`docs.activegraph.ai` is hard for those agents to parse — they
+fetch a page, get a navigation chrome wrapped around the content,
+and spend tokens unwrapping it before they read.
+
+The dominant convention for serving machine-readable docs is
+**llms.txt** (proposed by Jeremy Howard, 2024, at
+[llmstxt.org](https://llmstxt.org/)). Stripe, Vercel, Anthropic's
+docs, Nuxt, and many others publish `/llms.txt` and
+`/llms-full.txt` at the root of their doc sites. The pattern:
+
+- **`/llms.txt`**: a structured markdown index — H1 + blockquote
+  summary + H2 sections with linked pages, each with a
+  one-sentence description. Navigation aid for AI tools.
+- **`/llms-full.txt`**: concatenated markdown of every doc page,
+  sized for large context windows. The "everything in one file"
+  reference for AI tools that ingest comprehensive docs.
+
+v1.0.5 ships both files. Single finding, single mechanical
+release. No abstraction changes, no new runtime capability, no
+source-markdown changes. The release operates on docs + build
+infrastructure only.
+
+## v1.0.5 #1. `/llms.txt` and `/llms-full.txt` at docs site root, generated at build time
+
+### The contract claim
+
+After every `mkdocs build`, the deployed site root carries two
+additional files:
+
+- **`/llms.txt`** — markdown index. Starts with `# Active Graph`,
+  followed by a one-paragraph blockquote summary naming the
+  framework's stance and the install command. Then H2 sections
+  organizing the doc pages: Quickstart, Concepts, Guides,
+  Cookbook, Reference (CLI / LLM providers / API / Errors), and
+  About. Each link entry is `[Page Title](URL): one-sentence
+  description`. An "Optional" H2 section at the end carries
+  less-critical references (CHANGELOG, CONTRACT, etc.).
+- **`/llms-full.txt`** — concatenated markdown. Same H1 and
+  blockquote at the top. Then every doc page's markdown in
+  reading order (concepts → quickstart → guides → cookbook →
+  reference → about), with H2 separators between source pages
+  so an AI reading the file can locate source-page boundaries.
+
+Both files live at `https://docs.activegraph.ai/llms.txt` and
+`https://docs.activegraph.ai/llms-full.txt` once GitHub Pages has
+deployed the build artifact.
+
+### Generation: `mkdocs-llmstxt` plugin
+
+v1.0.5 adopts the `mkdocs-llmstxt` plugin (pawamoy, MIT, PyPI as
+of 2025-11) rather than a custom build script. Three reasons:
+
+1. **Same maintainer as `mkdocstrings`.** The framework's mkdocs
+   plugin surface is already pawamoy-shaped; one author, one
+   release cadence, one mental model. Adopting the same author's
+   sibling plugin keeps the surface coherent.
+2. **Native dual-output support.** The plugin's `full_output:
+   llms-full.txt` config toggle generates both files from one
+   pass over the nav tree. A custom script would re-implement
+   nav-walking, markdown extraction, and HTML cleanup — work
+   that already lives in the plugin and has been hardened
+   against the mkdocs-internal API across releases.
+3. **No drift surface.** Generation happens inside `mkdocs build`.
+   The output files cannot drift from the source markdown
+   because they are recomputed every build. There is no
+   committed `llms.txt` to maintain by hand.
+
+The plugin is installed via the existing `[docs]` extra in
+`pyproject.toml` (same pattern that the rc3 amendment locked in
+for `mkdocstrings`). Adding the dep to the extra auto-syncs the
+`.github/workflows/docs.yml` install line (`pip install -e
+".[docs]"`).
+
+### Configuration shape in `mkdocs.yml`
+
+The plugin's `sections:` config mirrors the existing `nav:` block
+1:1 — Quickstart, Concepts, Guides, Cookbook, Reference (CLI +
+LLM providers + API + Errors), About. The `markdown_description:`
+field carries the one-paragraph framework summary (the same prose
+that opens `README.md` and `docs/index.md`, kept in sync by the
+same Standing-Rule-§1-style discipline that governs every other
+voice-anchored prose surface). The `full_output: llms-full.txt`
+toggle enables the second file.
+
+### Drift prevention is structural, not procedural
+
+The failure mode this fix protects against is drift between source
+markdown and the published `llms.txt` / `llms-full.txt`. The
+protection is **structural**: both files are generated at build
+time from the same `docs/` source tree that mkdocs renders to
+HTML. There is no separate hand-maintained `llms.txt` file in the
+repository. The build cannot succeed without regenerating both.
+
+This is the same pattern that protects the doc-site rendering
+itself: the only way the site has stale content is for the
+underlying markdown to be stale, in which case the rendered HTML
+has the same staleness. Locking both surfaces to the same source
+collapses the drift surface from two-of-two to one-of-one.
+
+### Tests (Standing Rule §2)
+
+`tests/test_llms_txt.py` is the contract anchor for v1.0.5 #1's
+claim. The test invokes `mkdocs build` against the live
+`mkdocs.yml` (into a temp `site/` directory) and asserts:
+
+1. **Both files exist** at `site/llms.txt` and
+   `site/llms-full.txt`.
+2. **`llms.txt` well-formedness**: starts with `# Active Graph`;
+   contains a blockquote summary line; contains at least one H2
+   section header.
+3. **`llms.txt` content coverage**: references each of the
+   nav-anchor pages — `concepts/graph.md`, `quickstart.md`, and
+   at least one cookbook page — so a file that exists but only
+   contains the H1 doesn't pass. The assertion is on the linked
+   nav anchors, not the full page list, so future page additions
+   don't churn the test.
+4. **`llms-full.txt` well-formedness**: starts with `# Active
+   Graph`; contains the markdown body of at least one source
+   page (asserted via a distinctive marker phrase from
+   `docs/quickstart.md`).
+
+The test is marked `@pytest.mark.slow` because `mkdocs build`
+takes several seconds (the same cost as `test_doc_site_reachable.py`).
+Local `pytest` skips it by default; the `docs.yml` workflow runs
+it explicitly. Mirrors the precedent set by
+`test_doc_site_reachable.py`.
+
+The boundary the test anchors on: "both files exist after build
+and are well-formed" — the exact phrase this section commits to.
+Standing Rule §2.
+
+### README and CHANGELOG
+
+`README.md`'s `## Documentation` section gains a short note:
+machine-readable docs at `/llms.txt` and `/llms-full.txt` for AI
+coding assistants and agents. One sentence; the link targets
+speak for themselves.
+
+The CHANGELOG entry frames the release as "AI-readable docs via
+llms.txt support" and cites the v1.0.4 user-test as the surfacing
+path.
+
+## v1.0.5 deliberately does NOT touch
+
+The single-finding cleanup pass is tightly scoped. Out of scope:
+
+- **No content negotiation** (Accept: text/markdown serving).
+  That requires docs-host infrastructure beyond GitHub Pages;
+  filed as v1.1 candidate.
+- **No editorial doc-readability audit.** Individual doc pages
+  may benefit from front-loaded summaries, clearer
+  cross-references, or consistent terminology — but that is
+  open-ended editorial work, not a release that ships two files
+  at the site root.
+- **No changes to existing doc pages' content.** The source
+  markdown stays as is; the new files are generated from the
+  existing markdown unchanged.
+- **No code changes to the framework itself.** This is a docs +
+  build-infrastructure release. No `activegraph/**/*.py` change
+  ships.
+- **No new abstraction.** No new public class, no new public
+  method, no new event type, no new reason code, no new error
+  class.
+- **No reshape of any locked decision below v1.0.5.** Every
+  surface from v1.0 through v1.0.4 stays byte-identical.
+
+### v1.1 candidates surfaced by v1.0.5
+
+Restated here for `v1.1-plan.md`'s backlog:
+
+1. **Content negotiation on the docs host** (returns
+   `text/markdown` for `Accept: text/markdown` requests).
+   Complementary to the static `/llms.txt` and `/llms-full.txt`
+   files: an AI agent that fetches an arbitrary doc page URL
+   gets the markdown source rather than the rendered HTML. The
+   v1.0.5 static-files approach handles the index-and-bulk case;
+   content negotiation handles the per-page case. Requires
+   docs-host infrastructure (a worker / edge function /
+   nginx-config), which GitHub Pages does not support natively.
+2. **Editorial doc-readability pass.** Front-load page summaries
+   (so the first paragraph stands alone as the page abstract),
+   tighten cross-references, normalize terminology across the
+   per-error catalog. Open-ended and orthogonal to v1.0.5's
+   mechanical file-generation scope.
+
+
 # v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
 
 **Review status (2026-05-19):** RELOCATED. The post-v1.0.3 contract
