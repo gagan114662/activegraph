@@ -172,9 +172,29 @@ def _row_to_run(row: sqlite3.Row) -> RunRecord:
 
 
 class SQLiteEventStore:
-    """Per-run view onto a SQLite-backed event log."""
+    """Per-run view onto a SQLite-backed event log.
 
-    def __init__(self, path: str, run_id: str) -> None:
+    Direct construction expects an explicit ``path`` and ``run_id``.
+    For most cases prefer ``Runtime(graph, persist_to=...)``, which
+    opens the store, mints a ``run_id`` if needed, and wires it onto
+    the runtime — the v1.0.1 user-test surfaced that constructing
+    ``SQLiteEventStore`` by hand is a low-frequency operator path,
+    not the happy path.
+    """
+
+    def __init__(
+        self, path: Optional[str] = None, run_id: Optional[str] = None
+    ) -> None:
+        if path is None or run_id is None:
+            missing = "run_id" if path is not None else "path and a run_id"
+            raise TypeError(
+                f"SQLiteEventStore requires a {missing}. For most cases, "
+                f"use Runtime(graph, persist_to='path/to/trace.sqlite') "
+                f"instead, which handles run_id automatically. If you "
+                f"need a per-run handle (migration, conformance test, "
+                f"trace inspection), pass both explicitly: "
+                f"SQLiteEventStore('path/to/trace.sqlite', run_id='run_...')."
+            )
         self.path = path
         self.run_id = run_id
         self._conn = sqlite3.connect(path, isolation_level=None)
