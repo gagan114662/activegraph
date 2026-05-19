@@ -48,15 +48,7 @@ symbol = "activegraph.View"
 reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
 
 [[exemptions]]
-symbol = "activegraph.clear_registry"
-reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
-
-[[exemptions]]
 symbol = "activegraph.clear_tool_registry"
-reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
-
-[[exemptions]]
-symbol = "activegraph.get_registry"
 reason = "missing entirely; v1.1 follow-on per COVERAGE_REPORT.md"
 
 [[exemptions]]

@@ -27,12 +27,64 @@ from activegraph.behaviors.base import (
 _REGISTRY: list[Union[Behavior, RelationBehavior]] = []
 
 
-def clear_registry() -> None:
+def clear_registry() -> list[Union[Behavior, RelationBehavior]]:
+    """Empty the global behavior registry and return what was cleared.
+
+    Tests that need isolation between cases call this in a fixture; the
+    return value is the list of removed behaviors in registration
+    order, so multi-run scripts can capture them once and re-register
+    via :func:`register` on each subsequent run without re-importing
+    the modules whose ``@behavior`` decorators populated the registry
+    in the first place. See the *Multi-run scripts* cookbook recipe.
+
+    v1.0.1: the return value is new. v1.0 returned ``None``; callers
+    that ignored the return still work unchanged.
+    """
+    cleared: list[Union[Behavior, RelationBehavior]] = list(_REGISTRY)
     _REGISTRY.clear()
+    return cleared
 
 
 def get_registry() -> list[Union[Behavior, RelationBehavior]]:
+    """Snapshot of the global behavior registry (a shallow copy)."""
     return list(_REGISTRY)
+
+
+def register(behavior_obj: Union[Behavior, RelationBehavior]) -> None:
+    """Append an already-constructed behavior to the global registry.
+
+    The decorators (:func:`behavior`, :func:`relation_behavior`,
+    :func:`llm_behavior`) register on definition; this function exists
+    for the case where definition and registration are decoupled —
+    most commonly, multi-run scripts that call :func:`clear_registry`
+    between runs and need to re-populate the registry without
+    re-importing the decorator-bearing modules:
+
+    .. code-block:: python
+
+        from activegraph import clear_registry, register
+
+        cleared = clear_registry()        # capture before the first run
+        rt1 = Runtime(graph1); rt1.run_goal("first")
+
+        for b in cleared:                 # restore for the next run
+            register(b)
+        rt2 = Runtime(graph2); rt2.run_goal("second")
+
+    See the *Multi-run scripts* cookbook recipe.
+
+    v1.0.1: new. v1.0 required reaching into the private
+    ``_REGISTRY`` list — the user-test gate surfaced that as a rough
+    edge.
+    """
+    if not isinstance(behavior_obj, (Behavior, RelationBehavior)):
+        raise TypeError(
+            f"register() expected a Behavior, RelationBehavior, or "
+            f"LLMBehavior instance; got {type(behavior_obj).__name__}. "
+            f"Use the @behavior / @relation_behavior / @llm_behavior "
+            f"decorators to construct one."
+        )
+    _REGISTRY.append(behavior_obj)
 
 
 def behavior(
@@ -124,6 +176,26 @@ def llm_behavior(
 
     Keyword-only on purpose — `@llm_behavior` carries enough
     parameters that positional binding would be a footgun.
+
+    `prompt_template=` is the only escape hatch from the
+    runtime-assembled prompt. It is a `str.format`-style template that
+    receives four placeholders:
+
+    - ``{system}`` — the system block: behavior name, frame goal and
+      constraints, role description, and (when `output_schema=` is set)
+      the schema with an example instance.
+    - ``{view}`` — the scoped graph view: objects, relations, and
+      recent events, rendered as Markdown (format locked per
+      CONTRACT v0.6 #13).
+    - ``{event}`` — the triggering event as id, type, actor, and
+      pretty-printed JSON payload with volatile keys stripped.
+    - ``{instruction}`` — the one-sentence task derived from `creates=`
+      and `output_schema=`.
+
+    The four placeholders carry the same runtime-assembled content
+    whether or not a template is set; the template only re-arranges
+    them. Omitting `prompt_template=` (the default) uses the
+    runtime's canonical layout.
     """
 
     from activegraph.runtime.patterns import parse as _parse_pattern

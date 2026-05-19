@@ -33,3 +33,5 @@ and [`concepts/behaviors`](../../concepts/behaviors.md).
 ::: activegraph.get_registry
 
 ::: activegraph.clear_registry
+
+::: activegraph.register

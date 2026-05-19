@@ -141,6 +141,7 @@ nav:
   - Cookbook:
       - Common patterns: cookbook/common-patterns.md
       - Debugging: cookbook/debugging.md
+      - Multi-run scripts: cookbook/multi-run-scripts.md
       - Migration from v0.7: cookbook/migration-from-v0-7.md
   - Reference:
       - CLI: reference/cli.md
