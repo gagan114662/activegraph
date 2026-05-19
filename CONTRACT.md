@@ -1,4 +1,99 @@
+## Post-v1.0.3 contract review banner (2026-05-19)
+
+A documentation-heavy review of the cumulative document was run after
+v1.0.3 shipped, on branch `claude/review-contract-docs-CoaO6`. The
+review produced two companion deliverables:
+
+- `CONTRACT-review-findings.md` — the audit record: amendment-by-
+  amendment outcomes, API coherence findings, failure-model
+  consistency findings, tests-verify-contracts findings, plus
+  v1.0.4 / v1.1 candidates surfaced.
+- `v1.1-plan.md` — the consolidated v1.1 backlog. CONTRACT.md no
+  longer carries scattered "filed for v1.1" markers in amendment
+  bodies; each deferral reads "Filed in v1.1-plan.md" and points at
+  one entry.
+
+### Document semantics: this banner is a status overlay, not a rewrite
+
+The review added, but did not rewrite, the following:
+
+- This preamble banner.
+- Per-milestone `Review status:` markers immediately after each
+  milestone header. The default outcome is **STILL ACCURATE**;
+  departures are surfaced inline.
+- One in-place marker at v1.0.2 #1(b) recording that the prose was
+  revised by v1.0.2.post1 (see standing rule §1 below).
+
+**Pre-banner content is the original archeological record** — every
+amendment from v0 through v1.0.3 reads as it did when locked
+(modulo the v1.0.2 #1(b) in-place revision that this review
+flagged). **Post-banner annotations are the May 2026 review
+overlay** — `Review status:` markers and "Filed in v1.1-plan.md"
+pointers were appended, never substituted in for prior prose.
+
+A future reader should treat the two layers separately. The
+archeology answers "what was decided when"; the overlay answers
+"how does that decision read now."
+
+### Standing rules adopted by this review
+
+The review surfaced two process gaps that are now standing rules
+for every future amendment cycle. These are framework-discipline
+rules, not project-management rules; they apply to every
+CONTRACT amendment from this banner forward.
+
+**Standing rule §1 — Amendments append, never modify.** When a
+post-release amendment changes or corrects an earlier amendment's
+wording, the amendment is appended as a new dated section under
+(or alongside) the original — never folded in by editing the
+prior section's prose. Editing in place destroys the boundary
+record: a future reader of the contract alone cannot reconstruct
+when the change happened or what was changed. The CHANGELOG carries
+shipping dates; CONTRACT carries decision provenance. Both
+matter; neither replaces the other.
+
+This rule is retroactive in one specific case: v1.0.2 #1(b) was
+revised in place by v1.0.2.post1. A v1.0.4 candidate (review §5
+#6) appends a proper `### v1.0.2.post1` section to CONTRACT to
+restore the archeological record without rewriting the corrected
+prose. The in-place marker added by this review is the
+interim measure.
+
+**Standing rule §2 — Tests anchor on the boundary the contract
+names, not the implementation's path.** When an amendment locks a
+boundary ("at registration time," "before any state mutation," "on
+load," "at decoration time," "after the pack is loaded"), the
+test suite for that amendment must exercise the boundary the
+contract names — not whatever path the implementation happens to
+take through that boundary. Two boundary-mismatch bugs have shipped
+under this gap (v0.5 #8's `_requeue_unfired`; v1.0.2 #1(b)'s lazy
+validation); the v1.0.2.post1 tests in
+`tests/test_llm_default_model.py` Section (g) are the canonical
+model. The future-proof shape: every test naming a binding moment
+in its name AND asserting the contract behavior fires at that
+specific moment.
+
+A spec-vs-impl drift gate (v1.1 candidate D-1 / D-2) is the
+mechanical complement to this discipline. Automated checking
+catches what amendment-cycle discipline alone cannot.
+
+### What this review did not change
+
+No code changed in this pass. Code-shaped findings are filed as
+v1.0.4 candidates (review §5) or v1.1 candidates (`v1.1-plan.md`).
+No amendment was retired. No amendment was rewritten to make a
+different claim than its original; "STILL ACCURATE" is the
+overwhelming verdict.
+
+---
+
 # Active Graph v0 — Design Contract
+
+**Review status (2026-05-19):** STILL ACCURATE. #11 (`token_budget`
+"parsed but ignored until v0.6") and #16 (out-of-scope list) are
+historical statements — every deferred item has since shipped.
+Preserved as archeology; see review §1 and §5 #5 (v1.0.4 candidate
+to add one-line "shipped in vX" notes).
 
 These decisions are locked. Changing any of them is a breaking change to the
 public API or to the trace format. Any change must update this file in the
@@ -239,6 +334,18 @@ one space follows it.
 ---
 
 # Active Graph v0.5 — Resumability addendum
+
+**Review status (2026-05-19):** STILL ACCURATE. #7 known-limitation
+narrowed (not closed) by v0.6 #22 — forward pointer was already
+self-documented in v0.6 #22. #8 "DIFF: re-queue unfired events on
+load" was the contract claim against which a latent boundary-
+mismatch bug shipped from v0.5 through v1.0-rc1; v1.0-rc2 fixed
+the implementation (see CHANGELOG v1.0-rc2 entry on
+`_requeue_unfired`). The contract claim was correct; the
+implementation relied on a false reverse-implication. See review
+§4 spot-check on v0.5 #8 and §7 #2 (boundary-mismatch class). A
+contract-anchored test for the zero-subscriber case is filed as
+v1.0.4 candidate #4.
 
 v0.5 makes persistence physical. The event log moves from a Python list
 into a SQLite file, with save / load / fork / diff on the runtime. v0
@@ -485,6 +592,15 @@ Snapshot-tested in `tests/test_replay_trace_snapshot.py`.
 ---
 
 # Active Graph v0.6 — LLM behaviors addendum
+
+**Review status (2026-05-19):** STILL ACCURATE. #14 (trace format
+for LLM events) was incrementally amended by v0.7 #18 (added
+`prompt_normalized=true`) and then v0.9.1 #2 (rolled the flag up
+into `[trace.flags]`) — both successors self-document the change.
+#11 reason taxonomy is "closed" per v1.0.1 #5(c) clause 4; no new
+codes added since. #13 failures-as-events is the foundation for
+v1.0 #4b's framework-wide principle and v1.0.3 #3's user-facing
+surface (`Runtime.errors`).
 
 v0.6 puts LLMs onto the substrate without breaking what made the
 substrate trustworthy. Every LLM call is two events in the log; the
@@ -860,6 +976,10 @@ unavoidable.
 ---
 
 # Active Graph v0.7 — Tools + advanced matching addendum
+
+**Review status (2026-05-19):** STILL ACCURATE. #18's per-line
+`prompt_normalized=true` is hidden behind v0.9.1 #2's rollup; the
+underlying contract about the flag's existence is preserved.
 
 v0.7 makes tool use a first-class primitive (not buried inside LLM
 behaviors) and lands Cypher-style pattern subscriptions plus
@@ -1279,6 +1399,16 @@ provider serves canned URL responses.
 
 # Active Graph v0.8 — Persistence, observability, operator surface
 
+**Review status (2026-05-19):** STILL ACCURATE. #6 structured
+logging schema (`error_type` / `error_message` field names) is the
+canonical operator contract; the v1.0.3 #3 `BehaviorFailure`
+NamedTuple uses Python-conventional names
+(`exception_type` / `message`) — intentional divergence, filed for
+docs clarification as v1.0.4 candidate #3. #11 RuntimeStatus shape
+extended additively in v1.0.3 #3 (`Runtime.errors` property, not a
+frozen-dataclass field). #19 out-of-scope list is historical (same
+pattern as v0 #16); items have shipped in subsequent milestones.
+
 v0.8 is the milestone where the framework stops adding capability and
 starts hardening the boundary between the runtime and the world it has
 to live in. Three concerns: persistence beyond SQLite (Postgres),
@@ -1605,6 +1735,15 @@ is what makes the framework deployable.
 ---
 
 # v0.9 — Pack format + Diligence pack
+
+**Review status (2026-05-19):** STILL ACCURATE. Spot-checked #5
+(load-order asymmetry), #10 (prompt hash as replay contract), #13
+(`pack.loaded` event); tests in `tests/test_packs_*` anchor on the
+contract claims. #26 deferred items (Memory pack, Research pack,
+pack registry, signing, sandboxing, adaptive question generation,
+contradiction resolver) remain deferred per v1.0 #10's deferral
+list and `v1.1-plan.md`'s "What v1.1 deliberately does NOT
+include."
 
 v0.9 ships two things that share a single design: the **pack format**
 (a way to bundle object types, relation types, behaviors, tools,
@@ -2209,6 +2348,12 @@ installs activegraph + activegraph.packs.diligence and follows the
 README can produce a useful memo on day one. If the pack feels like
 a toy, the milestone hasn't shipped. Polish over breadth.
 
+**Review status (2026-05-19):** STILL ACCURATE. #2 self-documents
+the supersession of v0.7 #22's per-line `prompt_normalized=true`
+clause — exemplary cycle discipline (the successor amendment
+explicitly names what it supersedes; the predecessor's claim is
+preserved as archeology).
+
 # v0.9.1 — pending follow-ups bundle
 
 A small follow-up release with two items the v1.0 plan flagged as
@@ -2299,7 +2444,18 @@ The v1.0 plan locked these as out for v0.9.1 and v1.0 both:
   ships post-1.0 only if quickstart usage shows demand)
 - Web UI, streaming, multi-model routing (per v0.9 #26)
 
-# v1.0 — adoption surface (PR series; not yet shipped)
+# v1.0 — adoption surface (shipped; PR series)
+
+**Review status (2026-05-19):** STILL ACCURATE. The "not yet
+shipped" qualifier in the original header is historical — v1.0
+shipped 2026-05-18; v1.0.1 / v1.0.2 / v1.0.2.post1 / v1.0.3 have
+shipped since. The C1–C8 decisions, the #1–#10 main spec, the
+PR-A-through-PR-G series, and #4b / #4c / #4d addenda all hold.
+"v1.1 error-completeness milestone scope" tallies scattered through
+PR-E / PR-F / PR-G are now consolidated in `v1.1-plan.md` Theme A.
+The cumulative tally of 19 new exception classes migrated to the
+v1.0 structured format stands as the series-final state per PR-G's
+end-of-series note.
 
 The framework runtime is done. v1.0 is the milestone that decides
 whether anyone uses it. Every prior milestone improved the artifact;
@@ -3873,6 +4029,14 @@ from runtime engineering.
 
 # v1.0.1 — first external user-test patch
 
+**Review status (2026-05-19):** STILL ACCURATE. #5(c) clauses 1–4
+(token-counting asymmetry, Anthropic-only tool use, instruction-
+based structured output, closed reason taxonomy) all remain
+honest non-promises; the v1.1 candidates they named are
+consolidated in `v1.1-plan.md` (B-1 OpenAI tool-shape, B-2 native
+structured output). Tests for #1–#4 anchor on contract claims
+(see review §4).
+
 The first external user-test produced three small findings, all on
 the "X is confusing" UX side of the heuristic in HANDOFF.md, none
 architectural. The framework's shape held; the polish around three
@@ -4129,6 +4293,20 @@ follow-ons, etc.). v1.0.1 doesn't reshape that backlog.
 
 # v1.0.2 — second external user-test patch (provider-aware default model)
 
+**Review status (2026-05-19):** STILL ACCURATE post-revision.
+**Discipline note**: #1(b) below was originally locked to fire
+validation at registration time. The v1.0.2 implementation
+actually fired lazily at first `run_goal()`. v1.0.2.post1
+corrected the implementation AND revised the prose of #1(b) in
+place to the "both binding moments" wording it carries now. The
+CHANGELOG carries a dated `[v1.0.2.post1]` entry; this CONTRACT
+section was edited in place rather than appended to. See review
+§4 (the post1 tests in `test_llm_default_model.py` Section (g) are
+the canonical model for boundary-anchored tests) and review §7 #1
+(discipline finding on in-place revisions vs dated amendment
+sections). Pack-load-time validation remains a third binding
+moment — filed as v1.1 candidate B-3.
+
 The v1.0.1 release added `OpenAIProvider` as the second concrete
 provider and locked the provider-commitment surface (v1.0.1 #5). A
 second-round external user-test surfaced three more findings; the
@@ -4155,6 +4333,26 @@ credibility hits on the v1.0.1 announcement; the default-model
 mismatch is.
 
 ## v1.0.2 #1. `@llm_behavior(model=)` defaults to the provider's default model
+
+> **Retroactive revision note (added 2026-05-19 by the post-v1.0.3
+> contract review).** This section's prose was revised in place by
+> v1.0.2.post1 (CHANGELOG dated 2026-05-19) when an external
+> spot-check discovered the v1.0.2 implementation fired the
+> validation lazily at first `run_goal()` rather than at
+> registration time as the original v1.0.2 #1(b) text claimed. The
+> "both binding moments" wording carried in §(b) below is the
+> post1-corrected form, not the original v1.0.2 lock.
+>
+> The CHANGELOG carries the dated v1.0.2.post1 entry with the full
+> boundary-correction record. v1.0.4 candidate §5 #6 (review) will
+> append a proper `### v1.0.2.post1` amendment section to CONTRACT
+> so the archeology is restored without further rewriting the
+> corrected prose. Until that lands, this note is the breadcrumb;
+> the in-place marker under §(b) is the second breadcrumb at the
+> specific revision site.
+>
+> Standing rule §1 (banner) prevents this pattern from recurring:
+> amendments append, never modify.
 
 The `LLMProvider` Protocol gains two additive surfaces. v1.0.1 #5
 locked "additions are non-breaking"; v1.0.2 #1 invokes that clause
@@ -4190,6 +4388,12 @@ instance, so `behavior.build_prompt(event, graph)` keeps its
 existing pure-function signature for prompt inspection.
 
 ### (b) `LLMProvider.recognizes_model(name)` method
+
+*[Revised by v1.0.2.post1. The "both binding moments" wording
+below is the post1 form; the original v1.0.2 #1(b) text described
+registration-time-only validation but the implementation fired
+lazily. See review §7 #1 for the discipline note. CHANGELOG
+carries the dated v1.0.2.post1 entry.]*
 
 Each provider implements `recognizes_model(name: str) -> bool`
 returning True if `name` belongs to a model family the provider
@@ -4322,6 +4526,17 @@ need design before they're locked.
 
 
 # v1.0.3 — comprehensive response to two user-test reports
+
+**Review status (2026-05-19):** STILL ACCURATE. All four findings
+carry contract-anchored tests (review §4). The "v1.1 backlog
+candidates surfaced by v1.0.3" list at the end of this section is
+consolidated in `v1.1-plan.md` Themes B and C — see B-4 (dict-form
+`output_schema=`), B-5 (`on_failure=` callback), B-1 (OpenAI tool
+translation, restated from v1.0.1 #5(c)), B-6 (fire-once
+aggregation), B-3 (pack-load-time validation, restated from
+v1.0.2 #1(b)). The `graph.relations()` doc-vs-impl gap noted in
+the review work-item premise was **not** filed by v1.0.3; review
+§2 Finding A surfaces it as v1.0.4 candidate #1.
 
 v1.0.2.post1 corrected the validation boundary for v1.0.2 #1
 (cross-provider model validation now fires at both binding moments,
@@ -4753,6 +4968,37 @@ into a single v1.1 scope section alongside the existing v1.1
 
 
 # v1.1 — implementation gaps (concrete items from v1.0-rc1 user-facing work)
+
+**Review status (2026-05-19):** RELOCATED. The post-v1.0.3 contract
+review consolidated the v1.1 backlog (this section plus the
+scattered "filed for v1.1" markers from v1.0.1 / v1.0.2 / v1.0.3,
+plus the v1.0 PR-G end-of-series tallies) into a single document:
+**`v1.1-plan.md`** (see also `CONTRACT-review-findings.md` §2 and
+§6 for the surfacing path).
+
+The numbered entries below (#1–#9 + #7-and-beyond) are preserved
+as historical context; each maps to one or more `v1.1-plan.md`
+themes:
+
+- #1 (CLI flags) → `v1.1-plan.md` Theme F (F-1 / F-2 / F-3).
+- #2 (spec-vs-impl drift gate; CLI + Python snippets) →
+  `v1.1-plan.md` D-1 + D-2.
+- #3 (type-completeness) → `v1.1-plan.md` E-1.
+- #4 (docstring-completeness) → `v1.1-plan.md` E-2 (+ E-3).
+- #5 (`Runtime.load` auto-provider) → `v1.1-plan.md` B-7.
+- #6 (version-tag-correspondence gate) → `v1.1-plan.md` D-3.
+- #8 (wheel-completeness gate) → `v1.1-plan.md` D-4 (shipped in
+  v1.0-rc3; required-status flip pending).
+- #9 (deploy-verification gate) → `v1.1-plan.md` D-5 (shipped;
+  required-status flip pending Pages enablement).
+- #7-and-beyond (Pack* partials, DB errors, fork cache symmetry,
+  OpenAI tool, native structured output) → `v1.1-plan.md` A-1,
+  A-2, A-3, H-1, B-1, B-2.
+
+When v1.1 milestone scoping begins, `v1.1-plan.md` is the
+canonical backlog. The text below stays as the original framing
+discipline ("turn 'we found a gap' into 'we found a gap and we
+know exactly how to close it'") which the plan inherits.
 
 The first v1.1 items that came from real user-facing work, not from
 internal audit. The v1.0 error-completeness milestone (~30 items from
