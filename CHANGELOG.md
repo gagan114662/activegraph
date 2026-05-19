@@ -15,8 +15,19 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 
 ## [Unreleased]
 
-Nothing yet. v1.1 scope is tracked in
+v1.1 scope is tracked in
 [CONTRACT.md § v1.1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md).
+
+### Examples
+
+- **`examples/babyagi.py`** with companion `examples/babyagi/README.md`
+  — BabyAGI's autonomous agent loop (Nakajima 2023) rebuilt as three
+  reactive behaviors over a shared graph. The minimal-loop counterpart
+  to the Diligence pack's domain-rich example: same conceptual lineage
+  as the framework's launch essays, runnable end-to-end against the
+  Anthropic provider, traces to `traces/babyagi-<timestamp>.sqlite`.
+  Uses the v1.0.1 public `register()` API. No runtime changes; no
+  version bump.
 
 ## [v1.0.1] — 2026-05-19
 

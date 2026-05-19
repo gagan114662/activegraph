@@ -169,7 +169,9 @@ in [`docs/concepts/relations.md`](https://docs.activegraph.ai/concepts/relations
   [`resume_and_fork.py`](examples/resume_and_fork.py),
   [`llm_claim_extraction.py`](examples/llm_claim_extraction.py),
   [`diligence_with_tools.py`](examples/diligence_with_tools.py),
-  [`operate_a_run.py`](examples/operate_a_run.py).
+  [`operate_a_run.py`](examples/operate_a_run.py),
+  [`babyagi.py`](examples/babyagi.py) — BabyAGI's autonomous agent loop,
+  rebuilt as three reactive behaviors over a shared graph.
 
 ## What this is not
 
