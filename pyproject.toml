@@ -178,6 +178,15 @@ files = [
     "activegraph/tools/errors.py",
 ]
 
+# Follow activegraph package imports silently rather than as Any so
+# downstream consumers (e.g. examples/v0_promote_runtime_diff.py) can
+# `assert_type` against the public surface of clean modules. Errors in
+# followed-but-not-listed modules are suppressed, preserving the
+# allowlist-gate semantics described above for the global default.
+[[tool.mypy.overrides]]
+module = "activegraph.*"
+follow_imports = "silent"
+
 # Strict-mode invariants applied to each clean module. Same list as
 # `files` above (mypy expects module dotted names here, not paths).
 
