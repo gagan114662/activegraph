@@ -89,6 +89,18 @@ v1.0.5.post2.
 
 ### Changed
 
+- **`README.md`**: new `## The type system at a glance` section between
+  `Concepts at a glance` and `A small example`. Three short beats —
+  event types are fixed (full enumerated list inline), object and
+  relation types are yours (no central schema, no registration), patch
+  states are fixed — plus a pointer to the new concepts page. The
+  bridge between the primitive index and the example: a reader who
+  has skimmed the twelve primitives now knows the vocabulary the
+  example uses (`object.created`, the custom `task.completed`, the
+  `task` and `depends_on` strings) before they hit the code. The
+  section calls out the `task.completed` custom-event-type usage in
+  the example explicitly so the framework-vs-application event
+  distinction lands before the code rather than after it.
 - **`mkdocs.yml`**: nav adds `Type system: concepts/type-system.md`
   to the Concepts section between Graph and Events; the
   `mkdocs-llmstxt` plugin's `sections.Concepts` list adds the
