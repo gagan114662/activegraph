@@ -6602,3 +6602,238 @@ above):
 
 This list is the v1.1 backlog. CONTRACT v1.1 expands it into a
 proper milestone scope when v1.1 work begins.
+
+
+# v1.0.5.post2 — type-system concepts page (single finding from maintainer doc-gap review)
+
+A maintainer-driven review of the doc site found that the framework's
+type system is documented across four concepts pages (`graph.md`,
+`events.md`, `relations.md`, `patches.md`) plus the pack-authoring
+guide, with no single page that answers the question a new reader
+arrives with: *what types are framework-defined, what types are
+developer-defined, and how do they compose?* The "are there
+framework base object types?" question, in particular, is
+unanswered by the existing pages — a reader has to assemble the
+answer from `graph.md`'s "freeform if no pack declares it" line,
+`events.md`'s framework-event listing, and the Diligence pack's
+ObjectType declarations. A maintainer reading the README and
+`docs.activegraph.ai` could not find a direct answer.
+
+v1.0.5.post2 ships a single new concepts page. No framework code
+changes. No new public API. No reshape of any locked decision
+below v1.0.5.post2.
+
+## v1.0.5.post2 #1. The type-system concepts page lands at `docs/concepts/type-system.md`
+
+### The contract claim
+
+After v1.0.5.post2, the doc site carries a `Type system` concepts
+page at `docs/concepts/type-system.md`, slotted into the Concepts
+nav between `Graph` and `Events` (the position that matches its
+role: graph explains the world the framework reasons about, type
+system explains the vocabulary that world is described in, events
+explains the framework-defined vocabulary's mutation history).
+
+The page commits to four claims, each restated below as a contract
+boundary:
+
+**(a) Object types are developer-defined strings; the framework
+ships zero base object types.** `Graph.add_object(type, data)`
+accepts any string. There is no central registry, no required
+`register_object_type(...)` step, no enum. The Diligence pack's
+eight object types (`claim`, `evidence`, `question`, …) are an
+example ontology, not framework base types. This is the answer to
+the gap the maintainer review surfaced; the page makes it explicit
+because users from typed-schema backgrounds will expect a
+schema-definition step and need to be told there isn't one.
+
+**(b) Relation types follow the same model.**
+`Graph.add_relation(source, target, type)` accepts any string; no
+central registry. Pack-declared `RelationType` may pin endpoints
+(e.g., `supports: evidence → claim`); without a pack-declared
+rule, any source/target/type combination is allowed.
+
+**(c) Event types are framework-defined.** The page enumerates
+the complete set of framework-emitted event types in named
+families: lifecycle (`goal.created`, `runtime.idle`,
+`runtime.budget_exhausted`), graph mutations (`object.created`,
+`object.removed`, `relation.created`, `relation.removed`),
+behavior dispatch (`behavior.scheduled`, `behavior.started`,
+`behavior.completed`, `behavior.failed`,
+`relation_behavior.started`), patterns (`pattern.matched`), LLM /
+tools (`llm.requested`, `llm.responded`, `tool.requested`,
+`tool.responded`), patches (`patch.proposed`, `patch.applied`,
+`patch.rejected`), approvals (`approval.proposed`,
+`approval.granted`), pack lifecycle (`pack.loaded`). User code may
+emit additional types via `graph.emit`; the framework treats
+unknown types as opaque payload carriers.
+
+**(d) Patch lifecycle states are framework-defined.** Three
+values — `proposed | applied | rejected` — defined on
+`activegraph/core/patch.py:30`. `proposed` is the only
+non-terminal state; misuse of the lifecycle raises
+[`invalid-patch-lifecycle-state`](../reference/errors/invalid-patch-lifecycle-state.md).
+The page enumerates the values; `concepts/patches.md` remains the
+canonical lifecycle prose. The page exists to put every
+framework-defined vocabulary in one place; the single-source-of-
+truth pattern (HANDOFF.md "Discipline patterns") keeps the
+canonical prose on the dedicated page.
+
+### What the page also includes
+
+- **Composition narrative** — how the framework's event-type
+  vocabulary and the developer's object/relation-type vocabulary
+  interlock: events drive behaviors; behaviors create objects and
+  relations of developer-chosen types; those creations emit more
+  framework-defined events; the cycle continues.
+- **Ontology design guidance** — three rules surfaced across the
+  v0.7 / v0.9 / external-research-agent ontologies: object types
+  are nouns describing roles in the domain (not data bags);
+  relation types are verbs or predicates describing meaningful
+  structure (not generic `related_to`); keep the vocabulary
+  small. The deep-research-agent user-test finding ("object types
+  should be nouns describing their role in the pipeline, not just
+  data bags") is referenced explicitly as the surfacing path.
+- **Diligence pack as the worked example** — every object type
+  and every relation type rendered as tables, framed explicitly
+  as "an example ontology, not framework base types."
+
+### Drift surface and prevention
+
+Two surfaces could drift between this page and the framework:
+
+1. **The enumerated event-type list.** If a future amendment adds
+   a new framework event type, the page's listing should grow
+   with it. The protection is the same kind that protects every
+   other framework-vocabulary doc: amendments that add a new
+   event type are out of scope for v1.0.5.post2 (CONTRACT v1.0
+   #4b locks "no new event type" through v1.0.5; v1.1 owns the
+   first opportunity for new event types). When v1.1 lands its
+   first new framework event type, the amendment naming the new
+   type also updates this page — same cross-amendment discipline
+   that keeps `events.md` and the trace formatter in sync.
+
+2. **The Diligence pack ontology tables.** The tables are
+   transcribed from `activegraph/packs/diligence/object_types.py`.
+   If a v1.x release modifies that file (currently locked by
+   CONTRACT v0.9 #15 #16 #17 plus v1.0.5.post1 "no reshape"
+   discipline), the table updates in the same commit. The
+   pre-existing pack-stability discipline carries the weight.
+
+### What the page deliberately does NOT do
+
+- **Does not reshape the existing concepts pages.** `graph.md`,
+  `events.md`, `relations.md`, `patches.md` stay byte-identical.
+  The new page references them; it does not subsume them.
+- **Does not document the `behavior.failed` reason-code
+  taxonomy.** That is a payload-field vocabulary on a single
+  event type, not a fourth type-system layer; `failure-model.md`
+  is the canonical home and the new page cross-links there.
+- **Does not introduce a code-side contract.** No new public
+  class, no new public method, no new event type, no new reason
+  code, no new error class.
+
+### Tests (Standing Rule §2)
+
+The boundary the v1.0.5.post2 #1 amendment names is "the
+type-system concepts page lands at `docs/concepts/type-system.md`,
+referenced from the Concepts nav, and committed to the four claims
+(a)–(d) above." The existing doc-link gate
+(`tests/test_doc_links.py`) anchors on the navigation surface —
+broken links from the new page to existing pages, and broken
+cross-references from existing pages to the new page (none in
+v1.0.5.post2; all cross-references are inbound to the new page),
+fail the gate. The `tests/test_llms_txt.py` gate from v1.0.5 #1
+asserts the generated `llms.txt` / `llms-full.txt` reference the
+nav-anchor pages, so the new page automatically appears in both
+files after `mkdocs build` (the structural drift prevention
+v1.0.5 #1 already named).
+
+No new dedicated test ships in v1.0.5.post2. The boundary the
+amendment names ("a concepts page exists at this path with
+these claims") is verified by the existing doc-link gate plus
+the human review of the page's prose — a pure-prose docs release
+does not earn a Python-side test the way an API-shape claim
+would. The Standing Rule §2 question for docs-only releases is
+*"would a future drift between this amendment and the file
+silently pass any gate?"* — the answer for v1.0.5.post2 is no,
+because the doc-link gate fails if the file is removed and the
+llms-txt gate fails if the file is removed from the generated
+index. Both failures point at the v1.0.5.post2 #1 boundary.
+
+### Version bump
+
+`pyproject.toml`'s `version = "1.0.5.post1"` becomes
+`version = "1.0.5.post2"`. `activegraph/__init__.py`'s
+`__version__` follows. Three error snapshots that embed the
+framework version
+(`tests/snapshots/errors/internal_bug__pattern_unknown_op.txt`,
+`internal_bug__graph_view_unknown_op.txt`, `schema_version_
+mismatch.txt`) are rebaselined to the new string — same
+mechanical pattern v1.0.5.post1 used. No other version-bearing
+file changes.
+
+### Discipline note on the "no base types" finding
+
+The diagnosis behind v1.0.5.post2 #1 surfaced one observation
+that did not change but is worth recording: the framework's
+**absence of base object types is itself a locked decision**,
+inherited from CONTRACT v0.5 onward (graph mutation is
+event-emission with no central type schema) and reaffirmed by
+v0.9 #21 (backward compatibility is absolute; pre-v0.9 untyped
+behavior is preserved when no pack contributes the type). The
+new page documents this stance explicitly; the underlying
+decision has been load-bearing since v0.5 without a single
+amendment ever proposing to add a central object-type registry.
+v1.0.5.post2 makes the implicit stance explicit in
+user-readable prose; the framework's behavior is unchanged.
+
+## v1.0.5.post2 deliberately does NOT touch
+
+- **No code changes under `activegraph/`.** Pure docs + version
+  bump + snapshot rebaseline (the snapshots embed the version
+  string; rebaselining them is the version-bump tail).
+- **No new abstraction.** No new public class, no new public
+  method, no new event type, no new reason code, no new error
+  class, no new CI gate.
+- **No reshape of any locked decision below v1.0.5.post2.**
+  Every surface from v1.0 through v1.0.5.post1 stays
+  byte-identical.
+- **No changes to other concepts pages.** `graph.md`,
+  `events.md`, `relations.md`, `patches.md`,
+  `failure-model.md`, and `authoring-packs.md` stay
+  byte-identical. The new page cross-references them; it does
+  not duplicate or subsume any of them.
+- **No fix to the `object.patched` mention in `events.md`.** The
+  diagnosis surfaced that `events.md:43` mentions `object.patched`
+  as a framework event family, but the code emits `patch.applied`
+  for direct `patch_object` calls and never `object.patched`.
+  This is documentation drift, not a contract claim; filed as a
+  v1.1 candidate (see below) rather than fixed here under the
+  v1.0.5.post2 "no concepts-page reshape" discipline.
+
+### v1.1 candidates surfaced by v1.0.5.post2
+
+Restated here for `v1.1-plan.md`'s backlog:
+
+1. **`object.patched` event-name drift in `events.md`.** The page
+   lists `object.patched` as a framework event in the "Object
+   mutations" family; the code emits `patch.applied` for the
+   `patch_object` shortcut path. Either fix the doc (drop
+   `object.patched` from the list, or rename the bullet to
+   `patch.applied`) or fix the code (emit a separate
+   `object.patched` event from `patch_object` independent of the
+   `patch.applied` event). The fix shape depends on whether the
+   intent was to model direct mutations distinctly from patch
+   applies; v1.1 owns that design call.
+
+2. **Reason-code taxonomy as a dedicated concepts page.** The
+   `behavior.failed` / `tool.responded` `reason=` field carries a
+   closed taxonomy (`llm.network_error`, `llm.parse_error`,
+   `tool.unknown_tool`, `tool.max_turns_exhausted`, etc.) that is
+   currently documented only across the per-error pages.
+   `failure-model.md` is the closest existing home; a dedicated
+   "Reason codes" reference (or an expansion of failure-model.md)
+   could enumerate the codes the way v1.0.5.post2 #1 enumerates
+   the event types. v1.1 owns the call between "expand
+   failure-model.md" and "new reference page."

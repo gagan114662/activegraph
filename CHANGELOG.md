@@ -31,7 +31,134 @@ enterprise legal review makes the ceremony concrete);
 Covenant v2.1 is the standard text; the missing piece is the contact
 inbox); and the relaxation of the issues-first contribution policy
 (currently a pre-launch posture; revisit based on actual contribution
-patterns observed during v1.0.x's public window).
+patterns observed during v1.0.x's public window). v1.0.5.post2 surfaced
+two more: the `object.patched` event-name drift in
+`docs/concepts/events.md` (the page lists a framework event the code
+does not emit — fix the doc or fix the code, design call deferred);
+and a dedicated reason-code taxonomy reference (the closed
+`behavior.failed` / `tool.responded` `reason=` vocabulary is documented
+only across the per-error pages; a single enumeration would mirror the
+event-type listing v1.0.5.post2 ships).
+
+## [v1.0.5.post2] — 2026-05-20
+
+Type-system concepts page. A maintainer-driven doc-gap review found
+that the framework's type system is documented across four concepts
+pages (`graph.md`, `events.md`, `relations.md`, `patches.md`) plus
+the pack-authoring guide, with no single page answering the question
+a new reader arrives with: *what types are framework-defined, what
+types are developer-defined, and how do they compose?* In
+particular, "are there framework base object types?" — the answer
+is no — was reachable only by assembling fragments from three pages.
+
+v1.0.5.post2 ships one new concepts page. No framework code changes.
+No new public API. No reshape of any locked decision below
+v1.0.5.post2.
+
+### The single finding
+
+  v1.0.5.post2 #1 — A type-system concepts page lands at
+                    `docs/concepts/type-system.md`, slotted into
+                    the Concepts nav between Graph and Events. The
+                    page commits to four claims: (a) object types
+                    are developer-defined strings; the framework
+                    ships zero base object types; (b) relation
+                    types follow the same model; (c) event types
+                    are framework-defined, with the complete
+                    enumerated set in named families
+                    (lifecycle / graph mutations / behavior dispatch
+                    / patterns / LLM / tools / patches / approvals
+                    / pack lifecycle); (d) patch lifecycle states
+                    (`proposed | applied | rejected`) are
+                    framework-defined.
+
+### Added
+
+- **`docs/concepts/type-system.md`** (v1.0.5.post2 #1). The new
+  page. Sections: the framework-defined layer (event types, fully
+  enumerated); the developer-defined layer (object types); the
+  developer-defined layer (relation types); how the three layers
+  compose; patch lifecycle states; designing an ontology; the
+  Diligence pack ontology as the worked example. The page makes
+  the framework's "no base object types" stance explicit because
+  users from typed-schema backgrounds (databases, Pydantic,
+  GraphQL, Protobuf) arrive expecting a schema-definition step.
+  The deep-research-agent user-test finding ("object types should
+  be nouns describing their role in the pipeline, not just data
+  bags") is the surfacing path for the ontology design guidance.
+
+### Changed
+
+- **`mkdocs.yml`**: nav adds `Type system: concepts/type-system.md`
+  to the Concepts section between Graph and Events; the
+  `mkdocs-llmstxt` plugin's `sections.Concepts` list adds the
+  matching entry with its one-sentence description. The
+  `tests/test_llms_txt.py` gate from v1.0.5 #1 picks up the new
+  page automatically at build time (the generated `/llms.txt` and
+  `/llms-full.txt` regenerate from `mkdocs.yml` + the `docs/`
+  source on every build, so the new page appears in both).
+- **`pyproject.toml`**: `version` bumps `1.0.5.post1` →
+  `1.0.5.post2`.
+- **`activegraph/__init__.py`**: `__version__` tracks the bump
+  (the `test_version_sync` gate asserts it matches
+  `pyproject.toml` byte-identically).
+- **`tests/snapshots/errors/{internal_bug__pattern_unknown_op,
+  internal_bug__graph_view_unknown_op,schema_version_mismatch}.txt`**:
+  rebaselined the embedded version string from `1.0.5.post1` to
+  `1.0.5.post2` (same three snapshots v1.0.5.post1 rebaselined
+  for the same reason — they render `activegraph.__version__`
+  inline per the internal-bug context format and the
+  schema-version-mismatch context format).
+
+### CONTRACT amendments
+
+- **`v1.0.5.post2` milestone added** with one numbered finding
+  (`v1.0.5.post2 #1`) and a "deliberately does NOT touch"
+  section. Single-finding milestone — same scope discipline as
+  v1.0.1 / v1.0.2 / v1.0.2.post1 / v1.0.5 / v1.0.5.post1.
+  Appended as a new section after v1.0.5.post1 per Standing
+  Rule §1.
+
+### v1.1 backlog (filed in `v1.1-plan.md`)
+
+- **`object.patched` event-name drift in `docs/concepts/events.md`.**
+  The page's "Object mutations" family lists `object.patched`,
+  but the code emits `patch.applied` for the direct
+  `graph.patch_object(...)` shortcut and never `object.patched`.
+  Either correct the doc (drop the name or rename to
+  `patch.applied`) or add the event in code; the fix shape
+  depends on whether direct mutations were intended to be
+  distinguishable from patch applies. Surfaced during the
+  v1.0.5.post2 diagnosis; out of scope for a "no concepts-page
+  reshape" docs-only release.
+- **Reason-code taxonomy as a dedicated concepts page.** The
+  `behavior.failed` / `tool.responded` `reason=` field carries a
+  closed taxonomy (`llm.network_error`, `llm.parse_error`,
+  `tool.unknown_tool`, `tool.max_turns_exhausted`, …) documented
+  only across the per-error pages. A dedicated reference (or
+  `failure-model.md` expansion) could enumerate the codes the
+  way v1.0.5.post2 #1 enumerates the event types.
+
+### Migration from v1.0.5.post1
+
+Forward-compatible. No code changes required. The runtime API,
+public surface, and CI gates are unchanged. The doc site grows
+by one page; existing pages stay byte-identical. `/llms.txt` and
+`/llms-full.txt` regenerate automatically on the next
+`mkdocs build` (the v1.0.5 #1 structural-drift guarantee).
+
+```bash
+pip install --upgrade activegraph==1.0.5.post2
+```
+
+- Every v1.0.5.post1 surface (LICENSE, NOTICE, CONTRIBUTING.md,
+  issue templates, license metadata) stays byte-identical.
+- Every v1.0.5 surface (`/llms.txt`, `/llms-full.txt`,
+  `mkdocs-llmstxt` plugin, `tests/test_llms_txt.py`) stays
+  byte-identical apart from the new entry the plugin picks up
+  from `mkdocs.yml`.
+- Every v1.0.4 / v1.0.3 / v1.0.2.post1 / v1.0.2 / v1.0.1 / v1.0
+  surface stays byte-identical.
 
 ## [v1.0.5.post1] — 2026-05-19
 
