@@ -15,6 +15,9 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 
 ## [Unreleased]
 
+### Type system
+- Promoted `activegraph.runtime.diff` to mypy --strict clean allowlist (CONTRACT v1.0 #C5 type-completeness progression).
+
 Nothing yet. v1.1 scope is tracked in `v1.1-plan.md` (consolidated by
 the post-v1.0.3 contract review). v1.0.4 surfaced two additional v1.1
 candidates: C-3 (lock the failure-routing convention for eval-time

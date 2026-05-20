@@ -91,9 +91,18 @@ def run_fixture_mode(stream: Optional[TextIO] = None) -> int:
     # Fresh DB on every run. The fixed run_id means re-running quickstart
     # overwrites the previous demo — correct for a demo; we don't want
     # quickstart leaving N database files in /tmp.
+    #
+    # Sidecar cleanup (.db-wal, .db-shm, .db-journal) is load-bearing:
+    # if a prior in-process caller (e.g., the test suite calling
+    # run_fixture_mode directly) leaked an open connection, its WAL
+    # sidecars survive on disk. SQLite recovers from -wal on the next
+    # open of the .db path; if the .db was unlinked and recreated, the
+    # stale -wal no longer matches and recovery raises
+    # ``sqlite3.OperationalError: disk I/O error`` from inside
+    # PRAGMA journal_mode=WAL. Removing all three before opening, and
+    # closing the store before returning, keeps the next caller clean.
     Path(_QUICKSTART_DB_DIR).mkdir(parents=True, exist_ok=True)
-    if os.path.exists(_QUICKSTART_DB_PATH):
-        os.remove(_QUICKSTART_DB_PATH)
+    _remove_quickstart_db_files()
 
     provider = RecordedDiligenceProvider(companies=THREE_COMPANIES)
     graph = Graph(
@@ -112,45 +121,67 @@ def run_fixture_mode(stream: Optional[TextIO] = None) -> int:
         },
         seed=0,
     )
-    rt.load_pack(
-        diligence_pack,
-        settings=DiligenceSettings(
-            llm_model="claude-sonnet-4-5",
-            max_documents_per_company=5,
-            max_claims_per_document=10,
-            confidence_threshold_for_review=0.7,
-            min_questions=8,
-            max_questions=12,
-        ),
-    )
+    try:
+        rt.load_pack(
+            diligence_pack,
+            settings=DiligenceSettings(
+                llm_model="claude-sonnet-4-5",
+                max_documents_per_company=5,
+                max_claims_per_document=10,
+                confidence_threshold_for_review=0.7,
+                min_questions=8,
+                max_questions=12,
+            ),
+        )
 
-    for company in THREE_COMPANIES:
-        rt.run_goal(company_goal(company))
+        for company in THREE_COMPANIES:
+            rt.run_goal(company_goal(company))
 
-    rt.save_state()
+        rt.save_state()
 
-    # Trace — canonical printer output. The quickstart does not reformat;
-    # any drift between the trace shown here and the trace documented on
-    # the doc site is a bug in this code path, not the printer.
-    for line in rt.trace.lines():
-        write(line)
-    write("")
+        # Trace — canonical printer output. The quickstart does not reformat;
+        # any drift between the trace shown here and the trace documented on
+        # the doc site is a bug in this code path, not the printer.
+        for line in rt.trace.lines():
+            write(line)
+        write("")
 
-    # Pull the memos. Print the first in full, mention the others.
-    memos = [o for o in rt.graph.all_objects() if o.type == "memo"]
-    if memos:
-        _print_memo_section(write, rt, memos[0])
-        if len(memos) > 1:
-            others = [_company_name_for_memo(rt, m) for m in memos[1:]]
-            write(
-                f"Memos for {', '.join(others)} were produced under the same "
-                f"contract. Output written to sqlite:///{_QUICKSTART_DB_PATH}."
-            )
-            write("")
+        # Pull the memos. Print the first in full, mention the others.
+        memos = [o for o in rt.graph.all_objects() if o.type == "memo"]
+        if memos:
+            _print_memo_section(write, rt, memos[0])
+            if len(memos) > 1:
+                others = [_company_name_for_memo(rt, m) for m in memos[1:]]
+                write(
+                    f"Memos for {', '.join(others)} were produced under the same "
+                    f"contract. Output written to sqlite:///{_QUICKSTART_DB_PATH}."
+                )
+                write("")
 
-    _print_what_just_happened(write)
-    _print_try_next(write)
-    return 0
+        _print_what_just_happened(write)
+        _print_try_next(write)
+        return 0
+    finally:
+        store = rt.graph.store
+        if store is not None:
+            store.close()
+
+
+def _remove_quickstart_db_files() -> None:
+    """Remove the quickstart demo DB and any SQLite sidecar files.
+
+    SQLite's WAL mode produces ``-wal`` and ``-shm`` sidecars alongside
+    the database file. Deleting only the ``.db`` file (as a prior
+    version of this function did) leaves orphaned sidecars that the
+    next ``sqlite3.connect`` interprets as a corrupt log to recover
+    from, raising ``disk I/O error`` inside ``PRAGMA journal_mode=WAL``.
+    Cleaning all known suffixes keeps re-runs reliable even when the
+    previous caller crashed mid-run.
+    """
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        path = f"{_QUICKSTART_DB_PATH}{suffix}"
+        if os.path.exists(path):
+            os.remove(path)
 
 
 def _company_name_for_memo(rt, memo) -> str:

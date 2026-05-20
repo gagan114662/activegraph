@@ -14,6 +14,7 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 - [ ] `AmbiguousToolError` — **one-line**
 - [x] `ApprovalNotFoundError`
 - [ ] `Behavior` — **one-line**
+- [x] `BehaviorFailure`
 - [x] `BehaviorNotFoundError`
 - [ ] `Budget` — **missing**
 - [ ] `Clock` — **one-line**
@@ -80,7 +81,7 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 - [ ] `Runtime` — **missing**
 - [x] `RuntimeContextRequiredError`
 - [ ] `RuntimeStatus` — **one-line**
-- [ ] `SQLiteEventStore` — **one-line**
+- [x] `SQLiteEventStore`
 - [x] `SchemaVersionMismatch`
 - [ ] `StorageError` — **one-line**
 - [ ] `TickingClock` — **one-line**
@@ -93,11 +94,11 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 - [ ] `View` — **missing**
 - [x] `behavior`
 - [ ] `clear_discovery_cache` — **one-line**
-- [ ] `clear_registry` — **missing**
+- [x] `clear_registry`
 - [ ] `clear_tool_registry` — **missing**
 - [x] `configure_logging`
 - [x] `discover`
-- [ ] `get_registry` — **missing**
+- [ ] `get_registry` — **one-line**
 - [ ] `get_tool_registry` — **missing**
 - [x] `llm_behavior`
 - [ ] `load_by_name` — **one-line**
@@ -105,6 +106,7 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 - [x] `migrate`
 - [x] `open_store`
 - [ ] `parse_store_url` — **one-line**
+- [x] `register`
 - [x] `relation_behavior`
 - [x] `tool`
 
@@ -142,6 +144,14 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 - [x] `CachedEntry` — **one-line**
 - [ ] `LLMCache` — **missing**
 
+### `activegraph.llm.openai`
+
+- [x] `OpenAIProvider`
+
+### `activegraph.llm.parsing`
+
+- [x] `parse_structured_response`
+
 ### `activegraph.llm.prompt`
 
 - [x] `AssembledPrompt`
@@ -149,6 +159,7 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 - [x] `build_instruction`
 - [x] `build_system_prompt`
 - [ ] `build_user_message` — **missing**
+- [x] `example_instance_from_schema`
 - [x] `schema_to_json`
 - [x] `serialize_view`
 
@@ -244,6 +255,12 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 
 - [x] `normalize_pack_name`
 - [x] `scaffold_pack`
+
+### `activegraph.runtime._live`
+
+- [x] `live_runtimes`
+- [x] `track_runtime` — **one-line**
+- [x] `validate_behavior_against_live_runtimes`
 
 ### `activegraph.runtime.behavior_graph`
 
@@ -353,8 +370,8 @@ Classification: ``full`` (≥3 lines OR has Args/Returns/Raises/Examples), ``one
 
 ### Ring 0 — public surface (target 100%)
 
-- **57/100 fully documented (57.0%)** — gap to 100% full: **43 symbols**
-- **92/100 not-missing (92.0%)** — gap to 100% not-missing: **8 symbols** (these need `docstring_gaps.toml` exemptions for the gate to pass)
+- **61/102 fully documented (59.8%)** — gap to 100% full: **41 symbols**
+- **96/102 not-missing (94.1%)** — gap to 100% not-missing: **6 symbols** (these need `docstring_gaps.toml` exemptions for the gate to pass)
 
 Ring 0 missing-entirely (gate exemptions):
 
@@ -362,15 +379,13 @@ Ring 0 missing-entirely (gate exemptions):
 - `activegraph.InMemoryEventStore`
 - `activegraph.Runtime`
 - `activegraph.View`
-- `activegraph.clear_registry`
 - `activegraph.clear_tool_registry`
-- `activegraph.get_registry`
 - `activegraph.get_tool_registry`
 
 ### Ring 1 — importable but not in `__all__` (target 80% not-missing)
 
-- **56/114 fully documented (49.1%)** — v1.1 burndown target is 100% full
-- **97/114 not-missing (85.1%)** — gate threshold is 80% not-missing
+- **61/120 fully documented (50.8%)** — v1.1 burndown target is 100% full
+- **103/120 not-missing (85.8%)** — gate threshold is 80% not-missing
 
 Ring 1 is **above** the 80% gate threshold. The gate enforces the threshold; individual missing-Ring-1 symbols are v1.1 burndown items, not gate exemptions.
 

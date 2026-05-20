@@ -49,11 +49,11 @@ class DivergentRelation:
 
     def summary(self) -> str:
         if self.in_parent is None:
-            r = self.in_fork
-            return f"{self.id} only in fork ({r['source']} --{r['type']}--> {r['target']})"
+            assert self.in_fork is not None
+            return f"{self.id} only in fork ({self.in_fork['source']} --{self.in_fork['type']}--> {self.in_fork['target']})"
         if self.in_fork is None:
-            r = self.in_parent
-            return f"{self.id} only in parent ({r['source']} --{r['type']}--> {r['target']})"
+            assert self.in_parent is not None
+            return f"{self.id} only in parent ({self.in_parent['source']} --{self.in_parent['type']}--> {self.in_parent['target']})"
         return f"{self.id} differs"
 
 
@@ -134,12 +134,12 @@ def compute_diff(parent: Graph, fork: Graph, parent_run_id: str, fork_run_id: st
 
 def _normalize_object(o: Object) -> dict[str, Any]:
     """Strip provenance (timestamps, run_id) so equality is structural."""
-    d = o.to_dict()
+    d: dict[str, Any] = o.to_dict()
     d.pop("provenance", None)
     return d
 
 
 def _normalize_relation(r: Relation) -> dict[str, Any]:
-    d = r.to_dict()
+    d: dict[str, Any] = r.to_dict()
     d.pop("provenance", None)
     return d
