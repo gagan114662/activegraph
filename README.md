@@ -122,6 +122,48 @@ read those when you want depth on one piece.
   first-class history. Exceptions live at runtime entry points only.
   [→ concepts/failure-model](https://docs.activegraph.ai/concepts/failure-model/)
 
+## The type system at a glance
+
+What's fixed and what's yours. The framework speaks a small vocabulary
+of event types — the verbs of what happened. The nouns and edges of
+your domain are strings you choose.
+
+**Event types — fixed.** The runtime emits these; the trace, replay,
+and observability surfaces all key off them.
+
+- **Lifecycle:** `goal.created`, `runtime.idle`, `runtime.budget_exhausted`
+- **Graph:** `object.created`, `object.removed`, `relation.created`, `relation.removed`
+- **Behaviors:** `behavior.scheduled`, `behavior.started`, `behavior.completed`, `behavior.failed`, `relation_behavior.started`
+- **Patterns:** `pattern.matched`
+- **LLM:** `llm.requested`, `llm.responded`
+- **Tools:** `tool.requested`, `tool.responded`
+- **Patches:** `patch.proposed`, `patch.applied`, `patch.rejected`
+- **Approvals:** `approval.proposed`, `approval.granted`
+- **Packs:** `pack.loaded`
+
+Behaviors can also emit custom event types — any string. The
+`task.completed` signal in the example below is one: an
+application-level event the `unblock` relation behavior subscribes
+to, flowing through the same log alongside the framework's own.
+
+**Object and relation types — yours.** Any string works. There is no
+central schema, no registration step, no enum to extend.
+`graph.add_object("claim", {...})` creates a `claim` because you said
+`claim`; `graph.add_relation(a, b, "depends_on")` makes a
+`depends_on` edge because you said `depends_on`. Packs can attach
+optional Pydantic validation per type; absent a pack, the data passes
+through unchanged. The Diligence pack's object types (`claim`,
+`evidence`, `risk`, `memo`, …) and relation types (`supports`,
+`contradicts`, `references`, …) are an example ontology, not framework
+base types — you design your own for your domain.
+
+**Patch states — fixed.** `proposed` → `applied` | `rejected`. Three
+values, two of them terminal.
+
+The full model — composition, ontology design guidance, the Diligence
+pack as a worked example — lives at
+[→ concepts/type-system](https://docs.activegraph.ai/concepts/type-system/).
+
 ## A small example
 
 The relation-behavior primitive — coordination logic on the edge,

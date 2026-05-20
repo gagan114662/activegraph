@@ -95,6 +95,7 @@ plugins:
           - quickstart.md: Ten-minute tutorial from install to a working custom behavior; ends with the fork-and-diff workflow.
         Concepts:
           - concepts/graph.md: Objects and typed relations forming the world the framework reasons about; the graph is a projection of the event log.
+          - concepts/type-system.md: The three type layers — framework-defined event types, developer-defined object and relation types — and the patch-lifecycle states.
           - concepts/events.md: The append-only history — every behavior fires in response to events and produces more events.
           - concepts/behaviors.md: The unit of reactive code — function, class, or LLM-backed — with a per-behavior determinism contract.
           - concepts/relations.md: Typed edges with their own behaviors; coordination logic on the edge rather than on either endpoint.
@@ -205,6 +206,7 @@ nav:
   - Quickstart: quickstart.md
   - Concepts:
       - Graph: concepts/graph.md
+      - Type system: concepts/type-system.md
       - Events: concepts/events.md
       - Behaviors: concepts/behaviors.md
       - Relations: concepts/relations.md
