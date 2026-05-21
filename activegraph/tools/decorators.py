@@ -21,10 +21,12 @@ _TOOL_REGISTRY: list[Tool] = []
 
 
 def clear_tool_registry() -> None:
+    """Clear all registered tools from the global registry. Used for test isolation."""
     _TOOL_REGISTRY.clear()
 
 
 def get_tool_registry() -> list[Tool]:
+    """Return a copy of the global tool registry. Returns: A list of all currently registered Tool objects."""
     return list(_TOOL_REGISTRY)
 
 

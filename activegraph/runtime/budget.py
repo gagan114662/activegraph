@@ -35,6 +35,8 @@ def _as_decimal(v: Any) -> Decimal:
 
 
 class Budget:
+    """Enforce hard limits on a run. Tracks usage across multiple dimensions (events, calls, cost, time) and stops the runtime when any limit is exceeded."""
+
     def __init__(self, limits: Optional[dict[str, Any]] = None) -> None:
         self.limits: dict[str, float] = {}
         self.cost_limit: Optional[Decimal] = None

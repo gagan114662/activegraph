@@ -18,6 +18,9 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 ### Type system
 - Promoted `activegraph.runtime.diff` to mypy --strict clean allowlist (CONTRACT v1.0 #C5 type-completeness progression).
 
+### Documentation
+- Closed all Ring 0 docstring exemptions (CONTRACT v1.1 #4 Wave 1): added docstrings to `Budget`, `InMemoryEventStore`, `Runtime`, `View`, `clear_tool_registry`, and `get_tool_registry`. Ring 0 coverage now 100% not-missing.
+
 Nothing yet. v1.1 scope is tracked in `v1.1-plan.md` (consolidated by
 the post-v1.0.3 contract review). v1.0.4 surfaced two additional v1.1
 candidates: C-3 (lock the failure-routing convention for eval-time

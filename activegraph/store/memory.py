@@ -41,6 +41,8 @@ def _event_not_found(event_id: str, *, run_id: str, where: str) -> EventNotFound
 
 
 class InMemoryEventStore:
+    """Volatile, dict-backed event store. Provides a reference implementation of the EventStore protocol for tests and in-memory runtimes."""
+
     def __init__(self, run_id: str = "run_mem") -> None:
         self.run_id = run_id
         self._events: list[Event] = []

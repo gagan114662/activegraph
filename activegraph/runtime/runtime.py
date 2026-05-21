@@ -223,6 +223,8 @@ def _doc_url_for_reason(reason: str) -> str:
 
 
 class Runtime:
+    """Single-threaded FIFO event loop that executes behaviors, manages persistence, and enforces budgets. Emits and replays events for auditability and determinism."""
+
     def __init__(
         self,
         graph: Graph,

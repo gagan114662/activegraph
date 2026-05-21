@@ -14,6 +14,8 @@ from activegraph.core.graph import Object, Relation, evaluate_where
 
 
 class View:
+    """Read-only scoped slice of the graph passed to behaviors. Provides filtered access to objects, relations, and events matching behavior-declared criteria."""
+
     def __init__(
         self,
         objects: list[Object],
