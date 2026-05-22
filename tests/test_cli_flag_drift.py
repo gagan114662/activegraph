@@ -451,7 +451,10 @@ class TestAllowlist:
         allowlist = repo_root / "cli_flag_drift_allowlist.toml"
         assert allowlist.exists()
         loaded = gate.load_allowlist(allowlist, repo_root=repo_root)
-        assert {"--set", "--memo", "--search"}.issubset(loaded)
+        # T3 (v1.1) landed --set as a real CLI flag, so the allowlist no
+        # longer carries it; --memo / --search remain pending.
+        assert {"--memo", "--search"}.issubset(loaded)
+        assert "--set" not in loaded
 
 
 # ---------------------------------------------------------------------------

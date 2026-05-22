@@ -17,21 +17,20 @@
 
 schema_version = "1"
 
-[[entry]]
-flag = "--set"
-rationale = "Promised in 8 markdown files (CHANGELOG.md, CONTRACT.md, docs/quickstart.md, docs/cookbook/migration-from-v0-7.md, docs/cookbook/common-patterns.md, docs/guides/operating-in-production.md, docs/concepts/forking.md, docs/reference/cli.md) per GAUNTLET T2 line 52. Implementation is parked in frame t3-implement-cli-set-flag — D-1..D-3 amendments landed; D-4 + impl pending."
-expiry_commit_ref = "frame:t3-implement-cli-set-flag"
-expiry_date = "2026-07-01"
+# --set: RESOLVED by frame t3-implement-cli-set-flag (v1.1). --set is
+# now a real CLI flag on `activegraph fork`; the drift gate sees it on
+# both sides and no longer needs an allowlist entry. Entry removed in
+# the T3 closure commit.
 
 [[entry]]
 flag = "--memo"
-rationale = "Promised in CHANGELOG and CONTRACT alongside --set as part of the v1.1 #1 inspect-extension cluster. Implementation tied to the same t3 sequencing."
+rationale = "Promised in CHANGELOG and CONTRACT alongside --set as part of the v1.1 #1 inspect-extension cluster. T3 landed --set; --memo + --search remain pending in a follow-on frame."
 expiry_commit_ref = "frame:t3-implement-cli-set-flag"
 expiry_date = "2026-07-01"
 
 [[entry]]
 flag = "--search"
-rationale = "Promised in CHANGELOG and CONTRACT alongside --set / --memo as part of the v1.1 #1 inspect-extension cluster. Implementation tied to the same t3 sequencing."
+rationale = "Promised in CHANGELOG and CONTRACT alongside --set / --memo as part of the v1.1 #1 inspect-extension cluster. T3 landed --set; --memo + --search remain pending in a follow-on frame."
 expiry_commit_ref = "frame:t3-implement-cli-set-flag"
 expiry_date = "2026-07-01"
 
