@@ -20,6 +20,10 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 
 ### Documentation
 - Closed all Ring 0 docstring exemptions (CONTRACT v1.1 #4 Wave 1): added docstrings to `Budget`, `InMemoryEventStore`, `Runtime`, `View`, `clear_tool_registry`, and `get_tool_registry`. Ring 0 coverage now 100% not-missing.
+- Documented provider tool parity for T4 / v1.1 B-1: OpenAI tool-shape translation now shares the runtime tool loop with Anthropic, uses the existing tool and LLM reason-code vocabulary, and is covered by a dedicated provider parity page.
+
+### LLM providers
+- OpenAI tool calling now accepts framework `Tool` definitions, translates them to OpenAI `function` tool shape, extracts OpenAI `tool_calls` into `LLMResponse.tool_calls`, and lets the runtime append tool results through the same loop used by Anthropic. Final structured-output parsing remains runtime-owned for providers that opt into runtime parsing.
 
 ### CI / drift gates
 - CLI-flag drift gate (`scripts/gate_cli_flag_drift.py`) implementing the CLI-flag half of CONTRACT v1.1 #2. Static AST extraction across `activegraph/cli/**/*.py`, fail-closed on `SyntaxError`, TOML allowlist with mandatory rationale + expiry per entry, expiry/resolution backstops, click `--help`/`--version` recognised implicitly. Wired into `.github/workflows/wheel-completeness.yml`. The initial allowlist covered the then-pending T3 cluster (`--set`, `--memo`, `--search`); T3 removes `--set` from that allowlist when the shipped CLI flag lands. `--memo` / `--search`, the v1.0 #C3 dropped `--live` flag, cross-tool noise (`--strict`/`--abbrev`/`--tags`/`--upgrade`/`--wheel`), prose placeholders (`--foo`/`--flag`/`--behavior`/`--provider`), and the known doc-vs-CLI drift for `export-trace --out` vs `--output` remain tracked as explicit allowlist entries.

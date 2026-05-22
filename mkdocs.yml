@@ -104,6 +104,7 @@ plugins:
           - concepts/frames.md: Bounded contexts for a run — goal, constraints, budget, registered behaviors.
           - concepts/patterns.md: Cypher-subset pattern subscriptions for subscribing to graph shapes, with `NOT EXISTS` and temporal predicates.
           - concepts/policies.md: Approval and gating for behavior capabilities — which behaviors can call which tools, which mutations need human approval.
+          - concepts/provider-tool-parity.md: Provider-agnostic tool behavior — OpenAI and Anthropic share runtime dispatch, cache replay, and failure semantics.
           - concepts/replay.md: Re-execute a run from its event log; strict mode re-fires behaviors and fails on divergence.
           - concepts/forking.md: Branch any run at any event into an independent fork; structurally diff the fork against the parent.
           - concepts/failure-model.md: A behavior failure is a `behavior.failed` event, not an exception; exceptions live at runtime entry points only.
@@ -215,6 +216,7 @@ nav:
       - Frames: concepts/frames.md
       - Pattern subscriptions: concepts/patterns.md
       - Policies: concepts/policies.md
+      - Provider tool parity: concepts/provider-tool-parity.md
       - Replay: concepts/replay.md
       - Forking: concepts/forking.md
       - Failure model: concepts/failure-model.md

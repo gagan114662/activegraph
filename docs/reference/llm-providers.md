@@ -106,7 +106,7 @@ by design: only *recognized* cross-provider mismatches fire.
 | SDK | `anthropic>=0.40` | `openai>=1.0` |
 | Structured output | Instruction-based: schema + example instance embedded in the system prompt by [`build_system_prompt`](api/index.md); provider parses JSON out of the response via the shared `parse_structured_response` helper | Same path. Native `response_format={"type":"json_schema",...}` mode is a v1.1 candidate |
 | `count_tokens()` | Server-side via `messages.count_tokens` (1 roundtrip per call when `budget.max_cost_usd` is set and no cache hit) | Client-side via `tiktoken` when available; char/4 heuristic fallback with a one-time debug log if tiktoken is missing |
-| Tool use | Supported (`Tool.to_definition()` emits Anthropic shape) | **Not supported in v1.0.1.** A non-empty `tools=` raises `LLMBehaviorError(reason="llm.network_error")` with a v1.1 pointer. Tool-shape translation is a scheduled v1.1 item |
+| Tool use | Supported (`Tool.to_definition()` emits Anthropic shape) | Supported through provider translation to OpenAI `function` tool shape; runtime dispatch, cache replay, and failure semantics match Anthropic |
 | Exception mapping | `llm.rate_limited` on 429-shaped errors; `llm.network_error` for everything else (timeouts, connection errors, **auth failures**) | Same mapping |
 | Pricing | Family-prefix lookup; override with `pricing=` kwarg | Family-prefix lookup; override with `pricing=` kwarg |
 
@@ -172,8 +172,11 @@ structured-output path (most do), reuse
 the shipped providers — same `llm.parse_error` and
 `llm.schema_violation` reason codes for the same response shapes.
 
+See [Provider tool parity](../concepts/provider-tool-parity.md) for
+the current shared tool-loop contract.
+
 See [CONTRACT v1.0.1 #5](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md)
 for the provider-commitment surface: which methods are stable,
 which behaviors are provider-dependent (`count_tokens`), and which
-capabilities are explicitly v1.1 (tool use for OpenAI, native
-structured-output modes).
+capabilities were explicitly deferred before the v1.1 tool-parity
+closure.

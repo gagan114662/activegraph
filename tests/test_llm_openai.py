@@ -3,12 +3,12 @@
 CONTRACT v1.0.1 #5 / CONTRACT v0.6 #11: exception mapping (network vs
 rate-limit), no-API-key handling, structured-output extraction
 through the shared `parse_structured_response` path, family-prefix
-pricing lookup, tool-use rejection until v1.1, count_tokens fallback.
+pricing lookup, tool-shape translation, count_tokens fallback.
 
 Mirrors `tests/test_llm_anthropic.py`. Same fake-client shape; the
 only intentional divergences are the OpenAI response structure
 (`choices[0].message.content`, `usage.prompt_tokens`) and the tool-
-use rejection test.
+shape translation boundary.
 """
 
 from __future__ import annotations
@@ -183,28 +183,35 @@ def test_complete_maps_auth_failure_to_network_error():
     assert "Invalid API key" in str(exc.value)
 
 
-def test_complete_rejects_tool_use_with_v11_pointer():
-    # CONTRACT v1.0.1 #5 + v1.1 #7-and-beyond: tool-shape translation
-    # deferred. The Protocol signature still accepts `tools=`; the
-    # divergence triggers only on non-empty.
-    client = MagicMock()
+def test_complete_translates_tools_to_openai_function_shape():
+    # CONTRACT v1.1 B-1 / T4: the Protocol still accepts framework
+    # tool definitions; OpenAIProvider translates at the provider edge.
+    client = _client_returning('{"n": 1}')
     p = OpenAIProvider(client=client)
-    with pytest.raises(LLMBehaviorError) as exc:
-        p.complete(
-            system="",
-            messages=[LLMMessage(role="user", content="u")],
-            model="gpt-4o-mini",
-            max_tokens=64,
-            temperature=0.0,
-            top_p=1.0,
-            output_schema=None,
-            timeout_seconds=30,
-            tools=[{"name": "foo", "description": "d", "input_schema": {}}],
-        )
-    assert exc.value.reason == "llm.network_error"
-    assert "v1.1" in str(exc.value)
-    # The SDK was never called — the rejection is pre-call.
-    client.chat.completions.create.assert_not_called()
+    response = p.complete(
+        system="",
+        messages=[LLMMessage(role="user", content="u")],
+        model="gpt-4o-mini",
+        max_tokens=64,
+        temperature=0.0,
+        top_p=1.0,
+        output_schema=None,
+        timeout_seconds=30,
+        tools=[{"name": "foo", "description": "d", "input_schema": {}}],
+    )
+
+    assert response.raw_text == '{"n": 1}'
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "foo",
+                "description": "d",
+                "parameters": {},
+            },
+        }
+    ]
 
 
 def test_estimate_cost_uses_family_prefix():

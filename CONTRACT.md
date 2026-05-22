@@ -4196,6 +4196,37 @@ implementation and don't leak into the Protocol surface. New
 providers join by implementing the three methods; they don't
 negotiate the abstraction.
 
+### v1.1 B-1 closure amendment: OpenAI tool parity
+
+T4 closes the v1.0.1 non-promise for OpenAI tool use without widening
+`LLMProvider`. Framework `Tool` objects remain the behavior-facing
+contract; providers translate wire shapes locally. `AnthropicProvider`
+continues to send `{name, description, input_schema}`, while
+`OpenAIProvider` translates the same framework definition to OpenAI's
+`{type: "function", function: {name, description, parameters}}`
+shape.
+
+Provider responses normalize requested calls into
+`LLMResponse.tool_calls`. Runtime dispatch stays provider-agnostic:
+the runtime records `llm.responded`, emits `tool.requested`, executes
+the registered tool, appends the provider-specific tool-result message,
+and loops until the final assistant response. The event log therefore
+remains the shared audit boundary across Anthropic, OpenAI, live runs,
+and recorded fixtures.
+
+Providers that set `runtime_parses_output = True` leave final
+structured-output parsing to the runtime. That preserves the failure
+ordering required by the audit log: final assistant text is recorded in
+`llm.responded` before parse/schema failures surface as
+`behavior.failed`.
+
+No new reason codes are introduced by this closure. Provider failures
+continue to map to existing LLM reasons such as `llm.network_error`;
+invalid tool arguments continue to use `tool.invalid_input`; final
+parse/schema failures continue through the existing behavior failure
+path. Native provider structured-output modes remain outside this
+closure.
+
 ### (b) Three-extras install pattern
 
 `pyproject.toml` extras follow a three-pattern shape:
