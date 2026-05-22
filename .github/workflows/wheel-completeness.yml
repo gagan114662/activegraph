@@ -25,7 +25,16 @@ on:
       - "activegraph/**"
       - "pyproject.toml"
       - "tests/test_wheel_completeness.py"
+      - "tests/test_cli_flag_drift.py"
+      - "scripts/gate_cli_flag_drift.py"
+      - "cli_flag_drift_allowlist.toml"
       - ".github/workflows/wheel-completeness.yml"
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "CONTRACT.md"
+      - "README.md"
+      - "HANDOFF.md"
+      - "CONTRIBUTING.md"
   pull_request:
     # No paths: filter. The gate is a required status check on
     # main; a paths-filtered pull_request trigger silently skips
@@ -62,3 +71,14 @@ jobs:
           pip install -e .
       - name: Run wheel-completeness gate
         run: pytest -m slow tests/test_wheel_completeness.py -v
+
+      # CLI flag drift gate — CONTRACT v1.1 #2, frame t2-build-cli-flag-drift-gate.
+      # Wired into this workflow per GAUNTLET T2 acceptance: "the same workflow
+      # file the wheel-completeness gate uses." Two surfaces: the pytest suite
+      # exercises extraction + allowlist semantics + synthetic fixtures; the
+      # gate script runs end-to-end against the live corpus.
+      - name: Run CLI flag drift gate test suite
+        run: pytest tests/test_cli_flag_drift.py -v
+
+      - name: Run CLI flag drift gate script (end-to-end)
+        run: python scripts/gate_cli_flag_drift.py

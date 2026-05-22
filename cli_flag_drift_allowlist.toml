@@ -1,0 +1,122 @@
+# activegraph/cli_flag_drift_allowlist.toml
+#
+# CLI flag drift gate allowlist. Per CONTRACT v1.1 #2 and frame
+# t2-build-cli-flag-drift-gate amendment D-2 (inner:623717f).
+#
+# Each entry suppresses a known docs-vs-impl gap that the team is
+# tracking elsewhere. Suppressions carry a rationale, an expiry date
+# (hard backstop), and a frame reference (resolution backstop). The
+# gate fails closed when either backstop fires:
+#   - expiry_date < today  -> AllowlistEntryExpiredError
+#   - frame closed         -> AllowlistEntryResolvedError
+#
+# Schema is validated by activegraph/scripts/gate_cli_flag_drift.py
+# (load_allowlist). Missing rationale, missing expiry_date, or
+# wrong schema_version -> AllowlistEntryMalformedError. No silent
+# softening of the contract.
+
+schema_version = "1"
+
+[[entry]]
+flag = "--set"
+rationale = "Promised in 8 markdown files (CHANGELOG.md, CONTRACT.md, docs/quickstart.md, docs/cookbook/migration-from-v0-7.md, docs/cookbook/common-patterns.md, docs/guides/operating-in-production.md, docs/concepts/forking.md, docs/reference/cli.md) per GAUNTLET T2 line 52. Implementation is parked in frame t3-implement-cli-set-flag — D-1..D-3 amendments landed; D-4 + impl pending."
+expiry_commit_ref = "frame:t3-implement-cli-set-flag"
+expiry_date = "2026-07-01"
+
+[[entry]]
+flag = "--memo"
+rationale = "Promised in CHANGELOG and CONTRACT alongside --set as part of the v1.1 #1 inspect-extension cluster. Implementation tied to the same t3 sequencing."
+expiry_commit_ref = "frame:t3-implement-cli-set-flag"
+expiry_date = "2026-07-01"
+
+[[entry]]
+flag = "--search"
+rationale = "Promised in CHANGELOG and CONTRACT alongside --set / --memo as part of the v1.1 #1 inspect-extension cluster. Implementation tied to the same t3 sequencing."
+expiry_commit_ref = "frame:t3-implement-cli-set-flag"
+expiry_date = "2026-07-01"
+
+# --- Documented-as-dropped activegraph flags ---------------------------------
+#
+# Flags that were spec'd in CONTRACT and explicitly dropped before they
+# shipped. They appear in docs as part of the dropped-feature narrative;
+# the gate would flag them as runtime leaks otherwise.
+
+[[entry]]
+flag = "--live"
+rationale = "CONTRACT v1.0 #C3 explicitly dropped --live from v1.0 with a post-1.0 reconsideration clause. Doc references are part of the dropped-feature narrative, not a runtime leak. Re-review when v1.1 ships or sooner if quickstart usage data changes the calculus."
+expiry_date = "2027-01-01"
+
+# --- Cross-tool documentation references -------------------------------------
+#
+# Doc-prose flags belonging to other tools (mypy, pip, git, build).
+# These are not activegraph CLI flags and never will be; the gate scans
+# docs as plain text so it cannot distinguish ``mypy --strict`` from
+# ``activegraph --strict``. Each entry below documents the actual owning
+# tool and the doc surface where the reference lives.
+
+[[entry]]
+flag = "--strict"
+rationale = "Refers to mypy's --strict mode (CONTRACT v1.0 #C5, HANDOFF.md, README.md). Not an activegraph CLI flag."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--abbrev"
+rationale = "Refers to git describe --abbrev (CONTRACT.md release-process section). Not an activegraph CLI flag."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--tags"
+rationale = "Refers to git describe --tags (CONTRACT.md release-process section). Not an activegraph CLI flag."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--upgrade"
+rationale = "Refers to pip install --upgrade in install-instruction docs. Not an activegraph CLI flag."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--wheel"
+rationale = "Refers to python -m build --wheel (CONTRACT.md release-process section, HANDOFF.md). Not an activegraph CLI flag."
+expiry_date = "2027-01-01"
+
+# --- Documentation prose / example placeholders ------------------------------
+#
+# Flags that appear inside meta-documentation about CLI conventions (for
+# example, frame amendments that quote ``parser.add_argument(\"--foo\")``
+# as an illustrative pattern). These are not promises of activegraph
+# flags; they're illustrative example text.
+
+[[entry]]
+flag = "--foo"
+rationale = "Example placeholder in CONTRACT.md (CLI-drift class discussion) and frame amendments (D-1 implementation sketch). Not a real promised flag."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--flag"
+rationale = "Example placeholder in CONTRACT.md (`` `--flag` `` inline-code-span discussion). Not a real promised flag."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--behavior"
+rationale = "Appears in docs prose discussing activegraph's @behavior decorator concept (e.g., 'the --behavior layer'). Not a CLI flag — the underlying real CLI surface is --behaviors (plural), which IS implemented in main.py."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--out"
+rationale = "docs/reference/cli.md documents the export-trace command's option as `--out`, but the CLI actually registers `--output` (activegraph/cli/main.py:615). Genuine doc drift in the opposite direction of this gate's primary class; doc fix is out of scope for the gate frame (docs/** is :ro). Tracked as a follow-up doc-update item."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--output"
+rationale = "CLI registers `--output` for export-trace (activegraph/cli/main.py:615) but the docs/reference/cli.md table still names it `--out`. The opposite-direction half of the same drift as `--out` above; allowlisted symmetrically until the doc-update follow-up lands."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--supports"
+rationale = "Graph-relation arrow notation in CONTRACT.md examples (`claim#2 --supports--> document#1`) and quickstart snapshot fixtures. Not a CLI flag. The doc-scan regex extracts the leading `--supports` of `--supports-->` because trailing dashes are stripped to reach an alphanumeric terminus."
+expiry_date = "2027-01-01"
+
+[[entry]]
+flag = "--provider"
+rationale = "Appears in docs prose discussing LLM-provider configuration. Implementation surface is the LLMProvider class, not a CLI flag. Re-review if provider-selection ever becomes a real CLI surface."
+expiry_date = "2027-01-01"
