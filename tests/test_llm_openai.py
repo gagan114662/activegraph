@@ -215,6 +215,34 @@ def test_complete_translates_tools_to_openai_function_shape():
     ]
 
 
+def test_complete_extracts_text_from_mapping_response_shape():
+    client = MagicMock()
+    client.chat.completions.create.return_value = {
+        "choices": [
+            {
+                "message": {"content": '{"n": 7}'},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+        "model": "gpt-4o-mini",
+    }
+
+    response = OpenAIProvider(client=client).complete(
+        system="",
+        messages=[LLMMessage(role="user", content="u")],
+        model="gpt-4o-mini",
+        max_tokens=64,
+        temperature=0.0,
+        top_p=1.0,
+        output_schema=None,
+        timeout_seconds=30,
+    )
+
+    assert response.raw_text == '{"n": 7}'
+    assert response.finish_reason == "stop"
+
+
 def test_estimate_cost_uses_family_prefix():
     p = OpenAIProvider(client=MagicMock())
     mini = p.estimate_cost(
