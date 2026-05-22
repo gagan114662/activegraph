@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from decimal import Decimal
 
 import pytest
 
@@ -28,7 +29,9 @@ from activegraph import (
     clear_registry,
     llm_behavior,
 )
-from activegraph.llm import LLMCache
+from activegraph.core.event import Event
+from activegraph.llm import LLMCache, LLMResponse, ToolCall
+from activegraph.llm.recorded import _response_from_fixture
 
 from tests._llm_helpers import Claim, ClaimList, ScriptedProvider
 
@@ -76,6 +79,68 @@ def test_cache_from_events_round_trip():
     assert cached is not None
     assert cached.cache_hit is True
     assert cached.raw_text != ""
+
+
+def test_invalid_tool_args_marker_round_trips_through_cache_and_recorded_hydration():
+    response = LLMResponse(
+        raw_text="",
+        parsed=None,
+        input_tokens=1,
+        output_tokens=0,
+        cost_usd=Decimal("0"),
+        latency_seconds=0.0,
+        model="gpt-4o-mini",
+        finish_reason="tool_calls",
+        tool_calls=[
+            ToolCall(
+                id="call_1",
+                name="ping",
+                args={"_raw": "{"},
+                invalid_args_error="OpenAI tool arguments must be valid JSON object text.",
+            )
+        ],
+    )
+    payload = response.to_dict()
+
+    assert (
+        payload["tool_calls"][0]["invalid_args_error"]
+        == "OpenAI tool arguments must be valid JSON object text."
+    )
+
+    request = Event(
+        id="evt_req",
+        type="llm.requested",
+        payload={"prompt_hash": "prompt-hash"},
+    )
+    responded = Event(
+        id="evt_resp",
+        type="llm.responded",
+        payload=payload,
+        caused_by=request.id,
+    )
+
+    cached = LLMCache.from_events([request, responded]).get("prompt-hash")
+    assert cached is not None
+    assert cached.tool_calls is not None
+    assert (
+        cached.tool_calls[0].invalid_args_error
+        == "OpenAI tool arguments must be valid JSON object text."
+    )
+    assert (
+        cached.to_dict()["tool_calls"][0]["invalid_args_error"]
+        == "OpenAI tool arguments must be valid JSON object text."
+    )
+
+    recorded = _response_from_fixture(payload, output_schema=None)
+    assert recorded.tool_calls is not None
+    assert (
+        recorded.tool_calls[0].invalid_args_error
+        == "OpenAI tool arguments must be valid JSON object text."
+    )
+    assert (
+        recorded.to_dict()["tool_calls"][0]["invalid_args_error"]
+        == "OpenAI tool arguments must be valid JSON object text."
+    )
 
 
 def test_cache_miss_returns_none():
