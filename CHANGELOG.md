@@ -21,6 +21,9 @@ mkdocs snippet plugin — edit `CHANGELOG.md` at the repo root.
 ### Documentation
 - Closed all Ring 0 docstring exemptions (CONTRACT v1.1 #4 Wave 1): added docstrings to `Budget`, `InMemoryEventStore`, `Runtime`, `View`, `clear_tool_registry`, and `get_tool_registry`. Ring 0 coverage now 100% not-missing.
 
+### CI / drift gates
+- CLI-flag drift gate (`scripts/gate_cli_flag_drift.py`) implementing the CLI-flag half of CONTRACT v1.1 #2. Static AST extraction across `activegraph/cli/**/*.py`, fail-closed on `SyntaxError`, TOML allowlist with mandatory rationale + expiry per entry, expiry/resolution backstops, click `--help`/`--version` recognised implicitly. Wired into `.github/workflows/wheel-completeness.yml`. Initial allowlist documents the T3-pending cluster (`--set`, `--memo`, `--search`), the v1.0 #C3 dropped `--live` flag, cross-tool noise (`--strict`/`--abbrev`/`--tags`/`--upgrade`/`--wheel`), prose placeholders (`--foo`/`--flag`/`--behavior`/`--provider`), and a known doc-vs-CLI drift for `export-trace --out` vs `--output` tracked as a doc-update follow-up.
+
 Nothing yet. v1.1 scope is tracked in `v1.1-plan.md` (consolidated by
 the post-v1.0.3 contract review). v1.0.4 surfaced two additional v1.1
 candidates: C-3 (lock the failure-routing convention for eval-time

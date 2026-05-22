@@ -6118,6 +6118,50 @@ The v1.0-rc2 work lands a tactical down-payment: `tests/test_tutorial_snippets.p
 covering step 7 only (the snippet that crashed). The full v1.1 #2
 gate generalizes that pattern across the doc surface.
 
+### v1.1 #2 closure (CLI-flag portion): static AST extraction + TOML allowlist
+
+The CLI-flag half of v1.1 #2 is implemented as
+`activegraph/scripts/gate_cli_flag_drift.py`. Locked vocabulary:
+
+- **Source-of-truth surface for CLI flags** is static AST extraction
+  across `activegraph/cli/**/*.py`. Calls to `add_argument`,
+  `option`, and `Option` are walked; every string-literal argument
+  matching `--<name>` is collected. `ast.parse` failure on any CLI
+  source file raises `CliParseError` and the gate exits nonzero
+  (fail-closed per the discipline constraint). Click's built-in
+  `--help` and `--version` are recognised as implicit. Dynamic
+  introspection is **not** the source of truth — its silent-empty
+  failure mode on `ImportError` violates the fail-closed contract.
+  Locked per frame `t2-build-cli-flag-drift-gate` amendment D-1
+  (inner:fd53455).
+
+- **Suppression surface** is a single TOML file at
+  `activegraph/cli_flag_drift_allowlist.toml`, schema version `"1"`.
+  Each `[[entry]]` row carries `flag`, `rationale`, and `expiry_date`
+  as required fields; `expiry_commit_ref` (prefixed `frame:<id>`) is
+  optional but enables the resolution backstop. The gate fails closed
+  at load time on any of: missing/invalid schema_version, missing or
+  empty `rationale`, missing or invalid `expiry_date`, expiry_date in
+  the past, or a referenced frame whose `frames/<id>.status` reads
+  `closed`. Inline HTML comments and per-doc suppressions are
+  **rejected** — they have no expiry mechanism and require
+  cross-document scanning to enumerate active suppressions. Locked
+  per amendment D-2 (inner:623717f) plus footnote (inner:9469889).
+
+- **Resolution coupling.** The gate reads `frames/<id>.status` to
+  determine when a referenced frame has closed (mechanism (i) per
+  D-2 footnote). Both the inner repo's `frames/` and its parent
+  (outer gauntlet repo's `frames/`) are searched, so the gate works
+  whether invoked from inside or outside the inner tree.
+
+- **CI integration.** The gate runs under
+  `.github/workflows/wheel-completeness.yml` — both the pytest
+  surface (`tests/test_cli_flag_drift.py`, 26 cases) and the
+  end-to-end script (`python scripts/gate_cli_flag_drift.py`).
+
+The Python-snippets half of v1.1 #2 (executable doc snippets) remains
+v1.1 candidate work and is not changed by this closure.
+
 ## v1.1 #3. Type-completeness on the public-surface allowlist
 
 CONTRACT v1.0 #C5's mypy --strict gate baselines at 22/38
