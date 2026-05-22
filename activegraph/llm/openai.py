@@ -405,22 +405,37 @@ def _extract_tool_calls(raw: Any) -> list[ToolCall]:
         call_id = _value(raw_call, "id") or ""
         function = _value(raw_call, "function") or {}
         name = _value(function, "name") or ""
-        arguments = _value(function, "arguments") or "{}"
+        arguments = _value(function, "arguments")
+        invalid_args_error: str | None = None
         if isinstance(arguments, str):
             try:
                 decoded = json.loads(arguments)
             except Exception:
                 args = {"_raw": arguments}
+                invalid_args_error = (
+                    "OpenAI tool arguments must be valid JSON object text."
+                )
             else:
                 if isinstance(decoded, Mapping):
                     args = dict(decoded)
                 else:
                     args = {"_raw": decoded}
+                    invalid_args_error = "OpenAI tool arguments must decode to a JSON object."
         elif isinstance(arguments, Mapping):
             args = dict(arguments)
         else:
             args = {"_raw": arguments}
-        out.append(ToolCall(id=str(call_id), name=str(name), args=args))
+            invalid_args_error = (
+                "OpenAI tool arguments must be a JSON object or JSON object text."
+            )
+        out.append(
+            ToolCall(
+                id=str(call_id),
+                name=str(name),
+                args=args,
+                invalid_args_error=invalid_args_error,
+            )
+        )
     return out
 
 

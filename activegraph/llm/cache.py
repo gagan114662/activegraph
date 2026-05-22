@@ -161,6 +161,7 @@ def _response_from_event_payload(payload: dict) -> LLMResponse:
                 id=tc.get("id", ""),
                 name=tc.get("name", ""),
                 args=dict(tc.get("args", {})),
+                invalid_args_error=tc.get("invalid_args_error"),
             )
             for tc in tc_payload
         ]

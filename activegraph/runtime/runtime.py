@@ -1320,6 +1320,8 @@ class Runtime:
 
         # Validate input
         try:
+            if call.invalid_args_error is not None:
+                raise ValueError(call.invalid_args_error)
             if tool.input_schema is not None:
                 input_obj = tool.input_schema.model_validate(call.args)
             else:

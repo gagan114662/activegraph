@@ -38,6 +38,14 @@ class _LookupResult(BaseModel):
     answer: str
 
 
+class _EmptyArgs(BaseModel):
+    pass
+
+
+class _PingResult(BaseModel):
+    ok: bool
+
+
 class _Answer(BaseModel):
     answer: str
 
@@ -356,6 +364,81 @@ def _run_openai_with_tool_arguments(arguments: str) -> _RunResult:
     return _RunResult(graph=graph, client=client)
 
 
+def _run_openai_zero_field_tool_with_arguments(arguments: str) -> _RunResult:
+    clear_registry()
+    clear_tool_registry()
+
+    @tool(
+        name="ping",
+        description="No-argument ping.",
+        input_schema=_EmptyArgs,
+        output_schema=_PingResult,
+        deterministic=True,
+    )
+    def ping(args: _EmptyArgs, ctx: Any) -> _PingResult:
+        return _PingResult(ok=True)
+
+    @llm_behavior(
+        name="answer_with_ping",
+        on=["goal.created"],
+        description="Answer with a no-argument tool call.",
+        output_schema=_Answer,
+        tools=[ping],
+        max_tool_turns=2,
+        temperature=0.0,
+    )
+    def answer_with_ping(event: Any, graph: Any, ctx: Any, out: _Answer) -> None:
+        graph.add_object("answer", {"answer": out.answer})
+
+    graph = _fresh_graph()
+    first = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            type="function",
+                            function=SimpleNamespace(
+                                name="ping",
+                                arguments=arguments,
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
+        model="gpt-4o-mini",
+    )
+    final = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"answer":"done"}'),
+                finish_reason="stop",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=6, completion_tokens=3),
+        model="gpt-4o-mini",
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(calls=[], _responses=[first, final])
+        )
+    )
+
+    def create(**kwargs: Any) -> SimpleNamespace:
+        client.chat.completions.calls.append(kwargs)
+        return client.chat.completions._responses.pop(0)
+
+    client.chat.completions.create = create
+    provider = OpenAIProvider(client=client)
+    Runtime(graph, llm_provider=provider, budget={"max_tool_calls": 4}).run_goal("g")
+    return _RunResult(graph=graph, client=client)
+
+
 def test_openai_tool_arguments_must_decode_to_object() -> None:
     for arguments in ('"not an object"', "1", '[["query", "alpha"]]'):
         result = _run_openai_with_tool_arguments(arguments)
@@ -369,6 +452,31 @@ def test_openai_tool_arguments_must_decode_to_object() -> None:
             "behavior.failed",
         ]
         assert _terminal_reason(result.graph) == "tool.invalid_input"
+        assert not [
+            e for e in result.graph.events
+            if e.type == "object.created"
+            and e.payload["object"]["type"] == "answer"
+        ]
+
+
+def test_openai_invalid_tool_arguments_rejected_for_zero_field_schema() -> None:
+    for arguments in ("", "{", "1", '"not an object"'):
+        result = _run_openai_zero_field_tool_with_arguments(arguments)
+
+        assert _event_types(result.graph) == [
+            "goal.created",
+            "llm.requested",
+            "llm.responded",
+            "tool.requested",
+            "tool.responded",
+            "behavior.failed",
+        ]
+        assert _terminal_reason(result.graph) == "tool.invalid_input"
+        assert [
+            e.payload.get("error", {}).get("reason")
+            for e in result.graph.events
+            if e.type == "tool.responded"
+        ] == ["tool.invalid_input"]
         assert not [
             e for e in result.graph.events
             if e.type == "object.created"
