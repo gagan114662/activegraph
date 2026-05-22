@@ -315,6 +315,67 @@ def test_invalid_args_failure_stream_and_reason_match_across_providers() -> None
     assert _terminal_reason(openai.graph) == "tool.invalid_input"
 
 
+def _run_openai_with_tool_arguments(arguments: str) -> _RunResult:
+    clear_registry()
+    clear_tool_registry()
+    _register_behavior()
+    graph = _fresh_graph()
+    first = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            type="function",
+                            function=SimpleNamespace(
+                                name="lookup_fact",
+                                arguments=arguments,
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
+        model="gpt-4o-mini",
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[first]))
+    )
+
+    def create(**kwargs: Any) -> SimpleNamespace:
+        client.chat.completions.calls.append(kwargs)
+        return client.chat.completions._responses.pop(0)
+
+    client.chat.completions.create = create
+    provider = OpenAIProvider(client=client)
+    Runtime(graph, llm_provider=provider, budget={"max_tool_calls": 4}).run_goal("g")
+    return _RunResult(graph=graph, client=client)
+
+
+def test_openai_tool_arguments_must_decode_to_object() -> None:
+    for arguments in ('"not an object"', "1", '[["query", "alpha"]]'):
+        result = _run_openai_with_tool_arguments(arguments)
+
+        assert _event_types(result.graph) == [
+            "goal.created",
+            "llm.requested",
+            "llm.responded",
+            "tool.requested",
+            "tool.responded",
+            "behavior.failed",
+        ]
+        assert _terminal_reason(result.graph) == "tool.invalid_input"
+        assert not [
+            e for e in result.graph.events
+            if e.type == "object.created"
+            and e.payload["object"]["type"] == "answer"
+        ]
+
+
 def test_unknown_tool_failure_stream_and_reason_match_across_providers() -> None:
     anthropic = _run_provider("anthropic", "unknown_tool")
     openai = _run_provider("openai", "unknown_tool")

@@ -268,6 +268,9 @@ class OpenAIProvider(LLMProvider):
             total += len(enc.encode(system))
         for m in messages:
             total += len(enc.encode(m.content))
+            extra = _message_token_payload_text(m)
+            if extra:
+                total += len(enc.encode(extra))
             # Each message carries ~4 tokens of OpenAI chat-formatting
             # overhead per the published "How to count tokens" guide.
             total += 4
@@ -288,7 +291,10 @@ class OpenAIProvider(LLMProvider):
                 "accurate accounting: pip install activegraph[openai]."
             )
             self._heuristic_warned = True
-        total = len(system) + sum(len(m.content) for m in messages)
+        total = len(system)
+        for m in messages:
+            total += len(m.content)
+            total += len(_message_token_payload_text(m))
         return max(1, total // 4)
 
 
@@ -317,6 +323,13 @@ def _extract_text(raw: Any) -> str:
         if isinstance(text, str):
             parts.append(text)
     return "".join(parts)
+
+
+def _message_token_payload_text(m: LLMMessage) -> str:
+    if not m.tool_calls:
+        return ""
+    payload = [_tool_call_to_openai(tc) for tc in m.tool_calls]
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _message_to_openai(m: LLMMessage) -> dict[str, Any]:
@@ -395,14 +408,19 @@ def _extract_tool_calls(raw: Any) -> list[ToolCall]:
         arguments = _value(function, "arguments") or "{}"
         if isinstance(arguments, str):
             try:
-                args = json.loads(arguments)
+                decoded = json.loads(arguments)
             except Exception:
                 args = {"_raw": arguments}
+            else:
+                if isinstance(decoded, Mapping):
+                    args = dict(decoded)
+                else:
+                    args = {"_raw": decoded}
         elif isinstance(arguments, Mapping):
             args = dict(arguments)
         else:
             args = {"_raw": arguments}
-        out.append(ToolCall(id=str(call_id), name=str(name), args=dict(args)))
+        out.append(ToolCall(id=str(call_id), name=str(name), args=args))
     return out
 
 
