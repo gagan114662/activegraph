@@ -88,10 +88,7 @@ class ToolCall:
     invalid_args_error: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
-        out = {"id": self.id, "name": self.name, "args": dict(self.args)}
-        if self.invalid_args_error is not None:
-            out["invalid_args_error"] = self.invalid_args_error
-        return out
+        return {"id": self.id, "name": self.name, "args": dict(self.args)}
 
 
 @dataclass

@@ -452,6 +452,10 @@ def test_openai_tool_arguments_must_decode_to_object() -> None:
             "behavior.failed",
         ]
         assert _terminal_reason(result.graph) == "tool.invalid_input"
+        llm_responded = [
+            e for e in result.graph.events if e.type == "llm.responded"
+        ][0]
+        assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
         assert not [
             e for e in result.graph.events
             if e.type == "object.created"
@@ -472,6 +476,10 @@ def test_openai_invalid_tool_arguments_rejected_for_zero_field_schema() -> None:
             "behavior.failed",
         ]
         assert _terminal_reason(result.graph) == "tool.invalid_input"
+        llm_responded = [
+            e for e in result.graph.events if e.type == "llm.responded"
+        ][0]
+        assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
         assert [
             e.payload.get("error", {}).get("reason")
             for e in result.graph.events
