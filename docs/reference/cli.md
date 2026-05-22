@@ -118,19 +118,10 @@ Exits: 0 on success, 3 if the store / run doesn't exist.
 Create a new run by copying events from a parent run up to and
 including `--at-event`.
 
-!!! note "The `--set` flag is part of the v1.1 release"
-    `--set <pack>.<setting>=<value>` is documented in CONTRACT
-    v1.0 and shown in the signature below, but the implementation
-    lands in v1.1 (see [CONTRACT v1.1 #1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md#v11-1-cli-flags-specd-but-not-implemented)).
-    Until then, use the Python-API form in
-    [Fork with a pack-setting override (v1.0 — Python API)](../cookbook/common-patterns.md#fork-with-a-pack-setting-override-v10-python-api)
-    for fork-with-override workflows. Other flags below (`--at-event`,
-    `--label`, `--to`, `--record`, `--json`) are available now.
-
 ```
 activegraph fork <url> --run-id <parent> --at-event <evt> \
                       [--label <text>] [--to <dest-url>]
-                      [--set <key>=<value>] [--record] [--json]
+                      [--set <pack>.<key>=<value>] [--record] [--json]
 ```
 
 | Flag | Meaning |
@@ -140,7 +131,7 @@ activegraph fork <url> --run-id <parent> --at-event <evt> \
 | `--at-event <evt>` | Event id at which to fork (inclusive). Required. |
 | `--label <text>` | Optional human-readable label for the new run. |
 | `--to <dest-url>` | Destination store URL. Defaults to the source store (cross-store fork is not supported in v1.0; use `migrate` first). |
-| `--set <key>=<value>` | Override a pack setting in the fork. Pack-settings-only; dotted-path `<pack>.<setting>=<value>`; multiple `--set` flags compose; unknown keys fail loud with a registration-time error (see the [errors catalog](errors/replay-divergence-error.md) for the family). |
+| `--set <pack>.<key>=<value>` | Override a pack setting in the fork. Pack-settings-only; multiple `--set` flags compose; values are coerced through the pack's Pydantic `settings_schema` and recorded as `fork.override.applied` events on the new run; unknown packs / unknown keys / coercion failures all raise pre-event errors. |
 | `--record` | Mark the fork as a re-recording. The new run accepts new cache entries instead of strict-checking against the parent's prompt hashes. |
 | `--json` | Machine-readable output. |
 

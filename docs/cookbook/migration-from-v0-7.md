@@ -150,7 +150,7 @@ reference in their recovery prose:
 - `activegraph inspect <run> --event <event-id>`
 - `activegraph inspect <run> --behaviors`
 - `activegraph inspect <run> --pack-version`
-- `activegraph fork <run> --at-event <evt> --set <key>=<value>`
+- `activegraph fork <url> --run-id <run> --at-event <evt> --set <pack>.<key>=<value>`
 - `activegraph fork <run> --at-event <evt> --record`
 - `activegraph migrate --from <src> --to <dst> --skip-corrupted`
 

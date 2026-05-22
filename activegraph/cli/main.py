@@ -410,6 +410,7 @@ def _print_pack_versions(rt, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
 def cmd_replay(url: str, run_id: str, as_json: bool) -> None:
     """Rebuild the graph from a run's event log (no behaviors fire)."""
+    from activegraph.runtime.errors import ReplayDivergenceError
     from activegraph.runtime.runtime import Runtime
 
     try:
@@ -420,6 +421,9 @@ def cmd_replay(url: str, run_id: str, as_json: bool) -> None:
     except __import__("sqlite3").OperationalError as e:
         click.echo(f"{url}: {e}", err=True)
         raise SystemExit(EXIT_NOT_FOUND)
+    except ReplayDivergenceError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(EXIT_DIVERGENCE)
 
     summary: dict[str, Any] = {
         "run_id": run_id,
@@ -568,6 +572,33 @@ def cmd_fork(
                 raise SystemExit(EXIT_USAGE_ERROR)
             coerced_overrides.append(coerced)
 
+        deduped: list[Any] = []
+        seen: dict[tuple[str, str], Any] = {}
+        for coerced in coerced_overrides:
+            key = (coerced.pack_name, coerced.key)
+            payload_value = coerced.to_event_payload()["value"]
+            if key in seen:
+                if seen[key] != payload_value:
+                    click.echo(
+                        "InvalidOverrideError: repeated --set for "
+                        f"{coerced.pack_name}.{coerced.key} has conflicting "
+                        f"values {seen[key]!r} and {payload_value!r}",
+                        err=True,
+                    )
+                    raise SystemExit(EXIT_USAGE_ERROR)
+                continue
+            seen[key] = payload_value
+            deduped.append(coerced)
+        coerced_overrides = deduped
+
+    if coerced_overrides and parsed.scheme == "postgres":
+        click.echo(
+            "--set is not supported for postgres stores yet "
+            "(pending t3a postgres override persistence).",
+            err=True,
+        )
+        raise SystemExit(EXIT_USAGE_ERROR)
+
     new_run_id = IDGen().run()
     try:
         if parsed.scheme == "sqlite":
@@ -621,18 +652,6 @@ def cmd_fork(
                 overrides_dict[f"{co.pack_name}.{co.key}"] = co.value
                 n += 1
             file_store.close()
-        else:
-            from activegraph.store.postgres import PostgresEventStore
-
-            pg = PostgresEventStore(parsed.raw, run_id=new_run_id)
-            for co in coerced_overrides:
-                pg.append(
-                    run_id=new_run_id,
-                    event_type="fork.override.applied",
-                    payload=co.to_event_payload(),
-                )
-                overrides_dict[f"{co.pack_name}.{co.key}"] = co.value
-                n += 1
 
     out: dict[str, Any] = {
         "parent_run_id": run_id,

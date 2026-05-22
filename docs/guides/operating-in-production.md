@@ -479,9 +479,9 @@ Pass `--record` to mark the fork as an intentional re-recording
 (used after a `ReplayDivergenceError` when the divergence was
 intentional). The flag appends `-recording` to the label and prints
 follow-on guidance. The fork-with-pack-setting-override workflow
-(the canonical recipe behind `--set`, landing in v1.1) is documented
-under [Cookbook: common patterns — Fork with a pack-setting
-override](../cookbook/common-patterns.md#fork-with-a-pack-setting-override-v10-python-api).
+(the canonical recipe behind `--set`) is documented under
+[Cookbook: common patterns — Fork with a pack-setting
+override](../cookbook/common-patterns.md#fork-with-a-pack-setting-override-python-api).
 
 ### `diff`
 

@@ -284,13 +284,38 @@ decision, and got a structural comparison of the results.
 Hypothesis testing on an agentic system, without losing the parent
 run. This is what fork-and-diff means in this framework.
 
-The fork-and-diff workflow will collapse into a single
-`activegraph fork --set` CLI command in v1.1
-([CONTRACT v1.1 #1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md#v11-1-cli-flags-specd-but-not-implemented));
-the Python form above is the v1.0 canonical recipe. For the
-conceptual deep-dive on forks (shared lineage, cache replay, the
-strict-vs-permissive replay distinction), read
-[`concepts/forking`](concepts/forking.md).
+The whole fork-and-diff workflow above collapses to a single
+`activegraph fork --set` CLI command — see
+[Cookbook: Fork-and-diff to compare alternative hypotheses](cookbook/common-patterns.md#fork-and-diff-to-compare-alternative-hypotheses)
+for the CLI form. The Python recipe above is the equivalent
+in-process path. For the conceptual deep-dive on forks (shared
+lineage, cache replay, the strict-vs-permissive replay
+distinction), read [`concepts/forking`](concepts/forking.md).
+
+The CLI path can apply more than one pack-setting override at fork
+creation. Each override must use the `<pack>.<key>=<value>` form, and
+replay projects the effective settings from the fork's event log:
+
+```bash
+FORK_RUN=$(
+  activegraph fork sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db \
+    --run-id quickstart_demo_run \
+    --at-event evt_002 \
+    --label cautious \
+    --set diligence.confidence_threshold_for_review=0.9 \
+    --set diligence.support_threshold=0.95 \
+    --record \
+    --json \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["new_run_id"])'
+)
+
+activegraph replay sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db \
+    --run-id "$FORK_RUN" \
+    --json
+```
+
+In the replay JSON, `effective_settings.diligence` contains the two
+typed override values recorded by the fork.
 
 ## What to read next
 

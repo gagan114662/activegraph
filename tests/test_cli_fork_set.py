@@ -28,9 +28,11 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from activegraph import SQLiteEventStore
 
@@ -111,6 +113,19 @@ def test_cli_accepts_set_with_valid_dotted_key_equals_value(tmp_path: Path) -> N
         "Override value not surfaced in --json output; D-3 full-attestation "
         "requires the typed value to be visible post-fork."
     )
+
+
+def test_cli_rejects_set_for_postgres_before_backend_open() -> None:
+    """T3 scopes --set to SQLite/path-backed forks; Postgres support is t3a."""
+    result = _run_cli([
+        "fork", "postgres://localhost/activegraph",
+        "--run-id", "run_parent",
+        "--at-event", "evt_001",
+        "--set", "diligence.confidence_threshold_for_review=0.9",
+    ])
+    assert result.returncode != 0
+    assert "pending t3a postgres override persistence" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_cli_rejects_malformed_set_missing_equals(tmp_path: Path) -> None:
@@ -237,6 +252,52 @@ def test_cli_multiple_set_flags_compose(tmp_path: Path) -> None:
     assert overrides.get("diligence.support_threshold") == 0.95
 
 
+def test_cli_rejects_conflicting_repeated_set_for_same_key(tmp_path: Path) -> None:
+    """D-2 covers the complete invocation: one key cannot carry two values."""
+    db = tmp_path / "run.db"
+    parent_id = _seed_run(db)
+    url = f"sqlite:{db}"
+
+    result = _run_cli([
+        "fork", url,
+        "--run-id", parent_id,
+        "--at-event", "evt_001",
+        "--set", "diligence.support_threshold=0.4",
+        "--set", "diligence.support_threshold=0.5",
+    ])
+
+    assert result.returncode != 0
+    assert "repeated --set" in result.stderr
+    assert "conflicting values" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_collapses_identical_repeated_set_for_same_key(tmp_path: Path) -> None:
+    """Same-key/same-value input is idempotent and mints one override event."""
+    db = tmp_path / "run.db"
+    parent_id = _seed_run(db)
+    url = f"sqlite:{db}"
+
+    result = _run_cli([
+        "fork", url,
+        "--run-id", parent_id,
+        "--at-event", "evt_001",
+        "--set", "diligence.support_threshold=0.5",
+        "--set", "diligence.support_threshold=0.5",
+        "--json",
+    ])
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    store = SQLiteEventStore(str(db))
+    override_events = [
+        e for e in store.load(payload["new_run_id"])
+        if e.type == "fork.override.applied"
+    ]
+    assert len(override_events) == 1
+    assert payload["overrides"]["diligence.support_threshold"] == 0.5
+
+
 # ============================================================================
 # D-2 helper surface — validate_override factored for unit testing
 # ============================================================================
@@ -296,3 +357,46 @@ def test_validate_override_raises_invalid_override_error_on_bad_value() -> None:
     err = excinfo.value
     assert getattr(err, "key", None) == "confidence_threshold_for_review"
     assert getattr(err, "value", None) == "not_a_number"
+
+
+def test_validate_override_handles_required_fields_without_whole_model_validation() -> None:
+    """A required sibling field must not make single-field --set validation fail."""
+    from activegraph.core.overrides import validate_override
+    from activegraph.packs import Pack
+
+    class RequiredSettings(BaseModel):
+        required_name: str
+        threshold: float
+
+    pack = Pack(
+        name="requiredpack",
+        version="0.1.0",
+        settings_schema=RequiredSettings,
+    )
+
+    coerced = validate_override("threshold", "0.75", pack)
+
+    assert coerced.value == 0.75
+    assert isinstance(coerced.value, float)
+    assert "default" not in coerced.schema_constraint_snapshot
+
+
+def test_coerced_override_event_payload_is_json_serializable_for_date_values() -> None:
+    """D-3 event payloads must be JSON-safe before the store writes them."""
+    from activegraph.core.overrides import validate_override
+    from activegraph.packs import Pack
+
+    class DateSettings(BaseModel):
+        review_by: date
+
+    pack = Pack(
+        name="datepack",
+        version="0.1.0",
+        settings_schema=DateSettings,
+    )
+
+    coerced = validate_override("review_by", "2026-05-22", pack)
+    payload = coerced.to_event_payload()
+
+    json.dumps(payload)
+    assert payload["value"] == "2026-05-22"

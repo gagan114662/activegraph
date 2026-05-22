@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 import random as _random
+import sqlite3
 import time as _time
 import traceback
 
@@ -361,7 +362,7 @@ class Runtime:
                             created_at=_now_iso(),
                             frame_id=self.frame.id if self.frame else None,
                         )
-                    except Exception:
+                    except sqlite3.IntegrityError:
                         pass
             graph.attach_store(store)
 
@@ -2180,7 +2181,7 @@ class Runtime:
                 graph._replay_event(ev)  # noqa: SLF001
             graph.ids.reseed_from_events(events)
             # T3 D-1: override projector — divergence on conflicting values.
-            _project_fork_overrides(events)
+            fork_overrides = _project_fork_overrides(events)
             graph.attach_store(store)
             cache = LLMCache.from_events(events) if replay_llm_cache else None
             from activegraph.tools.cache import ToolCache as _ToolCache
@@ -2202,7 +2203,7 @@ class Runtime:
                 replay_reinvoke_deterministic=replay_reinvoke_deterministic,
                 metrics=metrics,
             )
-            rt._fork_overrides = _project_fork_overrides(events)
+            rt._fork_overrides = fork_overrides
             _requeue_unfired(rt, events)
             return rt
 
@@ -2217,7 +2218,7 @@ class Runtime:
             graph._replay_event(ev)  # noqa: SLF001 — internal seam
         graph.ids.reseed_from_events(events)
         # T3 D-1: override projector — divergence on conflicting values.
-        _project_fork_overrides(events)
+        fork_overrides = _project_fork_overrides(events)
         graph.attach_store(store)
 
         # If we're caching, harvest llm.responded events from the log so
@@ -2251,7 +2252,7 @@ class Runtime:
         store.upsert_run(created_at=_now_iso())
         # T3 D-1: stash the projected override state for `replay --json`
         # to surface as `effective_settings`.
-        rt._fork_overrides = _project_fork_overrides(events)
+        rt._fork_overrides = fork_overrides
 
         # Re-queue events whose behaviors never fired (CONTRACT v0.5 diff #8).
         # Events that already have a behavior.started referencing them are

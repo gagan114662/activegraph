@@ -13,9 +13,10 @@ Wired by the `activegraph fork --set` CLI and replay projector.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic_core import PydanticUndefined, to_jsonable_python
 
 
 class InvalidOverrideError(ValueError):
@@ -52,11 +53,13 @@ class CoercedOverride:
     schema_constraint_snapshot: dict[str, Any]
 
     def to_event_payload(self) -> dict[str, Any]:
+        value = to_jsonable_python(self.value)
+        snapshot = to_jsonable_python(self.schema_constraint_snapshot)
         return {
             "pack": {"name": self.pack_name, "version": self.pack_version},
             "key": self.key,
-            "value": self.value,
-            "schema_constraint_snapshot": dict(self.schema_constraint_snapshot),
+            "value": value,
+            "schema_constraint_snapshot": dict(snapshot),
         }
 
 
@@ -75,7 +78,7 @@ def _field_constraint_snapshot(schema: type[BaseModel], key: str) -> dict[str, A
             v = getattr(src, attr, None)
             if v is not None:
                 snap[attr] = v
-    if field.default is not None:
+    if field.default is not PydanticUndefined:
         try:
             snap["default"] = field.default
         except Exception:
@@ -103,9 +106,10 @@ def validate_override(key: str, value: Any, pack: Any) -> CoercedOverride:
             value=value,
             pack_name=pack_name,
         )
+    schema_model = cast(type[BaseModel], schema)
 
-    if key not in schema.model_fields:
-        known = ", ".join(sorted(schema.model_fields.keys())) or "(none)"
+    if key not in schema_model.model_fields:
+        known = ", ".join(sorted(schema_model.model_fields.keys())) or "(none)"
         raise InvalidOverrideError(
             f"unknown key {key!r} for pack {pack_name!r}; "
             f"known keys: {known}",
@@ -114,13 +118,13 @@ def validate_override(key: str, value: Any, pack: Any) -> CoercedOverride:
             pack_name=pack_name,
         )
 
-    constraint = _field_constraint_snapshot(schema, key)
+    constraint = _field_constraint_snapshot(schema_model, key)
     try:
-        # Single-field coercion: build a partial dict and validate.
-        # `model_construct` skips validation, so we use a real validate
-        # call but only touch the one field by leaning on defaults.
-        kwargs = {key: value}
-        instance = schema.model_validate(kwargs, strict=False)
+        field = schema_model.model_fields[key]
+        annotation = field.annotation
+        if field.metadata:
+            annotation = Annotated[annotation, *field.metadata]
+        typed_value = TypeAdapter(annotation).validate_python(value)
     except ValidationError as exc:
         raise InvalidOverrideError(
             f"value {value!r} failed validation for {pack_name}.{key}: {exc}",
@@ -130,7 +134,6 @@ def validate_override(key: str, value: Any, pack: Any) -> CoercedOverride:
             schema_constraint=constraint,
         ) from exc
 
-    typed_value = getattr(instance, key)
     return CoercedOverride(
         key=key,
         value=typed_value,

@@ -59,20 +59,12 @@ When you want to know "what would happen if I changed this
 setting," fork from a point before the setting takes effect, run
 the fork with the override, and diff.
 
-!!! note "The `fork --set` flag is part of the v1.1 release"
-    The CLI form below shows the `--set <pack>.<key>=<value>` flag
-    documented in CONTRACT v1.0. The flag itself lands in v1.1
-    (see [CONTRACT v1.1 #1](https://github.com/yoheinakajima/activegraph/blob/main/CONTRACT.md#v11-1-cli-flags-specd-but-not-implemented)).
-    Until then, use the Python-API form in
-    [Fork with a pack-setting override (v1.0 — Python API)](#fork-with-a-pack-setting-override-v10-python-api)
-    below.
-
 ```bash
 # Find the event before the setting matters (usually the goal
 # event or a pack.loaded event):
 activegraph inspect <store> --run-id <run> --tail 50
 
-# Fork with the override (v1.1):
+# Fork with the override:
 activegraph fork <store> --run-id <run> --at-event <evt> \
     --label cautious \
     --set diligence.confidence_threshold_for_review=0.9 \
@@ -88,12 +80,13 @@ you where the override started producing different work. See
 [`forking`](../concepts/forking.md) for the cutoff semantics and
 the `--set` rules (pack-settings-only, fail-loud-on-typo).
 
-## Fork with a pack-setting override (v1.0 — Python API)
+## Fork with a pack-setting override (Python API)
 
-The canonical home for the fork-with-override workflow until the
-CLI's `--set` flag lands in v1.1. The Python form does the same
-thing the CLI form will: copies the parent's events up to the
-fork point, then resumes execution under different pack settings.
+The CLI form above is the canonical recipe; this is the equivalent
+in-process form for callers that are already inside Python (tests,
+scripts, notebooks). It does the same thing the CLI does: copies
+the parent's events up to the fork point, then resumes execution
+under different pack settings.
 
 ```python
 from activegraph import Graph, IDGen, FrozenClock, Runtime
@@ -148,9 +141,9 @@ activegraph diff sqlite:////tmp/activegraph_quickstart/quickstart_demo_run.db \
 ```
 
 The diff shows the structural difference produced by the
-threshold change. When `--set` lands in v1.1, the same workflow
-collapses to a single CLI command; until then, this is the
-canonical recipe.
+threshold change. The CLI form above collapses this whole recipe
+to a single command; the Python form here is the same operation
+done in-process.
 
 ## Pattern subscriptions for cross-object reactivity
 

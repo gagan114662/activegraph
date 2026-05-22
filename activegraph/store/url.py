@@ -139,6 +139,8 @@ def parse_store_url(url: str) -> StoreURL:
         post_scheme = url[len(parsed.scheme) + 1:]
         leading_slashes = len(post_scheme) - len(post_scheme.lstrip("/"))
         if leading_slashes == 1 and path:
+            # Keep this branch simple: store/url.py is in the strict mypy
+            # allowlist and this shorthand must stay type-obvious.
             # Absolute-shorthand: preserve the leading slash.
             return StoreURL(scheme="sqlite", raw=url, sqlite_path=path)
         if not path:

@@ -6590,6 +6590,294 @@ common cases so the maintainer doesn't have to debug:
   timeout per request so a hung connection fails the gate
   rather than the workflow.
 
+## v1.1 #10. `activegraph fork --set` sealed (D-1..D-4) + `SQLiteEventStore(path)` loosening
+
+Closes the `--set` half of v1.1 #1 (`v1.1-plan.md` F-1). Locks
+the four design decisions surfaced by the frame
+`t3-implement-cli-set-flag` yaml (`design_decisions_required:`
+D-1..D-4) as CONTRACT clauses, and supersedes the v1.0.1 #3
+`run_id`-required guard on `SQLiteEventStore.__init__` for the
+file-level construction path the override projector and replay
+forensics require.
+
+The `--memo` and `--search` halves of v1.1 #1 remain F-2 / F-3
+backlog. The Python-snippet drift gate (v1.1 #2 expansion) is
+unchanged by this amendment.
+
+**Code landing.** The frame's TDD chain went red→green across
+inner-repo commits `inner:8b0a61c` (failing tests landed first
+by Test Owner — `test_cli_fork_set.py`, `test_fork_set_persistence.py`,
+`test_fork_set_replay.py`) → `inner:d5bc55f` (Code Owner GREEN
+landing, 23/23 target tests + full suite 672 passed / 15 skipped
+/ 0 failed) → `inner:49b19c2` (bundled follow-on tightening the
+D-1 monotonic-replay + D-2 pre-event-validate paths). All three
+pushed by `gagan114662 <gagan@designgaga.ca>` on `main`.
+
+### (a) D-1 LOCKED — lock-at-creation producer + monotonic-only log invariant
+
+The `--set` override is captured as a `fork.override.applied`
+event in the fork's own event log at fork creation time,
+immediately after the parent's last replayed event (the fork
+point). Replay reads the override value from that event
+payload; it has no replay-time meaning. Per `inner:316a052`
+(producer rule) plus `inner:eb9d154` (log invariant): the CLI
+surface is the only legal producer of `fork.override.applied`,
+and if two events for the same key ever appear in one log
+(corruption, forgery, future non-CLI producer), same-value
+re-sets are idempotent no-ops while divergent-value re-sets
+raise `ReplayDivergenceError(event_id, expected, actual)` per
+v0.5 #7.
+
+Belt at the CLI surface, suspenders at the log layer. Replay
+output does not depend on out-of-log override state, preserving
+v0.5 fork semantics (events under the new `run_id` are the
+source of truth), `Graph._replay_event` log-is-truth, and
+`replay_strict=True` (the strict path verifies each replayed
+event against the recorded payload — there is no ambient
+setting it can consult).
+
+The CRDT-flavored "use new value at replay time" alternative
+was rejected because it makes replay non-self-contained. The
+"refuse fork if prefix contains events the override would have
+changed" alternative was rejected because it forces the CLI to
+import the pack and walk every prefix event, defeating the
+cheap-fork invariant. The surprise called out in v1.1 #1 ("a
+setting change pre-fork-point in the override is silently
+ignored") is addressed by event placement: the override is
+visible in the fork's log as the first post-fork-point event,
+so a user inspecting the fork sees exactly when the value
+became effective. Per-prefix retroactive application is
+explicitly not offered.
+
+### (b) D-2 LOCKED — pre-event validation via `validate_override(key, value, pack)`
+
+Bad-value handling fails at fork-creation time, before the
+`fork.override.applied` event is minted. Per `inner:b16a308`
+plus the schema-surface clarification at `inner:2dfa58c`, the
+new module `activegraph/core/overrides.py` exposes
+`validate_override(key, value, pack) → CoercedOverride` as the
+single seam. It resolves `key` against `pack.settings_schema`
+(a Pydantic `BaseModel`), coerces `value` through the field
+validator, and either returns a `CoercedOverride` carrying the
+typed value or raises `InvalidOverrideError(message, *, key,
+value, pack_name, schema_constraint)`.
+
+This matches the "validation fires at registration time"
+pattern from v1.0.2.post1 (v1.0.4 #6 archeology): the binding
+moment is the boundary the contract names, the test is anchored
+there, and lazy failure modes are eliminated by construction.
+Boundary-anchored test for the validation moment lives in
+`tests/test_cli_fork_set.py` (frame predicate
+`boundary_anchored_test_for_D2_validation_moment`).
+
+The D-2 invariant applies to the complete set of overrides in a
+single `activegraph fork` invocation, not merely to each parsed
+`--set` pair in isolation. Per Quinn's adversary repro against
+`inner:d5bc55f` (`frames/t3-implement-cli-set-flag.adversary.log`,
+Bug A; broken run `01KS80MH848Z4M395ZDT0WNGG9`), repeated
+same-key overrides with divergent values in one invocation are
+operator error and MUST exit `EXIT_USAGE_ERROR` (2) before any
+`fork.override.applied` event is minted. Repeated same-key
+overrides with the identical normalized value collapse silently as
+idempotent input. This closes the loophole where the CLI could
+write a log that immediately diverges under the D-1 projector.
+
+The fail-at-fork-construction (b) and store-as-is-then-explode-
+at-replay (c) alternatives were rejected: (b) splits the
+diagnostic across CLI parse and downstream constructor calls,
+and (c) violates the v1.0.2.post1 binding-moment discipline by
+deferring the failure past the boundary where the user has
+context.
+
+### (c) D-3 LOCKED — full-attestation event payload
+
+The `fork.override.applied` event payload carries three nested
+slots, per `inner:4f6b0a0` plus envelope-migration notes at
+`inner:473fa57`:
+
+```
+{
+  "pack": {"name": "...", "version": "..."},
+  "key": "<dotted.path>",
+  "value": <typed>,
+  "schema_constraint_snapshot": {
+    "type": "...",
+    "ge"|"gt"|"le"|"lt"|"min_length"|"max_length"|"pattern": <bound>,
+    "default": <if applicable>
+  }
+}
+```
+
+The schema-constraint snapshot is captured at fork time so
+replay is self-sufficient against pack drift: a fork created
+against pack version X replays cleanly even if version Y has
+narrowed or widened the `key`'s constraint, because the event
+itself names what was valid at creation. The persistence
+choice between the three v1.1 #1 options (new column / JSON
+blob on existing column / sidecar table) collapses: the
+override lives entirely inside an event row, not in a new
+schema column. The runs-table `schema_version` therefore does
+not bump for this feature, and `activegraph migrate` is not
+required to upgrade pre-T3 databases — pre-T3 forks have no
+`fork.override.applied` events and replay bit-identically to
+pre-T3 behavior (frame predicate
+`replay_of_pre_existing_fork_without_override_unchanged`).
+
+The attested `value` is JSON, not an arbitrary Python object. Per
+Quinn's adversary repro against `inner:d5bc55f`
+(`frames/t3-implement-cli-set-flag.adversary.log`, Bug D), a value
+that Pydantic can coerce but `json.dumps` cannot serialize
+(`datetime`, `Decimal`, `UUID`, `Path`, and equivalent pack-specific
+types) MUST be normalized through Pydantic JSON mode before the
+event is minted. The contract responsibility is: validate/coerce via
+the pack schema, JSON-normalize the coerced value, then write the
+attestation event. A half-built fork run caused by sqlite payload
+serialization failure is not a legal D-3 outcome.
+
+### (d) D-4 LOCKED — Pydantic field-validator coercion
+
+Type coercion goes through `Pack.settings_schema`'s field
+validators, per `inner:6e167ae` plus edge-case documentation at
+`inner:d2ba42e`. The CLI accepts a raw string; the value
+written into the event payload is the Pydantic-coerced typed
+value (float, int, bool, str, nested model, ...). Coercion
+failure raises `InvalidOverrideError` through the D-2 seam, so
+the user sees one diagnostic shape regardless of whether the
+failure was an unknown key, a constraint violation, or a
+coercion error.
+
+The strings-only (a) alternative was rejected because every
+downstream pack consumer would then carry its own coercion
+boilerplate (re-inventing what the pack's settings schema
+already declares). The infer-int/float/bool-from-text (b)
+alternative was rejected because string-like settings (a regex
+pattern, a path, an enum) would silently coerce wrong on
+values that happen to parse as numbers. The explicit
+`--set foo:float=0.7` typed form (c) was rejected as
+ergonomic friction for the common case where the schema
+already knows the type.
+
+### (e) Supersedes v1.0.1 #3 for the path-only construction path
+
+The v1.0.1 #3 hand-raised `TypeError` requiring **both** `path`
+and `run_id` at `SQLiteEventStore.__init__` is now superseded
+for the file-level construction case. Per `inner:d5bc55f`
+(activegraph/store/sqlite.py:185+), the constructor accepts a
+path-only call (`SQLiteEventStore(path)`), and a new
+`_bind_run_id(run_id)` method attaches the run after
+construction so the per-run protocol surface (`append(event)`,
+`iter_events()`, ...) continues to function. `Runtime` binds the
+run_id on attach; the file-level mode is for the override
+projector, replay forensics, and the
+`test_fork_set_persistence` / `test_fork_set_replay` predicates
+that need to read events across multiple `run_id`s in one file.
+
+Two forensic helpers ship with the loosening:
+
+- `load(run_id) → list[Event]` — read all events for a given
+  run from a path-only-constructed store.
+- `runs() → list[str]` — enumerate all run ids in the file,
+  including orphan-event runs the persistence-test fixtures
+  emit through `Graph` without an explicit `upsert_run`.
+
+`append(...)` grows a kwargs form
+(`append(run_id=..., event_type=..., payload=...)`) that mints
+a synthetic event with a generated id, used by the override
+projector to inject `fork.override.applied` events into forked
+runs without tripping the `UNIQUE(id, run_id)` constraint (the
+generated id walks past the parent-run prefix's max id).
+
+The v1.0.1 #3 diagnostic prose is preserved as archeology — its
+"For most cases, use Runtime(graph, persist_to=...)" hint
+remains correct for the common case; it is only the
+*required-positional* enforcement that v1.1 #10 loosens. The
+diagnostic now fires on path-missing alone:
+
+    SQLiteEventStore requires a path. For most cases, use
+    Runtime(graph, persist_to='path/to/trace.sqlite') instead,
+    which handles run_id automatically.
+
+Per `inner:d5bc55f`, `tests/test_v1_0_1_patches.py` is updated
+to assert the loosened shape (path required, run_id optional)
+rather than the v1.0.1 #3 both-required shape; the v1.0.1 #3
+test that asserted the both-required `TypeError` is the test
+the supersession replaces.
+
+### (f) Closure of v1.1 #2's drift gate against `--set`
+
+The T2 spec-vs-impl drift gate (`v1.1 #2 closure`) sees `--set`
+on both the doc-surface side (eight markdown files referencing
+`--set` per the t3 frame yaml's goal context) and the
+CLI-surface side (the new `activegraph fork --set` option in
+`activegraph/cli/main.py`). The binding closure between T2 and
+T3 is anchored by
+`tests/test_fork_set_replay.py::test_t2_drift_gate_passes_after_set_lands_without_allowlist_entry`
+per `inner:d5bc55f`: with `--set` implemented, no
+`cli_flag_drift_allowlist.toml` entry is required to keep the
+gate green. The allowlist's `--set` entry (if one was added as
+a tactical bridge during the rc1→T3 period) is the entry that
+v1.1 #10 removes; the gate's resolution coupling
+(`frames/t3-implement-cli-set-flag.status` reading `closed`)
+is the mechanism that retires any frame-pinned entry on its
+own per T2 D-2 (i).
+
+### (g) Ancillary surface settled by the same landing
+
+Two small surface changes also ship in `inner:d5bc55f`,
+captured here so the contract doesn't trail the code:
+
+- `activegraph/store/url.py` accepts `sqlite:<abspath>` as a
+  shorthand alongside the SQLAlchemy convention
+  (`sqlite:///<abspath>`). The forensic CLI paths and the
+  override projector use the shorthand; existing SQLAlchemy-
+  style URLs continue to parse unchanged.
+- `activegraph/packs/diligence/settings.py` gains
+  `support_threshold` to give the test surface a non-trivial
+  numeric field for D-1/D-2/D-4 exercise; the
+  `diligence_pack` export alias on
+  `activegraph/packs/diligence/__init__.py` is exposed for the
+  same reason. Neither change widens the pack's public
+  settings surface beyond what was already implied by
+  `DiligenceSettings`'s schema.
+
+### Predicates this amendment locks
+
+From the t3 frame yaml's `success_criteria` block:
+
+- `cli_accepts_set_with_valid_key_equals_value` — covered by
+  `tests/test_cli_fork_set.py`.
+- `cli_rejects_malformed_set_per_D2_decision` — covered by the
+  same file plus
+  `boundary_anchored_test_for_D2_validation_moment` per (b).
+- `fork_record_stores_set_override` — covered by
+  `tests/test_fork_set_persistence.py`.
+- `replay_honors_set_override_per_D1_decision` — covered by
+  `tests/test_fork_set_replay.py`.
+- `replay_of_pre_existing_fork_without_override_unchanged` —
+  covered by the same file per (c).
+- `schema_migration_upgrades_existing_db_on_first_run_no_data_loss`
+  — vacuously satisfied per (c): no schema bump.
+- `contract_v1_1_1_amended_with_locked_set_semantics` — closed
+  by this amendment.
+- `boundary_anchored_test_for_D2_validation_moment` — see (b).
+
+### What v1.1 #10 deliberately does NOT change
+
+- The `Tool.to_definition()` provider asymmetry (v1.0.1 #5(c)
+  clause 2 / v1.1 #7-and-beyond) is unchanged.
+- The reason-code taxonomy (v0.6 #11) is unchanged.
+  `InvalidOverrideError` is a `ValueError` subclass surfaced as
+  a CLI diagnostic, not an LLM/budget reason code, and does not
+  route through the `behavior.failed` machinery.
+- The `--memo` and `--search` halves of v1.1 #1 remain
+  unimplemented; `v1.1-plan.md` F-2 / F-3 are the canonical
+  backlog entries.
+- The Python-snippet drift gate (v1.1 #2 expansion) is
+  unchanged; the `--set` CLI invocations in
+  `docs/cookbook/common-patterns.md` and `docs/quickstart.md`
+  are now covered by the T2 static-AST half, not the
+  executable-snippet half.
+
 ## v1.1 #7 and beyond
 
 The remaining v1.1 scope (from CONTRACT v1.0 PR-G end-of-series

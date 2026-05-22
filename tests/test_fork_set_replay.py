@@ -167,6 +167,45 @@ def test_replay_raises_divergence_on_conflicting_set_events(tmp_path: Path) -> N
         runtime.run_until_idle()
 
 
+def test_cli_replay_reports_divergence_without_traceback(tmp_path: Path) -> None:
+    """ReplayDivergenceError reaches the documented CLI exit code, not a traceback."""
+    db = tmp_path / "run.db"
+    parent_id = _seed_run_with_diligence(db)
+
+    result = _run_cli([
+        "fork", f"sqlite:{db}",
+        "--run-id", parent_id,
+        "--at-event", "evt_001",
+        "--set", "diligence.confidence_threshold_for_review=0.7",
+        "--json",
+    ])
+    assert result.returncode == 0, result.stderr
+    import json
+    fork_id = json.loads(result.stdout)["new_run_id"]
+
+    store = SQLiteEventStore(str(db))
+    store.append(
+        run_id=fork_id,
+        event_type="fork.override.applied",
+        payload={
+            "pack": {"name": "diligence", "version": "1.0"},
+            "key": "confidence_threshold_for_review",
+            "value": 0.95,
+            "schema_constraint_snapshot": {"type": "float"},
+        },
+    )
+
+    replay_result = _run_cli([
+        "replay", f"sqlite:{db}",
+        "--run-id", fork_id,
+        "--json",
+    ])
+
+    assert replay_result.returncode == 5
+    assert "ReplayDivergenceError" in replay_result.stderr
+    assert "Traceback" not in replay_result.stderr
+
+
 def test_replay_idempotent_on_same_value_re_set(tmp_path: Path) -> None:
     """D-1: same-value re-set is idempotent per §3 immutability."""
     db = tmp_path / "run.db"
