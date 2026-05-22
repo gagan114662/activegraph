@@ -196,9 +196,9 @@ class OpenAIProvider(LLMProvider):
         if output_schema is not None and not tool_calls:
             parsed = _parse_structured(text, output_schema)
 
-        usage = getattr(raw, "usage", None)
-        in_tok = int(getattr(usage, "prompt_tokens", 0) or 0)
-        out_tok = int(getattr(usage, "completion_tokens", 0) or 0)
+        usage = _value(raw, "usage") or {}
+        in_tok = int(_value(usage, "prompt_tokens") or 0)
+        out_tok = int(_value(usage, "completion_tokens") or 0)
         cost = self.estimate_cost(
             input_tokens=in_tok, output_tokens=out_tok, model=model
         )
@@ -207,9 +207,9 @@ class OpenAIProvider(LLMProvider):
         # gate on specific strings — "stop", "length", "content_filter"
         # all flow through as-is; downstream callers can inspect.
         finish = "stop"
-        choices = getattr(raw, "choices", None) or []
-        if choices:
-            finish = str(getattr(choices[0], "finish_reason", None) or "stop")
+        choice = _first_choice(raw)
+        if choice is not None:
+            finish = str(_value(choice, "finish_reason") or "stop")
 
         return LLMResponse(
             raw_text=text,
@@ -218,7 +218,7 @@ class OpenAIProvider(LLMProvider):
             output_tokens=out_tok,
             cost_usd=cost,
             latency_seconds=latency,
-            model=getattr(raw, "model", model),
+            model=_value(raw, "model") or model,
             finish_reason=finish,
             seed=None,
             cache_hit=False,
@@ -303,13 +303,13 @@ class OpenAIProvider(LLMProvider):
 
 def _extract_text(raw: Any) -> str:
     """Pull assistant text from an OpenAI ``ChatCompletion``."""
-    choices = getattr(raw, "choices", None) or []
-    if not choices:
+    choice = _first_choice(raw)
+    if choice is None:
         return ""
-    message = getattr(choices[0], "message", None)
+    message = _value(choice, "message")
     if message is None:
         return ""
-    content = getattr(message, "content", None)
+    content = _value(message, "content")
     if content is None:
         return ""
     if isinstance(content, str):
@@ -393,13 +393,13 @@ def _tool_call_to_openai(tc: ToolCall) -> dict[str, Any]:
 
 
 def _extract_tool_calls(raw: Any) -> list[ToolCall]:
-    choices = getattr(raw, "choices", None) or []
-    if not choices:
+    choice = _first_choice(raw)
+    if choice is None:
         return []
-    message = getattr(choices[0], "message", None)
+    message = _value(choice, "message")
     if message is None:
         return []
-    raw_calls = getattr(message, "tool_calls", None) or []
+    raw_calls = _value(message, "tool_calls") or []
     out: list[ToolCall] = []
     for raw_call in raw_calls:
         call_id = _value(raw_call, "id") or ""
@@ -428,6 +428,13 @@ def _value(obj: Any, key: str) -> Any:
     if isinstance(obj, Mapping):
         return obj.get(key)
     return getattr(obj, key, None)
+
+
+def _first_choice(raw: Any) -> Any:
+    choices = _value(raw, "choices") or []
+    if not choices:
+        return None
+    return choices[0]
 
 
 def _classify_provider_exception(e: Exception) -> str:
