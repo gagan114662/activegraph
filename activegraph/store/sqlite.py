@@ -185,32 +185,141 @@ class SQLiteEventStore:
     def __init__(
         self, path: Optional[str] = None, run_id: Optional[str] = None
     ) -> None:
-        if path is None or run_id is None:
-            missing = "run_id" if path is not None else "path and a run_id"
+        if path is None:
             raise TypeError(
-                f"SQLiteEventStore requires a {missing}. For most cases, "
-                f"use Runtime(graph, persist_to='path/to/trace.sqlite') "
-                f"instead, which handles run_id automatically. If you "
-                f"need a per-run handle (migration, conformance test, "
-                f"trace inspection), pass both explicitly: "
-                f"SQLiteEventStore('path/to/trace.sqlite', run_id='run_...')."
+                "SQLiteEventStore requires a path. For most cases, "
+                "use Runtime(graph, persist_to='path/to/trace.sqlite') "
+                "instead, which handles run_id automatically."
             )
         self.path = path
-        self.run_id = run_id
+        # T3: run_id is now optional at construction. When None, this
+        # instance is in "file-level" mode: per-event-log forensic reads
+        # via .load(run_id), .runs(), and the kwargs-form .append().
+        # Runtime attachment binds the run_id post-construction via
+        # _bind_run_id() so the per-run protocol surface still works.
+        self.run_id = run_id  # type: ignore[assignment]
         self._conn = sqlite3.connect(path, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         _ensure_schema(self._conn)
 
+    # ---------- T3: file-level forensic helpers ----------
+
+    def _bind_run_id(self, run_id: str) -> None:
+        """Bind a run_id to a path-only-constructed store. Called by
+        Runtime after construction so the per-run protocol surface
+        (`append(event)`, `iter_events()`, etc.) functions normally.
+        """
+        if self.run_id is not None and self.run_id != run_id:
+            raise RuntimeError(
+                f"SQLiteEventStore at {self.path!r} already bound to "
+                f"run_id={self.run_id!r}; refusing to rebind to {run_id!r}"
+            )
+        self.run_id = run_id
+
+    def load(self, run_id: str) -> list[Event]:
+        """File-level reader: return all events for a run. T3 forensic
+        helper used by tests and the override projector.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM events WHERE run_id = ? ORDER BY seq",
+            (run_id,),
+        ).fetchall()
+        return [_row_to_event(r) for r in rows]
+
+    def runs(self) -> list[str]:
+        """File-level reader: return all run_ids in the file."""
+        rows = self._conn.execute(
+            "SELECT run_id FROM runs ORDER BY created_at"
+        ).fetchall()
+        out = [r["run_id"] for r in rows]
+        # Catch any orphan events (no runs row); the persistence-test
+        # fixtures emit through Graph without an explicit upsert_run.
+        rows = self._conn.execute(
+            "SELECT DISTINCT run_id FROM events"
+        ).fetchall()
+        for r in rows:
+            if r["run_id"] not in out:
+                out.append(r["run_id"])
+        return out
+
     # ---------- EventStore protocol ----------
 
-    def append(self, event: Event) -> None:
-        row = encode_event(event)
+    def append(
+        self,
+        event: Optional[Event] = None,
+        *,
+        run_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        payload: Optional[dict[str, Any]] = None,
+        actor: Optional[str] = None,
+        frame_id: Optional[str] = None,
+        caused_by: Optional[str] = None,
+        timestamp: Optional[str] = None,
+        event_id: Optional[str] = None,
+    ) -> None:
+        """Append an event.
+
+        Two forms:
+          - Per-run protocol:  `append(event)`  (binds to `self.run_id`)
+          - T3 file-level:     `append(run_id=..., event_type=..., payload=...)`
+            mints a synthetic event with a generated id and a default
+            timestamp. Used by replay forensics + the override projector
+            tests to inject `fork.override.applied` events post-fork.
+        """
+        if event is not None:
+            row = encode_event(event)
+            bound = self.run_id
+            if bound is None:
+                raise RuntimeError(
+                    "SQLiteEventStore.append(event) requires a bound run_id; "
+                    "call _bind_run_id() or construct with run_id=..."
+                )
+            self._conn.execute(
+                """
+                INSERT INTO events (id, type, actor, payload, frame_id, caused_by, timestamp, run_id)
+                VALUES (:id, :type, :actor, :payload, :frame_id, :caused_by, :timestamp, :run_id)
+                """,
+                {**row, "run_id": bound},
+            )
+            return
+
+        # T3 kwargs form
+        if run_id is None or event_type is None:
+            raise TypeError(
+                "SQLiteEventStore.append: pass either an Event or "
+                "(run_id=..., event_type=..., payload=...)"
+            )
+
+        import json as _json
+        from activegraph.runtime.runtime import _now_iso
+
+        if event_id is None:
+            # Pick the next logical id past whatever's already in this run
+            # so injecting events into a forked run (which copies parent
+            # event ids verbatim) doesn't trip the UNIQUE(id, run_id)
+            # constraint.
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            event_id = f"evt_{int(row['c']) + 1:03d}"
+        eid = event_id
+        ts = timestamp or _now_iso()
         self._conn.execute(
             """
             INSERT INTO events (id, type, actor, payload, frame_id, caused_by, timestamp, run_id)
-            VALUES (:id, :type, :actor, :payload, :frame_id, :caused_by, :timestamp, :run_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            {**row, "run_id": self.run_id},
+            (
+                eid,
+                event_type,
+                actor,
+                _json.dumps(payload or {}),
+                frame_id,
+                caused_by,
+                ts,
+                run_id,
+            ),
         )
 
     def iter_events(

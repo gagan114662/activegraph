@@ -421,12 +421,19 @@ def cmd_replay(url: str, run_id: str, as_json: bool) -> None:
         click.echo(f"{url}: {e}", err=True)
         raise SystemExit(EXIT_NOT_FOUND)
 
-    summary = {
+    summary: dict[str, Any] = {
         "run_id": run_id,
         "events": len(rt.graph.events),
         "objects": len(rt.graph.all_objects()),
         "relations": len(rt.graph.all_relations()),
     }
+    # T3 D-1: surface projected pack-setting overrides so callers can
+    # confirm replay reads from the event log, not ambient state.
+    overrides_state = getattr(rt, "_fork_overrides", None) or {}
+    if overrides_state:
+        summary["effective_settings"] = {
+            pack: dict(kv) for pack, kv in overrides_state.items()
+        }
     if as_json:
         click.echo(_json.dumps(summary))
         return
@@ -434,6 +441,11 @@ def cmd_replay(url: str, run_id: str, as_json: bool) -> None:
     click.echo(f"events:    {summary['events']}")
     click.echo(f"objects:   {summary['objects']}")
     click.echo(f"relations: {summary['relations']}")
+    if overrides_state:
+        click.echo("effective_settings:")
+        for pack, kv in overrides_state.items():
+            for k, v in kv.items():
+                click.echo(f"  {pack}.{k} = {v}")
 
 
 # ---- fork ---------------------------------------------------------------
@@ -449,6 +461,18 @@ def cmd_replay(url: str, run_id: str, as_json: bool) -> None:
     "to_url",
     default=None,
     help="Destination store URL. Defaults to the source store.",
+)
+@click.option(
+    "--set",
+    "set_pairs",
+    multiple=True,
+    metavar="<pack>.<key>=<value>",
+    help=(
+        "Override a pack setting at fork creation. Repeat to compose. "
+        "T3 (CONTRACT v1.1 #1): value is coerced through the pack's "
+        "Pydantic settings_schema and recorded as a "
+        "`fork.override.applied` event in the new run."
+    ),
 )
 @click.option(
     "--record",
@@ -469,6 +493,7 @@ def cmd_fork(
     at_event: str,
     label: Optional[str],
     to_url: Optional[str],
+    set_pairs: tuple[str, ...],
     record: bool,
     as_json: bool,
 ) -> None:
@@ -499,6 +524,50 @@ def cmd_fork(
         click.echo(str(e), err=True)
         raise SystemExit(EXIT_USAGE_ERROR)
 
+    # T3 D-2: validate --set PRE-event. Parse + coerce all overrides
+    # before minting the fork; an InvalidOverrideError on any one of
+    # them aborts the whole fork (no partial state, no override event).
+    coerced_overrides = []
+    if set_pairs:
+        from activegraph.core.overrides import (
+            InvalidOverrideError,
+            validate_override,
+        )
+
+        for raw in set_pairs:
+            if "=" not in raw:
+                click.echo(
+                    f"--set value {raw!r} is malformed: expected "
+                    f"<pack>.<key>=<value>",
+                    err=True,
+                )
+                raise SystemExit(EXIT_USAGE_ERROR)
+            dotted_key, _, value = raw.partition("=")
+            if "." not in dotted_key:
+                click.echo(
+                    f"--set key {dotted_key!r} must be of the form "
+                    f"<pack>.<key>; got no '.' in {raw!r}",
+                    err=True,
+                )
+                raise SystemExit(EXIT_USAGE_ERROR)
+            pack_name, _, field_key = dotted_key.partition(".")
+
+            pack = _resolve_pack(pack_name)
+            if pack is None:
+                click.echo(
+                    f"InvalidOverrideError: unknown pack {pack_name!r} "
+                    f"(in --set {raw!r})",
+                    err=True,
+                )
+                raise SystemExit(EXIT_USAGE_ERROR)
+
+            try:
+                coerced = validate_override(field_key, value, pack)
+            except InvalidOverrideError as exc:
+                click.echo(f"InvalidOverrideError: {exc}", err=True)
+                raise SystemExit(EXIT_USAGE_ERROR)
+            coerced_overrides.append(coerced)
+
     new_run_id = IDGen().run()
     try:
         if parsed.scheme == "sqlite":
@@ -527,24 +596,87 @@ def cmd_fork(
         click.echo(str(e), err=True)
         raise SystemExit(EXIT_NOT_FOUND)
 
-    out = {
+    # T3 D-3: mint one fork.override.applied event per coerced override,
+    # post fork_run so it lands in the new run's tail. The payload
+    # carries the full attestation shape (pack identity + typed value
+    # + schema constraint snapshot) so replay is self-sufficient.
+    overrides_dict: dict[str, Any] = {}
+    if coerced_overrides:
+        if parsed.scheme == "sqlite":
+            from activegraph.store.sqlite import SQLiteEventStore
+
+            file_store = SQLiteEventStore(parsed.sqlite_path or "")
+            # T3: event ids are per-run logical and copied verbatim
+            # during fork_run. Start the override event ids past the
+            # last copied seq so we don't collide with parent ids.
+            next_evt = n + 1
+            for co in coerced_overrides:
+                file_store.append(
+                    run_id=new_run_id,
+                    event_type="fork.override.applied",
+                    payload=co.to_event_payload(),
+                    event_id=f"evt_{next_evt:03d}",
+                )
+                next_evt += 1
+                overrides_dict[f"{co.pack_name}.{co.key}"] = co.value
+                n += 1
+            file_store.close()
+        else:
+            from activegraph.store.postgres import PostgresEventStore
+
+            pg = PostgresEventStore(parsed.raw, run_id=new_run_id)
+            for co in coerced_overrides:
+                pg.append(
+                    run_id=new_run_id,
+                    event_type="fork.override.applied",
+                    payload=co.to_event_payload(),
+                )
+                overrides_dict[f"{co.pack_name}.{co.key}"] = co.value
+                n += 1
+
+    out: dict[str, Any] = {
         "parent_run_id": run_id,
         "new_run_id": new_run_id,
         "at_event": at_event,
         "label": label,
         "events_copied": n,
     }
+    if overrides_dict:
+        out["overrides"] = overrides_dict
     if as_json:
         if record:
             out["recording"] = True
         click.echo(_json.dumps(out))
         return
     click.echo(f"forked {run_id} at {at_event} -> {new_run_id} ({n} events)")
+    for okey, oval in overrides_dict.items():
+        click.echo(f"  override: {okey}={oval}")
     if record:
         click.echo(
             "  recording fork: load this run without replay_strict=True to "
             "accept new LLM/tool cache entries."
         )
+
+
+def _resolve_pack(pack_name: str):
+    """Resolve a pack name to its Pack instance. T3 helper for fork --set.
+
+    First checks bundled packs (diligence is the v0.9 reference);
+    then falls back to the activegraph.packs entry-point discovery so
+    third-party packs participate too.
+    """
+    if pack_name == "diligence":
+        from activegraph.packs.diligence import pack as p
+        return p
+    try:
+        from activegraph.packs import discover, load_by_name
+
+        for entry in discover():
+            if entry.name == pack_name:
+                return load_by_name(pack_name)
+    except Exception:
+        pass
+    return None
 
 
 # ---- diff ---------------------------------------------------------------

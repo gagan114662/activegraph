@@ -83,4 +83,7 @@ pack = Pack(
 )
 
 
-__all__ = ["pack", "DiligenceSettings"]
+diligence_pack = pack
+
+
+__all__ = ["pack", "diligence_pack", "DiligenceSettings"]

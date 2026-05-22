@@ -39,6 +39,12 @@ class DiligenceSettings(BaseModel):
         description="Claims with confidence ≥ this threshold participate in "
                     "contradiction detection.",
     )
+    support_threshold: float = Field(
+        default=0.8, ge=0.0, le=1.0,
+        description="Minimum aggregate support score for a claim to advance "
+                    "to memo synthesis. T3 D-4 adds this as a Pydantic-coerced "
+                    "override target alongside confidence_threshold_for_review.",
+    )
     min_questions: int = Field(
         default=8, ge=1,
         description="Minimum number of thesis questions the generator produces.",

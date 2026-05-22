@@ -130,6 +130,17 @@ def parse_store_url(url: str) -> StoreURL:
             # "sqlite://host/path" — non-standard; treat host as part of
             # the path component for forgiveness in tests.
             path = f"//{parsed.netloc}{path}"
+        # T3: `sqlite:<absolute-path>` (single colon-slash) is a
+        # commonly-used shorthand for an absolute path. urlparse gives
+        # path="/abs/..."; the SQLAlchemy convention `sqlite:///rel`
+        # also yields path="/rel". Distinguish by counting the slashes
+        # right after `sqlite:` in the raw URL: 1 → absolute shorthand,
+        # 3 → SQLAlchemy relative, 4 → SQLAlchemy absolute.
+        post_scheme = url[len(parsed.scheme) + 1:]
+        leading_slashes = len(post_scheme) - len(post_scheme.lstrip("/"))
+        if leading_slashes == 1 and path:
+            # Absolute-shorthand: preserve the leading slash.
+            return StoreURL(scheme="sqlite", raw=url, sqlite_path=path)
         if not path:
             raise _invalid_url(
                 f"sqlite URL {url!r} has no path",

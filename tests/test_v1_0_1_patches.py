@@ -204,16 +204,23 @@ def test_sqlite_event_store_bare_call_hints_at_persist_to():
     msg = str(exc_info.value)
     assert "persist_to=" in msg
     assert "Runtime(" in msg
-    assert "path and a run_id" in msg
+    # T3 (v1.1): path-only construction is now allowed (file-level
+    # forensic mode), so the message no longer requires both args.
+    assert "path" in msg
 
 
-def test_sqlite_event_store_missing_run_id_hints_at_persist_to():
-    with pytest.raises(TypeError) as exc_info:
-        SQLiteEventStore("/tmp/some.db")  # type: ignore[call-arg]
-    msg = str(exc_info.value)
-    assert "run_id" in msg
-    assert "persist_to=" in msg
-    assert "Runtime(" in msg
+def test_sqlite_event_store_path_only_constructs_in_file_level_mode(tmp_path):
+    # T3 (v1.1): SQLiteEventStore(path) without a run_id is the
+    # file-level forensic-handle constructor used by `fork --set` and
+    # the override-projector tests. Per-run protocol methods require
+    # a subsequent _bind_run_id() (or use the kwargs-form append).
+    store = SQLiteEventStore(str(tmp_path / "trace.sqlite"))
+    try:
+        assert store.run_id is None
+        # File-level helpers work without a run_id binding.
+        assert store.runs() == []
+    finally:
+        store.close()
 
 
 def test_sqlite_event_store_explicit_args_still_construct(tmp_path):

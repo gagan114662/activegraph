@@ -236,6 +236,7 @@ class Runtime:
         *,
         persist_to: Optional[str] = None,
         store: Optional[Any] = None,
+        clock: Optional[Any] = None,
         replay_strict: bool = False,
         llm_provider: Optional[LLMProvider] = None,
         replay_llm_cache: bool = False,
@@ -250,6 +251,11 @@ class Runtime:
         metrics: Optional[Metrics] = None,
     ) -> None:
         self.graph = graph
+        # T3: optional clock override at Runtime construction time, so
+        # tests can pin determinism without threading the clock through
+        # an external Graph(...) constructor.
+        if clock is not None:
+            self.graph.clock = clock
         self.frame = frame
         self.policy = policy
         self.budget = Budget(budget or {})
@@ -344,6 +350,19 @@ class Runtime:
                 frame_id=self.frame.id if self.frame else None,
             )
         if store is not None:
+            # T3: bind run_id late on a path-only-constructed
+            # SQLiteEventStore. Lets `Runtime(graph=..., store=SQLite(path))`
+            # work without forcing the test surface to know graph.run_id.
+            if getattr(store, "run_id", None) is None and hasattr(store, "_bind_run_id"):
+                store._bind_run_id(graph.run_id)
+                if hasattr(store, "upsert_run"):
+                    try:
+                        store.upsert_run(
+                            created_at=_now_iso(),
+                            frame_id=self.frame.id if self.frame else None,
+                        )
+                    except Exception:
+                        pass
             graph.attach_store(store)
 
         # ---- v0.9: pack state (lazy) ----
@@ -356,6 +375,10 @@ class Runtime:
         self._pack_state = None  # type: ignore[assignment]
         self._pack_behaviors: list = []
         self._pack_tools: list = []
+        # T3 D-1: per-run override state projected from fork.override.applied
+        # events. Empty for runs without --set overrides. Populated by
+        # Runtime.load via _project_fork_overrides.
+        self._fork_overrides: dict[str, dict[str, Any]] = {}
 
         # ---- v1.0.2.post1 #1 (b): eager cross-provider validation ----
         # First run the bulk validation pass against whatever's already
@@ -554,6 +577,35 @@ class Runtime:
         self.budget.start()
         self.graph.emit(ev)
         self.run_until_idle()
+
+    def emit(
+        self,
+        event_type: str,
+        payload: Optional[dict[str, Any]] = None,
+        *,
+        actor: Optional[str] = None,
+        frame_id: Optional[str] = None,
+        caused_by: Optional[str] = None,
+    ) -> Event:
+        """Emit a single event onto the graph + queue.
+
+        T3 convenience that mirrors the typical seed pattern. Keeps
+        callers from threading the full ``Event(...)`` constructor.
+        """
+        self._ensure_registry()
+        ev = Event(
+            id=self.graph.ids.event(),
+            type=event_type,
+            payload=dict(payload or {}),
+            actor=actor,
+            frame_id=frame_id or (self.frame.id if self.frame else None),
+            caused_by=caused_by,
+            timestamp=self.graph.clock.now(),
+        )
+        if self.budget._start is None:
+            self.budget.start()
+        self.graph.emit(ev)
+        return ev
 
     def run_until_idle(self) -> None:
         self._ensure_registry()
@@ -2077,6 +2129,7 @@ class Runtime:
         path: str,
         run_id: Optional[str] = None,
         *,
+        store: Optional[Any] = None,
         behaviors: Optional[Iterable[Union[Behavior, RelationBehavior]]] = None,
         frame: Optional[Frame] = None,
         policy: Optional[Policy] = None,
@@ -2103,7 +2156,56 @@ class Runtime:
 
         v0.8: ``path`` accepts a URL (sqlite:///... or postgres://...)
         in addition to a bare SQLite path. Backward-compatible.
+
+        T3 (v1.1): the first positional may be a run_id when `store=`
+        is also passed — the caller has a pre-opened store and just
+        wants to materialize the run. The override projector folds
+        `fork.override.applied` events; conflicting values on the same
+        key raise ReplayDivergenceError per D-1 §"log is truth".
         """
+        if store is not None:
+            # T3: store-form. `path` slot is treated as run_id.
+            chosen = run_id or path
+            if chosen is None:
+                raise FileNotFoundError("Runtime.load(store=...) requires a run_id")
+            # Rebind the file-level store to this run for the protocol surface.
+            if hasattr(store, "_bind_run_id") and getattr(store, "run_id", None) in (None, chosen):
+                store._bind_run_id(chosen)
+            graph = Graph(ids=IDGen(), run_id=chosen)
+            if hasattr(store, "load"):
+                events = list(store.load(chosen))
+            else:
+                events = list(store.iter_events())
+            for ev in events:
+                graph._replay_event(ev)  # noqa: SLF001
+            graph.ids.reseed_from_events(events)
+            # T3 D-1: override projector — divergence on conflicting values.
+            _project_fork_overrides(events)
+            graph.attach_store(store)
+            cache = LLMCache.from_events(events) if replay_llm_cache else None
+            from activegraph.tools.cache import ToolCache as _ToolCache
+            tcache = _ToolCache.from_events(events) if replay_tool_cache else None
+            rt = cls(
+                graph,
+                behaviors=behaviors,
+                frame=frame,
+                policy=policy,
+                budget=budget,
+                seed=seed,
+                replay_strict=replay_strict,
+                llm_provider=llm_provider,
+                replay_llm_cache=replay_llm_cache,
+                llm_cache=cache,
+                tools=tools,
+                replay_tool_cache=replay_tool_cache,
+                tool_cache=tcache,
+                replay_reinvoke_deterministic=replay_reinvoke_deterministic,
+                metrics=metrics,
+            )
+            rt._fork_overrides = _project_fork_overrides(events)
+            _requeue_unfired(rt, events)
+            return rt
+
         chosen = run_id or _most_recent_run_id(path)
         if chosen is None:
             raise FileNotFoundError(f"no runs found in {path}")
@@ -2114,6 +2216,8 @@ class Runtime:
         for ev in events:
             graph._replay_event(ev)  # noqa: SLF001 — internal seam
         graph.ids.reseed_from_events(events)
+        # T3 D-1: override projector — divergence on conflicting values.
+        _project_fork_overrides(events)
         graph.attach_store(store)
 
         # If we're caching, harvest llm.responded events from the log so
@@ -2145,6 +2249,9 @@ class Runtime:
         # Make sure the run row exists (older files might predate it; in v0.5
         # they shouldn't, but be defensive).
         store.upsert_run(created_at=_now_iso())
+        # T3 D-1: stash the projected override state for `replay --json`
+        # to surface as `effective_settings`.
+        rt._fork_overrides = _project_fork_overrides(events)
 
         # Re-queue events whose behaviors never fired (CONTRACT v0.5 diff #8).
         # Events that already have a behavior.started referencing them are
@@ -2386,6 +2493,42 @@ def _now_iso() -> str:
     )
 
 
+def _project_fork_overrides(events: list[Event]) -> dict[str, dict[str, Any]]:
+    """Fold `fork.override.applied` events into a {pack: {key: value}} map.
+
+    T3 D-1: log is truth. First write of a (pack, key) records the value.
+    A subsequent event with the same value is idempotent. A subsequent
+    event with a different value raises :class:`ReplayDivergenceError`
+    per CONTRACT §v0.5 #7.
+    """
+    state: dict[str, dict[str, Any]] = {}
+    last_event_id: dict[tuple[str, str], str] = {}
+    for ev in events:
+        if ev.type != "fork.override.applied":
+            continue
+        p = ev.payload or {}
+        pack = (p.get("pack") or {}).get("name") or "?"
+        key = p.get("key")
+        if key is None:
+            continue
+        value = p.get("value")
+        bucket = state.setdefault(pack, {})
+        if key not in bucket:
+            bucket[key] = value
+            last_event_id[(pack, key)] = ev.id
+            continue
+        if bucket[key] == value:
+            # Idempotent re-set — log-is-truth tolerates same-value duplicates
+            # per CONTRACT v0.5 §3 (immutability).
+            continue
+        raise ReplayDivergenceError(
+            event_id=ev.id,
+            expected=f"{pack}.{key}={bucket[key]!r}",
+            actual=f"{pack}.{key}={value!r}",
+        )
+    return state
+
+
 def _first_goal(graph: Graph) -> Optional[str]:
     for e in graph.events:
         if e.type == "goal.created":
@@ -2395,7 +2538,7 @@ def _first_goal(graph: Graph) -> Optional[str]:
 
 def _most_recent_run_id(path_or_url: str) -> Optional[str]:
     """Backend-aware most_recent_run_id used by Runtime.load."""
-    if "://" in path_or_url:
+    if "://" in path_or_url or path_or_url.startswith("sqlite:"):
         from activegraph.store.url import parse_store_url
 
         parsed = parse_store_url(path_or_url)
@@ -2418,6 +2561,11 @@ def _open_sqlite_store(path_or_url: str, run_id: str):
     Anything containing ``://`` is parsed as a connection URL.
     """
     if "://" in path_or_url:
+        from activegraph.store import open_store
+
+        return open_store(path_or_url, run_id=run_id)
+    if path_or_url.startswith("sqlite:"):
+        # T3: `sqlite:<abspath>` shorthand routes through the URL parser.
         from activegraph.store import open_store
 
         return open_store(path_or_url, run_id=run_id)
