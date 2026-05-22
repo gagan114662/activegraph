@@ -25,11 +25,12 @@ What this provider does:
     shape as Anthropic's. Defaults track GPT-4o-family rates current
     in 2026; override via the ``pricing=`` constructor kwarg.
 
-Tool use is **not yet supported**. ``complete()`` accepts the ``tools=``
-kwarg for Protocol compatibility, but a non-empty list raises
-:class:`LLMBehaviorError` with ``reason="llm.network_error"`` and a
-message pointing at v1.1 for tool-shape translation. CONTRACT v1.1
-candidate, filed in v1.1 #7 and beyond.
+Tool use translates the framework's internal tool definition shape
+(``{"name", "description", "input_schema"}``) to OpenAI chat
+``function`` tools at the provider boundary. Assistant tool-call echoes
+and tool results are likewise translated from the provider-neutral
+``LLMMessage`` shape into OpenAI's ``tool_calls`` / ``tool_call_id``
+message format.
 
 API key comes from ``OPENAI_API_KEY`` — never from code, never from
 a checked-in config. Same loud-failure shape as ``ANTHROPIC_API_KEY``.
@@ -37,6 +38,7 @@ a checked-in config. Same loud-failure shape as ``ANTHROPIC_API_KEY``.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from decimal import Decimal
@@ -45,7 +47,7 @@ from typing import Any, Mapping, Optional
 from activegraph.llm.errors import LLMBehaviorError
 from activegraph.llm.parsing import parse_structured_response as _parse_structured
 from activegraph.llm.provider import LLMProvider
-from activegraph.llm.types import LLMMessage, LLMResponse
+from activegraph.llm.types import LLMMessage, LLMResponse, ToolCall
 
 
 _log = logging.getLogger("activegraph.llm.openai")
@@ -82,6 +84,8 @@ def _pricing_for(
 
 
 class OpenAIProvider(LLMProvider):
+    runtime_parses_output: bool = True
+
     # v1.0.2 #1: provider-aware default model. @llm_behavior(model=None)
     # resolves to this string at registration time. gpt-4o-mini is the
     # cheap, fast member of the GPT-4o family — matches Anthropic's
@@ -151,21 +155,6 @@ class OpenAIProvider(LLMProvider):
         timeout_seconds: float,
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
-        if tools:
-            # CONTRACT v1.0.1 #5: tool-shape translation deferred to v1.1.
-            # Surfaces as the same structured error any other LLM failure
-            # produces, so downstream `behavior.failed` handling is uniform.
-            raise LLMBehaviorError(
-                "llm.network_error",
-                (
-                    "OpenAIProvider does not yet support tool use. "
-                    "Tool-using behaviors should use AnthropicProvider until "
-                    "v1.1, which will add OpenAI tool-shape translation. "
-                    "See CONTRACT v1.0.1 #5 and v1.1 #7-and-beyond."
-                ),
-                payload_extras={"model": model, "tools_count": len(tools)},
-            )
-
         client = self._client()
         openai_messages: list[dict[str, Any]] = []
         if system:
@@ -182,6 +171,8 @@ class OpenAIProvider(LLMProvider):
         }
         if top_p < 1.0:
             kwargs["top_p"] = float(top_p)
+        if tools:
+            kwargs["tools"] = [_tool_to_openai(t) for t in tools]
 
         t0 = time.monotonic()
         try:
@@ -200,8 +191,9 @@ class OpenAIProvider(LLMProvider):
         latency = time.monotonic() - t0
 
         text = _extract_text(raw)
+        tool_calls = _extract_tool_calls(raw)
         parsed: Any = None
-        if output_schema is not None:
+        if output_schema is not None and not tool_calls:
             parsed = _parse_structured(text, output_schema)
 
         usage = getattr(raw, "usage", None)
@@ -230,7 +222,7 @@ class OpenAIProvider(LLMProvider):
             finish_reason=finish,
             seed=None,
             cache_hit=False,
-            tool_calls=None,
+            tool_calls=tool_calls or None,
         )
 
     def estimate_cost(
@@ -330,9 +322,10 @@ def _extract_text(raw: Any) -> str:
 def _message_to_openai(m: LLMMessage) -> dict[str, Any]:
     """Convert an LLMMessage to the OpenAI chat-message shape.
 
-    ``role="tool"`` is preserved (with ``tool_call_id``) for Protocol
-    compatibility, but the tool-use turn loop is rejected upstream in
-    ``complete()`` until v1.1 ships the shape-translation work.
+    ``role="tool"`` becomes OpenAI's tool-result message. An assistant
+    message carrying provider-neutral ``ToolCall`` objects echoes the
+    previous assistant turn in OpenAI's ``tool_calls`` format before
+    the following tool-result message references those IDs.
     """
     if m.role == "tool":
         return {
@@ -340,7 +333,83 @@ def _message_to_openai(m: LLMMessage) -> dict[str, Any]:
             "tool_call_id": m.tool_use_id or "",
             "content": m.content,
         }
+    if m.role == "assistant" and m.tool_calls:
+        return {
+            "role": "assistant",
+            "content": m.content or None,
+            "tool_calls": [_tool_call_to_openai(tc) for tc in m.tool_calls],
+        }
     return {"role": m.role, "content": m.content}
+
+
+def _tool_to_openai(tool: dict[str, Any]) -> dict[str, Any]:
+    name = tool.get("name")
+    description = tool.get("description", "")
+    input_schema = tool.get("input_schema")
+    if (
+        not isinstance(name, str)
+        or not name
+        or not isinstance(description, str)
+        or not isinstance(input_schema, Mapping)
+    ):
+        raise LLMBehaviorError(
+            "llm.prompt_assembly_error",
+            "OpenAI tool definitions must have non-empty string `name`, "
+            "string `description`, and mapping `input_schema` fields.",
+            payload_extras={"tool": dict(tool)},
+        )
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": dict(input_schema),
+        },
+    }
+
+
+def _tool_call_to_openai(tc: ToolCall) -> dict[str, Any]:
+    return {
+        "id": tc.id,
+        "type": "function",
+        "function": {
+            "name": tc.name,
+            "arguments": json.dumps(tc.args, separators=(",", ":")),
+        },
+    }
+
+
+def _extract_tool_calls(raw: Any) -> list[ToolCall]:
+    choices = getattr(raw, "choices", None) or []
+    if not choices:
+        return []
+    message = getattr(choices[0], "message", None)
+    if message is None:
+        return []
+    raw_calls = getattr(message, "tool_calls", None) or []
+    out: list[ToolCall] = []
+    for raw_call in raw_calls:
+        call_id = _value(raw_call, "id") or ""
+        function = _value(raw_call, "function") or {}
+        name = _value(function, "name") or ""
+        arguments = _value(function, "arguments") or "{}"
+        if isinstance(arguments, str):
+            try:
+                args = json.loads(arguments)
+            except Exception:
+                args = {"_raw": arguments}
+        elif isinstance(arguments, Mapping):
+            args = dict(arguments)
+        else:
+            args = {"_raw": arguments}
+        out.append(ToolCall(id=str(call_id), name=str(name), args=dict(args)))
+    return out
+
+
+def _value(obj: Any, key: str) -> Any:
+    if isinstance(obj, Mapping):
+        return obj.get(key)
+    return getattr(obj, key, None)
 
 
 def _classify_provider_exception(e: Exception) -> str:
