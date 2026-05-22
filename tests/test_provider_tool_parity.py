@@ -24,7 +24,7 @@ from activegraph import (
     llm_behavior,
     tool,
 )
-from activegraph.llm import AnthropicProvider, OpenAIProvider
+from activegraph.llm import AnthropicProvider, LLMCache, LLMResponse, OpenAIProvider, ToolCall
 
 
 Case = Literal["happy", "invalid_args", "unknown_tool", "final_parse_failure"]
@@ -455,7 +455,7 @@ def test_openai_tool_arguments_must_decode_to_object() -> None:
         llm_responded = [
             e for e in result.graph.events if e.type == "llm.responded"
         ][0]
-        assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
+        assert llm_responded.payload["tool_calls"][0]["invalid_args_error"]
         assert not [
             e for e in result.graph.events
             if e.type == "object.created"
@@ -479,7 +479,7 @@ def test_openai_invalid_tool_arguments_rejected_for_zero_field_schema() -> None:
         llm_responded = [
             e for e in result.graph.events if e.type == "llm.responded"
         ][0]
-        assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
+        assert llm_responded.payload["tool_calls"][0]["invalid_args_error"]
         assert [
             e.payload.get("error", {}).get("reason")
             for e in result.graph.events
@@ -490,6 +490,85 @@ def test_openai_invalid_tool_arguments_rejected_for_zero_field_schema() -> None:
             if e.type == "object.created"
             and e.payload["object"]["type"] == "answer"
         ]
+
+
+def test_invalid_tool_argument_marker_round_trips_response_dict() -> None:
+    response = LLMResponse(
+        raw_text="",
+        parsed=None,
+        input_tokens=1,
+        output_tokens=1,
+        cost_usd=0,
+        latency_seconds=0.0,
+        model="m",
+        finish_reason="tool_calls",
+        tool_calls=[
+            ToolCall(
+                id="call_1",
+                name="ping",
+                args={},
+                invalid_args_error="OpenAI tool arguments must decode to a JSON object.",
+            )
+        ],
+    )
+
+    tool_call = response.to_dict()["tool_calls"][0]
+    assert (
+        tool_call["invalid_args_error"]
+        == "OpenAI tool arguments must decode to a JSON object."
+    )
+
+
+def test_invalid_tool_argument_marker_round_trips_llm_cache() -> None:
+    result = _run_openai_zero_field_tool_with_arguments('"not an object"')
+    request = next(e for e in result.graph.events if e.type == "llm.requested")
+
+    cached = LLMCache.from_events(result.graph.events).get(
+        request.payload["prompt_hash"]
+    )
+
+    assert cached is not None
+    assert cached.tool_calls is not None
+    assert (
+        cached.tool_calls[0].invalid_args_error
+        == "OpenAI tool arguments must decode to a JSON object."
+    )
+
+
+def test_invalid_tool_argument_marker_round_trips_recorded_fixture() -> None:
+    from activegraph.llm.recorded import _response_from_fixture
+
+    response = _response_from_fixture(
+        {
+            "raw_text": "",
+            "parsed": None,
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "cost_usd": "0",
+            "latency_seconds": 0.0,
+            "model": "m",
+            "finish_reason": "tool_calls",
+            "seed": None,
+            "provider_meta": {},
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "name": "ping",
+                    "args": {},
+                    "invalid_args_error": (
+                        "OpenAI tool arguments must decode to a JSON object."
+                    ),
+                }
+            ],
+        },
+        output_schema=None,
+    )
+
+    assert response.tool_calls is not None
+    assert (
+        response.tool_calls[0].invalid_args_error
+        == "OpenAI tool arguments must decode to a JSON object."
+    )
 
 
 def test_unknown_tool_failure_stream_and_reason_match_across_providers() -> None:
