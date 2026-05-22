@@ -62,6 +62,8 @@ def _pricing_for(model: str, pricing: Mapping[str, Mapping[str, str]]) -> tuple[
 
 
 class AnthropicProvider(LLMProvider):
+    runtime_parses_output: bool = True
+
     # v1.0.2 #1: provider-aware default model. @llm_behavior(model=None)
     # resolves to this string at registration time.
     default_model: str = "claude-sonnet-4-5"

@@ -77,6 +77,7 @@ from activegraph.core.view import View
 from activegraph.frame import Frame
 from activegraph.llm.cache import LLMCache
 from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
+from activegraph.llm.parsing import parse_structured_response as _parse_structured
 from activegraph.llm.provider import LLMProvider
 from activegraph.llm.types import LLMMessage, ToolCall
 from activegraph.policy import Policy
@@ -1041,6 +1042,11 @@ class Runtime:
                 turn_response = cached
             else:
                 try:
+                    provider_output_schema = (
+                        None
+                        if getattr(self.llm_provider, "runtime_parses_output", False)
+                        else b.output_schema
+                    )
                     turn_response = self.llm_provider.complete(
                         system=prompt.system,
                         messages=running_messages,
@@ -1048,7 +1054,7 @@ class Runtime:
                         max_tokens=prompt.max_tokens,
                         temperature=prompt.temperature,
                         top_p=prompt.top_p,
-                        output_schema=b.output_schema,
+                        output_schema=provider_output_schema,
                         timeout_seconds=b.timeout_seconds,
                         tools=tool_defs,
                     )
@@ -1065,15 +1071,31 @@ class Runtime:
                         extras={"model": prompt.model},
                     )
                     return
-                self._llm_cache.record(
-                    turn_hash, turn_response, requesting_event_id=requested_evt.id
-                ) if self._llm_cache is not None else None
+                self.budget.add_cost(turn_response.cost_usd)
+
+            # The runtime owns behavior output parsing so even malformed
+            # final text still has a concrete `llm.responded` event before
+            # the terminal `behavior.failed` record.
+            response_tool_calls = getattr(turn_response, "tool_calls", None) or []
+            parse_error: Optional[LLMBehaviorError] = None
+            if (
+                not response_tool_calls
+                and b.output_schema is not None
+                and turn_response.parsed is None
+            ):
+                try:
+                    turn_response.parsed = _parse_structured(
+                        turn_response.raw_text, b.output_schema
+                    )
+                except LLMBehaviorError as e:
+                    parse_error = e
+
+            if cached is None:
                 if self._llm_cache is None:
                     self._llm_cache = LLMCache()
-                    self._llm_cache.record(
-                        turn_hash, turn_response, requesting_event_id=requested_evt.id
-                    )
-                self.budget.add_cost(turn_response.cost_usd)
+                self._llm_cache.record(
+                    turn_hash, turn_response, requesting_event_id=requested_evt.id
+                )
 
             # ---- Emit llm.responded ---------------------------------------
             responded_payload = turn_response.to_dict() | {
@@ -1087,12 +1109,20 @@ class Runtime:
                 actor=b.name,
                 caused_by=requested_evt.id,
             )
+            if parse_error is not None:
+                self._emit_behavior_failed(
+                    b.name,
+                    event.id,
+                    parse_error,
+                    reason=parse_error.reason,
+                    extras=parse_error.payload_extras,
+                )
+                return
 
             # ---- Branch: tool calls vs final response ---------------------
             # `tool_calls` is optional on LLMResponse; some test providers
             # return ad-hoc objects without it. Treat missing/None/empty
             # as "no tool calls" so backward compatibility holds.
-            response_tool_calls = getattr(turn_response, "tool_calls", None) or []
             if not response_tool_calls:
                 response = turn_response
                 break
