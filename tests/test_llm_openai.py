@@ -24,6 +24,7 @@ from activegraph.llm import (
     LLMBehaviorError,
     LLMMessage,
     OpenAIProvider,
+    ToolCall,
 )
 
 
@@ -250,6 +251,40 @@ def test_count_tokens_heuristic_fallback_when_tiktoken_missing(monkeypatch):
     )
     # (4 + 8) // 4 = 3
     assert n == 3
+
+
+def test_count_tokens_heuristic_includes_assistant_tool_calls(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fail_tiktoken(name, *args, **kwargs):
+        if name == "tiktoken":
+            raise ImportError("tiktoken not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_tiktoken)
+    p = OpenAIProvider(client=MagicMock())
+    n = p.count_tokens(
+        system="",
+        messages=[
+            LLMMessage(
+                role="assistant",
+                content="",
+                tool_calls=(
+                    ToolCall(
+                        id="call_1",
+                        name="lookup_fact",
+                        args={"query": "alpha"},
+                    ),
+                ),
+            ),
+            LLMMessage(role="tool", content="{}", tool_use_id="call_1"),
+        ],
+        model="gpt-4o-mini",
+    )
+
+    assert n > 1
 
 
 def test_missing_api_key_raises_when_constructing_real_client(monkeypatch):
