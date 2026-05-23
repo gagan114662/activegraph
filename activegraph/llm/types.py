@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Literal, Optional
 
+INVALID_TOOL_ARGS_PROVIDER_META_KEY = "activegraph.invalid_tool_args"
+
 
 # v0.7: the assistant can return tool_use blocks; the user echoes results
 # back as a "tool" message. Anthropic uses content blocks with a
@@ -110,6 +112,14 @@ class LLMResponse:
     tool_calls: Optional[list[ToolCall]] = None
 
     def to_dict(self) -> dict[str, Any]:
+        provider_meta = dict(self.provider_meta)
+        invalid_tool_args = {
+            tc.id: tc.invalid_args_error
+            for tc in (self.tool_calls or [])
+            if tc.invalid_args_error is not None
+        }
+        if invalid_tool_args:
+            provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] = invalid_tool_args
         return {
             "raw_text": self.raw_text,
             "parsed": _parsed_to_jsonable(self.parsed),
@@ -121,7 +131,7 @@ class LLMResponse:
             "finish_reason": self.finish_reason,
             "seed": self.seed,
             "cache_hit": bool(self.cache_hit),
-            "provider_meta": dict(self.provider_meta),
+            "provider_meta": provider_meta,
             "tool_calls": (
                 [tc.to_dict() for tc in self.tool_calls]
                 if self.tool_calls

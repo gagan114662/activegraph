@@ -79,7 +79,11 @@ from activegraph.llm.cache import LLMCache
 from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
 from activegraph.llm.parsing import parse_structured_response as _parse_structured
 from activegraph.llm.provider import LLMProvider
-from activegraph.llm.types import LLMMessage, ToolCall
+from activegraph.llm.types import (
+    INVALID_TOOL_ARGS_PROVIDER_META_KEY,
+    LLMMessage,
+    ToolCall,
+)
 from activegraph.policy import Policy
 from activegraph.runtime.behavior_graph import BehaviorGraph
 from activegraph.runtime.budget import Budget
@@ -113,6 +117,34 @@ from activegraph.observability.status import (
     FrameSnapshot,
     RuntimeStatus,
 )
+
+
+def _restore_invalid_tool_arg_markers(
+    tool_calls: list[ToolCall], provider_meta: Any
+) -> list[ToolCall]:
+    """Reattach internal invalid-argument sentinels from durable metadata."""
+    if not tool_calls or not isinstance(provider_meta, dict):
+        return tool_calls
+    raw_markers = provider_meta.get(INVALID_TOOL_ARGS_PROVIDER_META_KEY)
+    if not isinstance(raw_markers, dict):
+        return tool_calls
+    restored: list[ToolCall] = []
+    changed = False
+    for call in tool_calls:
+        marker = raw_markers.get(call.id)
+        if isinstance(marker, str) and call.invalid_args_error is None:
+            restored.append(
+                ToolCall(
+                    id=call.id,
+                    name=call.name,
+                    args=dict(call.args),
+                    invalid_args_error=marker,
+                )
+            )
+            changed = True
+        else:
+            restored.append(call)
+    return restored if changed else tool_calls
 
 
 @dataclass
@@ -1076,7 +1108,11 @@ class Runtime:
             # The runtime owns behavior output parsing so even malformed
             # final text still has a concrete `llm.responded` event before
             # the terminal `behavior.failed` record.
-            response_tool_calls = getattr(turn_response, "tool_calls", None) or []
+            response_tool_calls = _restore_invalid_tool_arg_markers(
+                getattr(turn_response, "tool_calls", None) or [],
+                getattr(turn_response, "provider_meta", None),
+            )
+            turn_response.tool_calls = response_tool_calls or None
             parse_error: Optional[LLMBehaviorError] = None
             if (
                 not response_tool_calls

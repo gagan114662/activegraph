@@ -33,6 +33,7 @@ from activegraph.llm import (
     OpenAIProvider,
     ToolCall,
 )
+from activegraph.llm.types import INVALID_TOOL_ARGS_PROVIDER_META_KEY
 
 
 Case = Literal["happy", "invalid_args", "unknown_tool", "final_parse_failure"]
@@ -520,11 +521,15 @@ def test_invalid_tool_argument_marker_stays_out_of_response_dict() -> None:
         ],
     )
 
-    tool_call = response.to_dict()["tool_calls"][0]
+    response_dict = response.to_dict()
+    tool_call = response_dict["tool_calls"][0]
     assert tool_call == {"id": "call_1", "name": "ping", "args": {}}
+    assert response_dict["provider_meta"][INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
+        "call_1": "OpenAI tool arguments must decode to a JSON object."
+    }
 
 
-def test_invalid_tool_argument_response_stays_out_of_durable_llm_cache() -> None:
+def test_invalid_tool_argument_marker_round_trips_llm_cache_metadata() -> None:
     result = _run_openai_zero_field_tool_with_arguments('"not an object"')
     request = next(e for e in result.graph.events if e.type == "llm.requested")
 
@@ -532,10 +537,15 @@ def test_invalid_tool_argument_response_stays_out_of_durable_llm_cache() -> None
         request.payload["prompt_hash"]
     )
 
-    assert cached is None
+    assert cached is not None
+    assert cached.tool_calls is not None
+    assert cached.tool_calls[0].invalid_args_error is None
+    assert cached.provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
+        "call_1": "OpenAI tool arguments must decode to a JSON object."
+    }
 
 
-def test_invalid_tool_argument_marker_is_ignored_from_recorded_fixture() -> None:
+def test_invalid_tool_argument_marker_round_trips_recorded_fixture_metadata() -> None:
     from activegraph.llm.recorded import _response_from_fixture
 
     response = _response_from_fixture(
@@ -549,15 +559,18 @@ def test_invalid_tool_argument_marker_is_ignored_from_recorded_fixture() -> None
             "model": "m",
             "finish_reason": "tool_calls",
             "seed": None,
-            "provider_meta": {},
+            "provider_meta": {
+                INVALID_TOOL_ARGS_PROVIDER_META_KEY: {
+                    "call_1": (
+                        "OpenAI tool arguments must decode to a JSON object."
+                    )
+                }
+            },
             "tool_calls": [
                 {
                     "id": "call_1",
                     "name": "ping",
                     "args": {},
-                    "invalid_args_error": (
-                        "OpenAI tool arguments must decode to a JSON object."
-                    ),
                 }
             ],
         },
@@ -566,6 +579,9 @@ def test_invalid_tool_argument_marker_is_ignored_from_recorded_fixture() -> None
 
     assert response.tool_calls is not None
     assert response.tool_calls[0].invalid_args_error is None
+    assert response.provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
+        "call_1": "OpenAI tool arguments must decode to a JSON object."
+    }
 
 
 def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
@@ -643,37 +659,15 @@ def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
         llm_responded = next(e for e in graph.events if e.type == "llm.responded")
         assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
 
-        fork_first = SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=None,
-                        tool_calls=[
-                            SimpleNamespace(
-                                id="call_1",
-                                type="function",
-                                function=SimpleNamespace(
-                                    name="ping",
-                                    arguments="{",
-                                ),
-                            )
-                        ],
-                    ),
-                    finish_reason="tool_calls",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
-            model="gpt-4o-mini",
-        )
         fork_client = SimpleNamespace(
             chat=SimpleNamespace(
-                completions=SimpleNamespace(calls=[], _responses=[fork_first])
+                completions=SimpleNamespace(calls=[], _responses=[])
             )
         )
 
         def fork_create(**kwargs: Any) -> SimpleNamespace:
             fork_client.chat.completions.calls.append(kwargs)
-            return fork_client.chat.completions._responses.pop(0)
+            raise AssertionError("fork replay should use the LLM cache")
 
         fork_client.chat.completions.create = fork_create
         goal_event = next(e for e in graph.events if e.type == "goal.created")
@@ -685,7 +679,7 @@ def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
         )
         fork.run_until_idle()
 
-        assert len(fork_client.chat.completions.calls) == 1
+        assert fork_client.chat.completions.calls == []
         assert _terminal_reason(fork.graph) == "tool.invalid_input"
         fork_llm_responded = next(
             e for e in fork.graph.events if e.type == "llm.responded"
@@ -707,12 +701,16 @@ def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
             os.remove(db)
 
 
-def test_invalid_tool_argument_durable_cache_does_not_replay_raw_args() -> None:
+def test_invalid_tool_argument_durable_cache_replays_invalid_input() -> None:
     parent = _run_openai_zero_field_tool_with_arguments("{")
     request = next(e for e in parent.graph.events if e.type == "llm.requested")
     cache = LLMCache.from_events(parent.graph.events)
 
-    assert cache.get(request.payload["prompt_hash"]) is None
+    cached = cache.get(request.payload["prompt_hash"])
+    assert cached is not None
+    assert cached.provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
+        "call_1": "OpenAI tool arguments must be valid JSON object text."
+    }
 
     clear_registry()
     clear_tool_registry()
@@ -741,46 +739,25 @@ def test_invalid_tool_argument_durable_cache_does_not_replay_raw_args() -> None:
     def answer_with_ping(event: Any, graph: Any, ctx: Any, out: _Answer) -> None:
         graph.add_object("answer", {"answer": out.answer})
 
-    first = SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(
-                    content=None,
-                    tool_calls=[
-                        SimpleNamespace(
-                            id="call_1",
-                            type="function",
-                            function=SimpleNamespace(
-                                name="ping",
-                                arguments="{",
-                            ),
-                        )
-                    ],
-                ),
-                finish_reason="tool_calls",
-            )
-        ],
-        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
-        model="gpt-4o-mini",
-    )
     client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[first]))
+        chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[]))
     )
 
     def create(**kwargs: Any) -> SimpleNamespace:
         client.chat.completions.calls.append(kwargs)
-        return client.chat.completions._responses.pop(0)
+        raise AssertionError("runtime should use the injected LLM cache")
 
     client.chat.completions.create = create
     graph = _fresh_graph()
     Runtime(
         graph,
         llm_provider=OpenAIProvider(client=client),
+        replay_llm_cache=True,
         llm_cache=cache,
         budget={"max_tool_calls": 4},
     ).run_goal("g")
 
-    assert len(client.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
     assert invoked == []
     assert _terminal_reason(graph) == "tool.invalid_input"
     assert not [
