@@ -200,7 +200,6 @@ def _response_from_fixture(
                 id=tc.get("id", ""),
                 name=tc.get("name", ""),
                 args=dict(tc.get("args") or {}),
-                invalid_args_error=tc.get("invalid_args_error"),
             )
             for tc in tool_calls_raw
         ]

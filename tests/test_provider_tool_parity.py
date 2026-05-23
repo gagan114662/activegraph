@@ -463,7 +463,7 @@ def test_openai_tool_arguments_must_decode_to_object() -> None:
         llm_responded = [
             e for e in result.graph.events if e.type == "llm.responded"
         ][0]
-        assert llm_responded.payload["tool_calls"][0]["invalid_args_error"]
+        assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
         assert not [
             e for e in result.graph.events
             if e.type == "object.created"
@@ -487,7 +487,7 @@ def test_openai_invalid_tool_arguments_rejected_for_zero_field_schema() -> None:
         llm_responded = [
             e for e in result.graph.events if e.type == "llm.responded"
         ][0]
-        assert llm_responded.payload["tool_calls"][0]["invalid_args_error"]
+        assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
         assert [
             e.payload.get("error", {}).get("reason")
             for e in result.graph.events
@@ -500,7 +500,7 @@ def test_openai_invalid_tool_arguments_rejected_for_zero_field_schema() -> None:
         ]
 
 
-def test_invalid_tool_argument_marker_round_trips_response_dict() -> None:
+def test_invalid_tool_argument_marker_stays_out_of_response_dict() -> None:
     response = LLMResponse(
         raw_text="",
         parsed=None,
@@ -521,13 +521,10 @@ def test_invalid_tool_argument_marker_round_trips_response_dict() -> None:
     )
 
     tool_call = response.to_dict()["tool_calls"][0]
-    assert (
-        tool_call["invalid_args_error"]
-        == "OpenAI tool arguments must decode to a JSON object."
-    )
+    assert tool_call == {"id": "call_1", "name": "ping", "args": {}}
 
 
-def test_invalid_tool_argument_marker_round_trips_llm_cache() -> None:
+def test_invalid_tool_argument_marker_stays_out_of_llm_cache() -> None:
     result = _run_openai_zero_field_tool_with_arguments('"not an object"')
     request = next(e for e in result.graph.events if e.type == "llm.requested")
 
@@ -537,13 +534,10 @@ def test_invalid_tool_argument_marker_round_trips_llm_cache() -> None:
 
     assert cached is not None
     assert cached.tool_calls is not None
-    assert (
-        cached.tool_calls[0].invalid_args_error
-        == "OpenAI tool arguments must decode to a JSON object."
-    )
+    assert cached.tool_calls[0].invalid_args_error is None
 
 
-def test_invalid_tool_argument_marker_round_trips_recorded_fixture() -> None:
+def test_invalid_tool_argument_marker_is_ignored_from_recorded_fixture() -> None:
     from activegraph.llm.recorded import _response_from_fixture
 
     response = _response_from_fixture(
@@ -573,13 +567,10 @@ def test_invalid_tool_argument_marker_round_trips_recorded_fixture() -> None:
     )
 
     assert response.tool_calls is not None
-    assert (
-        response.tool_calls[0].invalid_args_error
-        == "OpenAI tool arguments must decode to a JSON object."
-    )
+    assert response.tool_calls[0].invalid_args_error is None
 
 
-def test_invalid_tool_argument_marker_survives_fork_replay_cache() -> None:
+def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
     clear_registry()
     clear_tool_registry()
     invoked: list[str] = []
@@ -652,17 +643,39 @@ def test_invalid_tool_argument_marker_survives_fork_replay_cache() -> None:
         assert _terminal_reason(graph) == "tool.invalid_input"
         assert invoked == []
         llm_responded = next(e for e in graph.events if e.type == "llm.responded")
-        assert llm_responded.payload["tool_calls"][0]["invalid_args_error"]
+        assert "invalid_args_error" not in llm_responded.payload["tool_calls"][0]
 
+        fork_first = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=None,
+                        tool_calls=[
+                            SimpleNamespace(
+                                id="call_1",
+                                type="function",
+                                function=SimpleNamespace(
+                                    name="ping",
+                                    arguments="{",
+                                ),
+                            )
+                        ],
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
+            model="gpt-4o-mini",
+        )
         fork_client = SimpleNamespace(
             chat=SimpleNamespace(
-                completions=SimpleNamespace(calls=[], _responses=[])
+                completions=SimpleNamespace(calls=[], _responses=[fork_first])
             )
         )
 
         def fork_create(**kwargs: Any) -> SimpleNamespace:
             fork_client.chat.completions.calls.append(kwargs)
-            raise AssertionError("fork replay should use the LLM cache")
+            return fork_client.chat.completions._responses.pop(0)
 
         fork_client.chat.completions.create = fork_create
         goal_event = next(e for e in graph.events if e.type == "goal.created")
@@ -674,12 +687,17 @@ def test_invalid_tool_argument_marker_survives_fork_replay_cache() -> None:
         )
         fork.run_until_idle()
 
-        assert fork_client.chat.completions.calls == []
+        assert len(fork_client.chat.completions.calls) == 1
         assert _terminal_reason(fork.graph) == "tool.invalid_input"
+        fork_llm_responded = next(
+            e for e in fork.graph.events if e.type == "llm.responded"
+        )
+        assert "invalid_args_error" not in fork_llm_responded.payload["tool_calls"][0]
         assert [
-            e.payload.get("error", {}).get("reason")
+            (e.payload.get("error") or {}).get("reason")
             for e in fork.graph.events
             if e.type == "tool.responded"
+            and (e.payload.get("error") or {}).get("reason") is not None
         ] == ["tool.invalid_input"]
         assert not [
             e for e in fork.graph.events
