@@ -8,6 +8,8 @@ scripted provider. They bind D-3 ``inner:2f82f19`` and Sasha second-pass
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -24,7 +26,13 @@ from activegraph import (
     llm_behavior,
     tool,
 )
-from activegraph.llm import AnthropicProvider, LLMCache, LLMResponse, OpenAIProvider, ToolCall
+from activegraph.llm import (
+    AnthropicProvider,
+    LLMCache,
+    LLMResponse,
+    OpenAIProvider,
+    ToolCall,
+)
 
 
 Case = Literal["happy", "invalid_args", "unknown_tool", "final_parse_failure"]
@@ -569,6 +577,118 @@ def test_invalid_tool_argument_marker_round_trips_recorded_fixture() -> None:
         response.tool_calls[0].invalid_args_error
         == "OpenAI tool arguments must decode to a JSON object."
     )
+
+
+def test_invalid_tool_argument_marker_survives_fork_replay_cache() -> None:
+    clear_registry()
+    clear_tool_registry()
+    invoked: list[str] = []
+
+    @tool(
+        name="ping",
+        description="No-argument ping.",
+        input_schema=_EmptyArgs,
+        output_schema=_PingResult,
+        deterministic=True,
+    )
+    def ping(args: _EmptyArgs, ctx: Any) -> _PingResult:
+        invoked.append("parent")
+        return _PingResult(ok=True)
+
+    @llm_behavior(
+        name="answer_with_ping",
+        on=["goal.created"],
+        description="Answer with a no-argument tool call.",
+        output_schema=_Answer,
+        tools=[ping],
+        max_tool_turns=2,
+        temperature=0.0,
+    )
+    def answer_with_ping(event: Any, graph: Any, ctx: Any, out: _Answer) -> None:
+        graph.add_object("answer", {"answer": out.answer})
+
+    first = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            type="function",
+                            function=SimpleNamespace(
+                                name="ping",
+                                arguments="{",
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
+        model="gpt-4o-mini",
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[first]))
+    )
+
+    def create(**kwargs: Any) -> SimpleNamespace:
+        client.chat.completions.calls.append(kwargs)
+        return client.chat.completions._responses.pop(0)
+
+    client.chat.completions.create = create
+    db = tempfile.mktemp(suffix=".db")
+    try:
+        graph = _fresh_graph()
+        rt = Runtime(
+            graph,
+            llm_provider=OpenAIProvider(client=client),
+            budget={"max_tool_calls": 4},
+            persist_to=db,
+        )
+        rt.run_goal("g")
+
+        assert _terminal_reason(graph) == "tool.invalid_input"
+        assert invoked == []
+        llm_responded = next(e for e in graph.events if e.type == "llm.responded")
+        assert llm_responded.payload["tool_calls"][0]["invalid_args_error"]
+
+        fork_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(calls=[], _responses=[])
+            )
+        )
+
+        def fork_create(**kwargs: Any) -> SimpleNamespace:
+            fork_client.chat.completions.calls.append(kwargs)
+            raise AssertionError("fork replay should use the LLM cache")
+
+        fork_client.chat.completions.create = fork_create
+        goal_event = next(e for e in graph.events if e.type == "goal.created")
+        fork = rt.fork(
+            at_event=goal_event.id,
+            label="invalid-args-cache",
+            replay_llm_cache=True,
+            llm_provider=OpenAIProvider(client=fork_client),
+        )
+        fork.run_until_idle()
+
+        assert fork_client.chat.completions.calls == []
+        assert _terminal_reason(fork.graph) == "tool.invalid_input"
+        assert [
+            e.payload.get("error", {}).get("reason")
+            for e in fork.graph.events
+            if e.type == "tool.responded"
+        ] == ["tool.invalid_input"]
+        assert not [
+            e for e in fork.graph.events
+            if e.type == "object.created"
+            and e.payload["object"]["type"] == "answer"
+        ]
+    finally:
+        if os.path.exists(db):
+            os.remove(db)
 
 
 def test_unknown_tool_failure_stream_and_reason_match_across_providers() -> None:
