@@ -283,7 +283,7 @@ class Graph:
         """
         if self._store is store:
             return
-        if self._store is not None:
+        if self._store is not None and self._events:
             from activegraph.runtime.config_errors import IncompatibleRuntimeState
             raise IncompatibleRuntimeState(
                 "graph already has a store attached",
