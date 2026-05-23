@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from activegraph.core.graph import Graph
     from activegraph.frame import Frame
     from activegraph.llm.prompt import AssembledPrompt
+    from activegraph.runtime.runtime import Context
 
 
 def _llm_behavior_fn_placeholder(event, graph, ctx) -> None:  # pragma: no cover
@@ -51,7 +52,17 @@ class Behavior:
     # CONTRACT v0.7 #13. Event-count delay. None = fire immediately.
     activate_after: Optional[int] = None
 
-    def run(self, event, graph, ctx) -> None:
+    def run(self, event: "Event", graph: "Graph", ctx: "Context") -> None:
+        """Invoke the behavior's registered callable.
+
+        Args:
+            event: Event that matched this behavior.
+            graph: Graph receiving the behavior's writes.
+            ctx: Runtime invocation context for this behavior.
+
+        Returns:
+            None.
+        """
         self.fn(event, graph, ctx)
 
 
@@ -125,7 +136,6 @@ class LLMBehavior(Behavior):
 
         from activegraph.llm.prompt import assemble_prompt
         from activegraph.runtime.view_builder import (
-            DEFAULT_RECENT_EVENTS,
             _resolve_event_path,
             build_view,
         )
