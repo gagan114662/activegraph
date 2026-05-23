@@ -524,12 +524,10 @@ def test_invalid_tool_argument_marker_stays_out_of_response_dict() -> None:
     response_dict = response.to_dict()
     tool_call = response_dict["tool_calls"][0]
     assert tool_call == {"id": "call_1", "name": "ping", "args": {}}
-    assert response_dict["provider_meta"][INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
-        "call_1": "OpenAI tool arguments must decode to a JSON object."
-    }
+    assert INVALID_TOOL_ARGS_PROVIDER_META_KEY not in response_dict["provider_meta"]
 
 
-def test_invalid_tool_argument_marker_round_trips_llm_cache_metadata() -> None:
+def test_invalid_tool_argument_marker_stays_out_of_llm_cache_metadata() -> None:
     result = _run_openai_zero_field_tool_with_arguments('"not an object"')
     request = next(e for e in result.graph.events if e.type == "llm.requested")
 
@@ -537,12 +535,7 @@ def test_invalid_tool_argument_marker_round_trips_llm_cache_metadata() -> None:
         request.payload["prompt_hash"]
     )
 
-    assert cached is not None
-    assert cached.tool_calls is not None
-    assert cached.tool_calls[0].invalid_args_error is None
-    assert cached.provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
-        "call_1": "OpenAI tool arguments must decode to a JSON object."
-    }
+    assert cached is None
 
 
 def test_invalid_tool_argument_marker_round_trips_recorded_fixture_metadata() -> None:
@@ -579,9 +572,7 @@ def test_invalid_tool_argument_marker_round_trips_recorded_fixture_metadata() ->
 
     assert response.tool_calls is not None
     assert response.tool_calls[0].invalid_args_error is None
-    assert response.provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
-        "call_1": "OpenAI tool arguments must decode to a JSON object."
-    }
+    assert INVALID_TOOL_ARGS_PROVIDER_META_KEY not in response.provider_meta
 
 
 def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
@@ -664,10 +655,33 @@ def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
                 completions=SimpleNamespace(calls=[], _responses=[])
             )
         )
+        fork_first = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=None,
+                        tool_calls=[
+                            SimpleNamespace(
+                                id="call_1",
+                                type="function",
+                                function=SimpleNamespace(
+                                    name="ping",
+                                    arguments="{",
+                                ),
+                            )
+                        ],
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
+            model="gpt-4o-mini",
+        )
+        fork_client.chat.completions._responses.append(fork_first)
 
         def fork_create(**kwargs: Any) -> SimpleNamespace:
             fork_client.chat.completions.calls.append(kwargs)
-            raise AssertionError("fork replay should use the LLM cache")
+            return fork_client.chat.completions._responses.pop(0)
 
         fork_client.chat.completions.create = fork_create
         goal_event = next(e for e in graph.events if e.type == "goal.created")
@@ -679,7 +693,7 @@ def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
         )
         fork.run_until_idle()
 
-        assert fork_client.chat.completions.calls == []
+        assert len(fork_client.chat.completions.calls) == 1
         assert _terminal_reason(fork.graph) == "tool.invalid_input"
         fork_llm_responded = next(
             e for e in fork.graph.events if e.type == "llm.responded"
@@ -701,16 +715,12 @@ def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
             os.remove(db)
 
 
-def test_invalid_tool_argument_durable_cache_replays_invalid_input() -> None:
+def test_invalid_tool_argument_durable_cache_skips_invalid_input() -> None:
     parent = _run_openai_zero_field_tool_with_arguments("{")
     request = next(e for e in parent.graph.events if e.type == "llm.requested")
     cache = LLMCache.from_events(parent.graph.events)
 
-    cached = cache.get(request.payload["prompt_hash"])
-    assert cached is not None
-    assert cached.provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] == {
-        "call_1": "OpenAI tool arguments must be valid JSON object text."
-    }
+    assert cache.get(request.payload["prompt_hash"]) is None
 
     clear_registry()
     clear_tool_registry()
@@ -739,13 +749,35 @@ def test_invalid_tool_argument_durable_cache_replays_invalid_input() -> None:
     def answer_with_ping(event: Any, graph: Any, ctx: Any, out: _Answer) -> None:
         graph.add_object("answer", {"answer": out.answer})
 
+    first = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            type="function",
+                            function=SimpleNamespace(
+                                name="ping",
+                                arguments="{",
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
+        model="gpt-4o-mini",
+    )
     client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[]))
+        chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[first]))
     )
 
     def create(**kwargs: Any) -> SimpleNamespace:
         client.chat.completions.calls.append(kwargs)
-        raise AssertionError("runtime should use the injected LLM cache")
+        return client.chat.completions._responses.pop(0)
 
     client.chat.completions.create = create
     graph = _fresh_graph()
@@ -757,7 +789,7 @@ def test_invalid_tool_argument_durable_cache_replays_invalid_input() -> None:
         budget={"max_tool_calls": 4},
     ).run_goal("g")
 
-    assert client.chat.completions.calls == []
+    assert len(client.chat.completions.calls) == 1
     assert invoked == []
     assert _terminal_reason(graph) == "tool.invalid_input"
     assert not [

@@ -51,7 +51,12 @@ from typing import Any, Optional
 
 from activegraph.llm.errors import LLMBehaviorError
 from activegraph.llm.provider import LLMProvider
-from activegraph.llm.types import LLMMessage, LLMResponse, ToolCall
+from activegraph.llm.types import (
+    INVALID_TOOL_ARGS_PROVIDER_META_KEY,
+    LLMMessage,
+    LLMResponse,
+    ToolCall,
+)
 
 
 def _now_iso() -> str:
@@ -200,7 +205,6 @@ def _response_from_fixture(
                 id=tc.get("id", ""),
                 name=tc.get("name", ""),
                 args=dict(tc.get("args") or {}),
-                invalid_args_error=tc.get("invalid_args_error"),
             )
             for tc in tool_calls_raw
         ]
@@ -215,9 +219,17 @@ def _response_from_fixture(
         finish_reason=rdata.get("finish_reason", "end_turn"),
         seed=rdata.get("seed"),
         cache_hit=False,
-        provider_meta=dict(rdata.get("provider_meta", {}) or {}),
+        provider_meta=_public_provider_meta(rdata.get("provider_meta", {}) or {}),
         tool_calls=tool_calls,
     )
+
+
+def _public_provider_meta(provider_meta: dict) -> dict:
+    return {
+        key: value
+        for key, value in provider_meta.items()
+        if key != INVALID_TOOL_ARGS_PROVIDER_META_KEY
+    }
 
 
 # ---------- RecordingLLMProvider --------------------------------------------

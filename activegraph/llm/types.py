@@ -112,14 +112,6 @@ class LLMResponse:
     tool_calls: Optional[list[ToolCall]] = None
 
     def to_dict(self) -> dict[str, Any]:
-        provider_meta = dict(self.provider_meta)
-        invalid_tool_args = {
-            tc.id: tc.invalid_args_error
-            for tc in (self.tool_calls or [])
-            if tc.invalid_args_error is not None
-        }
-        if invalid_tool_args:
-            provider_meta[INVALID_TOOL_ARGS_PROVIDER_META_KEY] = invalid_tool_args
         return {
             "raw_text": self.raw_text,
             "parsed": _parsed_to_jsonable(self.parsed),
@@ -131,13 +123,21 @@ class LLMResponse:
             "finish_reason": self.finish_reason,
             "seed": self.seed,
             "cache_hit": bool(self.cache_hit),
-            "provider_meta": provider_meta,
+            "provider_meta": _public_provider_meta(self.provider_meta),
             "tool_calls": (
                 [tc.to_dict() for tc in self.tool_calls]
                 if self.tool_calls
                 else None
             ),
         }
+
+
+def _public_provider_meta(provider_meta: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in provider_meta.items()
+        if key != INVALID_TOOL_ARGS_PROVIDER_META_KEY
+    }
 
 
 def _parsed_to_jsonable(parsed: Any) -> Any:

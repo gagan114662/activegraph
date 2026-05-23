@@ -33,7 +33,10 @@ from decimal import Decimal
 from typing import Iterable, Optional
 
 from activegraph.core.event import Event
-from activegraph.llm.types import LLMResponse
+from activegraph.llm.types import (
+    INVALID_TOOL_ARGS_PROVIDER_META_KEY,
+    LLMResponse,
+)
 
 
 @dataclass
@@ -92,6 +95,8 @@ class LLMCache:
         # consistently set cache_hit=True.
         # v0.7: tolerate test-provider responses without tool_calls.
         tool_calls = getattr(response, "tool_calls", None)
+        if _has_invalid_tool_arg_marker(tool_calls):
+            return
         clean = LLMResponse(
             raw_text=response.raw_text,
             parsed=response.parsed,
@@ -103,7 +108,7 @@ class LLMCache:
             finish_reason=response.finish_reason,
             seed=response.seed,
             cache_hit=False,
-            provider_meta=dict(response.provider_meta),
+            provider_meta=_public_provider_meta(response.provider_meta),
             tool_calls=list(tool_calls) if tool_calls else None,
         )
         self._by_hash[prompt_hash] = CachedEntry(
@@ -137,6 +142,8 @@ class LLMCache:
             prompt_hash = request.payload.get("prompt_hash")
             if not prompt_hash:
                 continue
+            if _has_invalid_tool_input_for_request(events_list, request_id):
+                continue
             response = _response_from_event_payload(e.payload)
             cache.record(
                 prompt_hash, response, requesting_event_id=request_id
@@ -161,7 +168,6 @@ def _response_from_event_payload(payload: dict) -> LLMResponse:
                 id=tc.get("id", ""),
                 name=tc.get("name", ""),
                 args=dict(tc.get("args", {})),
-                invalid_args_error=tc.get("invalid_args_error"),
             )
             for tc in tc_payload
         ]
@@ -176,6 +182,39 @@ def _response_from_event_payload(payload: dict) -> LLMResponse:
         finish_reason=payload.get("finish_reason", "?"),
         seed=payload.get("seed"),
         cache_hit=False,
-        provider_meta=dict(payload.get("provider_meta", {}) or {}),
+        provider_meta=_public_provider_meta(payload.get("provider_meta", {}) or {}),
         tool_calls=tool_calls,
+    )
+
+
+def _has_invalid_tool_arg_marker(tool_calls: Optional[list]) -> bool:
+    return any(
+        getattr(call, "invalid_args_error", None) is not None
+        for call in (tool_calls or [])
+    )
+
+
+def _public_provider_meta(provider_meta: dict) -> dict:
+    return {
+        key: value
+        for key, value in provider_meta.items()
+        if key != INVALID_TOOL_ARGS_PROVIDER_META_KEY
+    }
+
+
+def _has_invalid_tool_input_for_request(
+    events: Iterable[Event], request_id: str
+) -> bool:
+    tool_requests = {
+        e.id
+        for e in events
+        if e.type == "tool.requested" and e.caused_by == request_id
+    }
+    if not tool_requests:
+        return False
+    return any(
+        e.type == "tool.responded"
+        and e.caused_by in tool_requests
+        and (e.payload.get("error") or {}).get("reason") == "tool.invalid_input"
+        for e in events
     )
