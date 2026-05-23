@@ -524,7 +524,7 @@ def test_invalid_tool_argument_marker_stays_out_of_response_dict() -> None:
     assert tool_call == {"id": "call_1", "name": "ping", "args": {}}
 
 
-def test_invalid_tool_argument_marker_stays_out_of_llm_cache() -> None:
+def test_invalid_tool_argument_response_stays_out_of_durable_llm_cache() -> None:
     result = _run_openai_zero_field_tool_with_arguments('"not an object"')
     request = next(e for e in result.graph.events if e.type == "llm.requested")
 
@@ -532,9 +532,7 @@ def test_invalid_tool_argument_marker_stays_out_of_llm_cache() -> None:
         request.payload["prompt_hash"]
     )
 
-    assert cached is not None
-    assert cached.tool_calls is not None
-    assert cached.tool_calls[0].invalid_args_error is None
+    assert cached is None
 
 
 def test_invalid_tool_argument_marker_is_ignored_from_recorded_fixture() -> None:
@@ -707,6 +705,89 @@ def test_invalid_tool_argument_marker_stays_out_of_fork_replay_events() -> None:
     finally:
         if os.path.exists(db):
             os.remove(db)
+
+
+def test_invalid_tool_argument_durable_cache_does_not_replay_raw_args() -> None:
+    parent = _run_openai_zero_field_tool_with_arguments("{")
+    request = next(e for e in parent.graph.events if e.type == "llm.requested")
+    cache = LLMCache.from_events(parent.graph.events)
+
+    assert cache.get(request.payload["prompt_hash"]) is None
+
+    clear_registry()
+    clear_tool_registry()
+    invoked: list[str] = []
+
+    @tool(
+        name="ping",
+        description="No-argument ping.",
+        input_schema=_EmptyArgs,
+        output_schema=_PingResult,
+        deterministic=True,
+    )
+    def ping(args: _EmptyArgs, ctx: Any) -> _PingResult:
+        invoked.append("called")
+        return _PingResult(ok=True)
+
+    @llm_behavior(
+        name="answer_with_ping",
+        on=["goal.created"],
+        description="Answer with a no-argument tool call.",
+        output_schema=_Answer,
+        tools=[ping],
+        max_tool_turns=2,
+        temperature=0.0,
+    )
+    def answer_with_ping(event: Any, graph: Any, ctx: Any, out: _Answer) -> None:
+        graph.add_object("answer", {"answer": out.answer})
+
+    first = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            type="function",
+                            function=SimpleNamespace(
+                                name="ping",
+                                arguments="{",
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2),
+        model="gpt-4o-mini",
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[first]))
+    )
+
+    def create(**kwargs: Any) -> SimpleNamespace:
+        client.chat.completions.calls.append(kwargs)
+        return client.chat.completions._responses.pop(0)
+
+    client.chat.completions.create = create
+    graph = _fresh_graph()
+    Runtime(
+        graph,
+        llm_provider=OpenAIProvider(client=client),
+        llm_cache=cache,
+        budget={"max_tool_calls": 4},
+    ).run_goal("g")
+
+    assert len(client.chat.completions.calls) == 1
+    assert invoked == []
+    assert _terminal_reason(graph) == "tool.invalid_input"
+    assert not [
+        e for e in graph.events
+        if e.type == "object.created"
+        and e.payload["object"]["type"] == "answer"
+    ]
 
 
 def test_unknown_tool_failure_stream_and_reason_match_across_providers() -> None:

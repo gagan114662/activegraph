@@ -125,11 +125,16 @@ class LLMCache:
         cache = cls()
         events_list = list(events)
         by_id: dict[str, Event] = {e.id: e for e in events_list}
+        invalid_tool_input_request_ids = _llm_requests_with_invalid_tool_input(
+            events_list
+        )
         for e in events_list:
             if e.type != "llm.responded":
                 continue
             request_id = e.caused_by
             if request_id is None:
+                continue
+            if request_id in invalid_tool_input_request_ids:
                 continue
             request = by_id.get(request_id)
             if request is None or request.type != "llm.requested":
@@ -142,6 +147,37 @@ class LLMCache:
                 prompt_hash, response, requesting_event_id=request_id
             )
         return cache
+
+
+def _llm_requests_with_invalid_tool_input(events: list[Event]) -> set[str]:
+    """Return LLM request ids whose tool-call turn failed input validation.
+
+    Invalid OpenAI JSON is intentionally kept off persisted `llm.responded`
+    payloads, so a durable replay cache cannot safely reconstruct that internal
+    marker. Skipping the cache entry preserves runtime semantics by forcing a
+    fresh provider response instead of replaying `{"_raw": ...}` as ordinary
+    tool input.
+    """
+
+    tool_request_to_llm_request: dict[str, str] = {}
+    for event in events:
+        if event.type != "tool.requested" or event.caused_by is None:
+            continue
+        tool_request_to_llm_request[event.id] = event.caused_by
+
+    invalid_llm_requests: set[str] = set()
+    for event in events:
+        if event.type != "tool.responded" or event.caused_by is None:
+            continue
+        error = event.payload.get("error")
+        if not isinstance(error, dict):
+            continue
+        if error.get("reason") != "tool.invalid_input":
+            continue
+        llm_request_id = tool_request_to_llm_request.get(event.caused_by)
+        if llm_request_id is not None:
+            invalid_llm_requests.add(llm_request_id)
+    return invalid_llm_requests
 
 
 def _response_from_event_payload(payload: dict) -> LLMResponse:
