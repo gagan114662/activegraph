@@ -64,7 +64,12 @@ class IDGen:
         self._object_counter += 1
         return f"{type_}#{self._object_counter}"
 
-    def event(self) -> str:
+    def event(self: "IDGen") -> str:
+        """Return the next event identifier.
+
+        Returns:
+            A monotonic event id with the `evt_` prefix.
+        """
         self._event_counter += 1
         return f"evt_{self._event_counter:03d}"
 
