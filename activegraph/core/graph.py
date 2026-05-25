@@ -44,7 +44,12 @@ class Object:
     version: int
     provenance: dict[str, Any]
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self: "Object") -> dict[str, Any]:
+        """Return this object as a serializable dictionary.
+
+        Returns:
+            A deep-copied dictionary representation of the object.
+        """
         return {
             "id": self.id,
             "type": self.type,
