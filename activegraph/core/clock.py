@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 class Clock:
     """Real wall-clock UTC. ISO 8601 second precision, Z suffix."""
 
-    def now(self) -> str:
+    def now(self: "Clock") -> str:
+        """Return the current UTC timestamp.
+
+        Returns:
+            An ISO 8601 timestamp with second precision and a Z suffix.
+        """
         return (
             datetime.now(tz=timezone.utc)
             .isoformat(timespec="seconds")
