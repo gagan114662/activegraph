@@ -223,11 +223,15 @@ nav:
   - Guides:
       - Operating in production: guides/operating-in-production.md
       - Authoring packs: guides/authoring-packs.md
+  - Specs:
+      - Events tail: specs/events-tail.md
   - Cookbook:
       - Common patterns: cookbook/common-patterns.md
       - Debugging: cookbook/debugging.md
       - Multi-run scripts: cookbook/multi-run-scripts.md
       - Migration from v0.7: cookbook/migration-from-v0-7.md
+  - How-to:
+      - Tail events: how-to/tail-events.md
   - Reference:
       - CLI: reference/cli.md
       - LLM providers: reference/llm-providers.md
