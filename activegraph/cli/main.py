@@ -143,6 +143,35 @@ from activegraph.cli.quickstart import cmd_quickstart as _cmd_quickstart
 cli.add_command(_cmd_quickstart)
 
 
+# ---- events -------------------------------------------------------------
+
+
+@cli.group("events")
+def cmd_events() -> None:
+    """Event-log commands."""
+
+
+@cmd_events.command("tail")
+@click.argument("url")
+@click.option("--run-id", required=True, help="Run id to inspect.")
+@click.option("--n", "count", default=20, show_default=True, type=int, help="Number of events to print.")
+@click.option("--since", default=None, help="Only include events at or after this ISO timestamp.")
+@click.option("--filter", "filter_text", default=None, help="Only include events whose JSON row contains this substring.")
+@click.option("--json", "as_json", is_flag=True, help="Emit newline-delimited JSON.")
+def cmd_events_tail(url: str, run_id: str, count: int, since: str | None, filter_text: str | None, as_json: bool) -> None:
+    """Print the last N events as newline-delimited JSON."""
+    from activegraph.cli.events_tail import tail_events
+
+    store = _open_store_or_die(url, run_id)
+    try:
+        rows = tail_events(store, n=count, since=since, filter_text=filter_text)
+    except ValueError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(EXIT_USAGE_ERROR)
+    for row in rows:
+        click.echo(_json.dumps(row) if as_json else row)
+
+
 # ---- pack ---------------------------------------------------------------
 
 
