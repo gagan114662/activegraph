@@ -73,7 +73,12 @@ class IDGen:
         self._event_counter += 1
         return f"evt_{self._event_counter:03d}"
 
-    def relation(self) -> str:
+    def relation(self: "IDGen") -> str:
+        """Return the next relation identifier.
+
+        Returns:
+            A monotonic relation id with the `rel_` prefix.
+        """
         self._relation_counter += 1
         return f"rel_{self._relation_counter:03d}"
 
