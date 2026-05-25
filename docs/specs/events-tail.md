@@ -1,22 +1,22 @@
 # events tail CLI Contract
 
-\`activegraph events tail\` prints the most recent events from an event store as newline-delimited JSON.
+`activegraph events tail` prints the most recent events from an event store as newline-delimited JSON.
 
 ## Command
 
-\`\`\`bash
-activegraph events tail <store-url> --run-id <run-id> [--n <int>] [--since <iso-timestamp>] [--filter <substring>] [--json]
-\`\`\`
+```bash
+activegraph events tail STORE_URL --run-id RUN_ID [--n COUNT] [--since ISO_TIMESTAMP] [--filter SUBSTRING] [--json]
+```
 
 ## Output Schema
 
 Each line is a JSON object with at least:
 
-- \`id\`: event id
-- \`ts\`: event timestamp
-- \`kind\`: event type
-- \`payload\`: event payload object
-- \`parent_id\`: causal parent id, or \`null\`
+- `id`: event id
+- `ts`: event timestamp
+- `kind`: event type
+- `payload`: event payload object
+- `parent_id`: causal parent id, or `null`
 
 ## Error Modes
 
@@ -27,4 +27,4 @@ Each line is a JSON object with at least:
 
 ## Auditability
 
-Every invocation emits an \`events_tail_invoked\` event into the same event store. The emitted event payload records the requested count, since filter, substring filter, and number of events printed.
+Every invocation emits an `events_tail_invoked` event into the same event store. The emitted event payload records the requested count, since filter, substring filter, and number of events printed.
