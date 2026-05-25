@@ -52,7 +52,15 @@ class IDGen:
 
     # ---- generators ----
 
-    def object(self, type_: str) -> str:
+    def object(self: "IDGen", type_: str) -> str:
+        """Return the next object identifier for a type.
+
+        Args:
+            type_: Object type prefix to include in the generated id.
+
+        Returns:
+            A globally monotonic object id using the requested type prefix.
+        """
         self._object_counter += 1
         return f"{type_}#{self._object_counter}"
 
