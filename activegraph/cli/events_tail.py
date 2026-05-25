@@ -6,8 +6,8 @@ but it uses the real EventStore protocol rather than a mocked log.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime, timezone
+import json
 from typing import Any
 
 from activegraph.core.event import Event
@@ -38,6 +38,11 @@ def tail_events(store: Any, *, n: int = 20, since: str | None = None, filter_tex
 
     events = list(store.iter_events())
     filtered = [event for event in events if not since or _event_timestamp(event) >= since]
+    if filter_text:
+        filtered = [
+            event for event in filtered
+            if filter_text in json.dumps(_to_output_row(event), sort_keys=True)
+        ]
     selected = filtered[-n:] if n else []
     rows = [_to_output_row(event) for event in selected]
     audit_id = f"evt_events_tail_invoked_{len(events) + 1:03d}"
