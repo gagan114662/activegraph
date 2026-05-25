@@ -36,8 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
@@ -131,7 +130,7 @@ class PackNotFoundError(RegistrationError, LookupError):
             ),
             how_to_fix=(
                 "Confirm the pack is installed:\n"
-                f"    pip show <pack-distribution-name>\n"
+                "    pip show <pack-distribution-name>\n"
                 "\n"
                 "List currently-discovered packs:\n"
                 "    from activegraph.packs import discover\n"
@@ -454,8 +453,26 @@ class PackPrompt:
         return f"sha256:{h}"
 
     @classmethod
-    def from_body(cls, name: str, version: str, body: str) -> "PackPrompt":
-        return cls(name=name, version=version, body=body, content_hash=cls.compute_hash(body))
+    def from_body(
+        cls: type["PackPrompt"], name: str, version: str, body: str
+    ) -> "PackPrompt":
+        """Build a prompt from raw body text.
+
+        Args:
+            name: Prompt name declared by the pack.
+            version: Human-readable prompt version.
+            body: Prompt body used for content hashing.
+
+        Returns:
+            A prompt with its replay content hash populated.
+        """
+
+        return cls(
+            name=name,
+            version=version,
+            body=body,
+            content_hash=cls.compute_hash(body),
+        )
 
 
 def load_prompts_from_dir(path: Union[str, Path]) -> tuple[PackPrompt, ...]:
