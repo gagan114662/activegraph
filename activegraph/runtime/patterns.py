@@ -711,7 +711,17 @@ class PatternMatcher:
     def __init__(self, pattern: Pattern) -> None:
         self.pattern = pattern
 
-    def matches(self, event, graph) -> list[Match]:
+    def matches(self, event: Any, graph: Any) -> list[Match]:
+        """Evaluate this pattern against a graph.
+
+        Args:
+            event: Event that triggered matching. Currently reserved for
+                future event-property bindings.
+            graph: Graph-like object whose objects and relations are matched.
+
+        Returns:
+            Pattern bindings that satisfy the compiled match clause.
+        """
         # `event` is currently unused — patterns evaluate against the
         # post-event graph state. Future extensions may bind event
         # properties (e.g. `$event.payload.x`). v0.7 spec keeps it
