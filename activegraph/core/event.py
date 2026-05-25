@@ -21,7 +21,16 @@ class Event:
     caused_by: Optional[str] = None
     timestamp: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self: "Event") -> dict[str, Any]:
+        """Return this event as a serializable dictionary.
+
+        Args:
+            self: Event instance to serialize.
+
+        Returns:
+            A dictionary containing the event identity, type, payload, actor,
+            frame, causal parent, and timestamp fields.
+        """
         return {
             "id": self.id,
             "type": self.type,
