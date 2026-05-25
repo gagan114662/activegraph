@@ -30,6 +30,7 @@ from activegraph.core.clock import Clock
 from activegraph.core.event import Event
 from activegraph.core.ids import IDGen
 from activegraph.core.patch import Patch
+from activegraph.store.base import EventStore
 
 
 # ---------- handles ----------
@@ -316,7 +317,13 @@ class Graph:
         self._store = store
 
     @property
-    def store(self):
+    def store(self) -> EventStore | None:
+        """Return the event store currently attached to this graph.
+
+        Returns:
+            The attached event store, or ``None`` when this graph is operating
+            without a durability sink.
+        """
         return self._store
 
     # ---------- the only mutator (live path) ----------
