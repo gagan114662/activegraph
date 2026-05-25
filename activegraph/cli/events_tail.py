@@ -19,9 +19,11 @@ def _parse_iso_timestamp(ctx: click.Context, param: click.Parameter, value: str 
     if value is None:
         return None
     try:
-        _datetime_from_iso(value)
+        parsed = _datetime_from_iso(value)
     except ValueError as exc:
         raise click.BadParameter("must be an ISO timestamp", ctx=ctx, param=param) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise click.BadParameter("must be an ISO timestamp with timezone", ctx=ctx, param=param)
     return value
 
 
