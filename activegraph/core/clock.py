@@ -48,7 +48,12 @@ class TickingClock(Clock):
         self._t = datetime.fromisoformat(start.replace("Z", "+00:00"))
         self._step = step_seconds
 
-    def now(self) -> str:
+    def now(self: "TickingClock") -> str:
+        """Return the current timestamp and advance the clock.
+
+        Returns:
+            The current ISO 8601 timestamp before applying the configured step.
+        """
         out = self._t.isoformat(timespec="seconds").replace("+00:00", "Z")
         from datetime import timedelta
 
