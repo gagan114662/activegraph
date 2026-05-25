@@ -120,7 +120,16 @@ class ToolCache:
     # ---- bulk-load from a recorded event log ----
 
     @classmethod
-    def from_events(cls, events: Iterable[Event]) -> "ToolCache":
+    def from_events(cls: type["ToolCache"], events: Iterable[Event]) -> "ToolCache":
+        """Build a cache from recorded tool lifecycle events.
+
+        Args:
+            events: Recorded events containing paired tool.requested and
+                tool.responded entries.
+
+        Returns:
+            A ToolCache populated with replayable tool responses.
+        """
         cache = cls()
         events_list = list(events)
         by_id: dict[str, Event] = {e.id: e for e in events_list}
