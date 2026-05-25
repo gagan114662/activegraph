@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 if TYPE_CHECKING:
     from activegraph.core.event import Event
-    from activegraph.core.graph import Graph
+    from activegraph.core.graph import Graph, Relation
     from activegraph.frame import Frame
     from activegraph.llm.prompt import AssembledPrompt
     from activegraph.runtime.runtime import Context
@@ -83,7 +83,24 @@ class RelationBehavior:
     pattern_matcher: Any = None
     activate_after: Optional[int] = None
 
-    def run(self, relation, event, graph, ctx) -> None:
+    def run(
+        self,
+        relation: "Relation",
+        event: "Event",
+        graph: "Graph",
+        ctx: "Context",
+    ) -> None:
+        """Invoke the relation behavior's registered callable.
+
+        Args:
+            relation: Relation that matched this behavior.
+            event: Event being processed by the runtime.
+            graph: Graph receiving the behavior's writes.
+            ctx: Runtime invocation context for this behavior.
+
+        Returns:
+            None.
+        """
         self.fn(relation, event, graph, ctx)
 
 
