@@ -68,7 +68,12 @@ class Relation:
     data: dict[str, Any]
     provenance: dict[str, Any]
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self: "Relation") -> dict[str, Any]:
+        """Return this relation as a serializable dictionary.
+
+        Returns:
+            A deep-copied dictionary representation of the relation.
+        """
         return {
             "id": self.id,
             "source": self.source,
