@@ -27,7 +27,12 @@ class FrozenClock(Clock):
     def __init__(self, t: str = "2026-05-15T10:32:01Z") -> None:
         self._t = t
 
-    def now(self) -> str:
+    def now(self: "FrozenClock") -> str:
+        """Return the frozen timestamp.
+
+        Returns:
+            The configured ISO 8601 timestamp.
+        """
         return self._t
 
 
