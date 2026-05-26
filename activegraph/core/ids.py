@@ -100,7 +100,12 @@ class IDGen:
         self._frame_counter += 1
         return f"frame_{self._frame_counter:03d}"
 
-    def run(self) -> str:
+    def run(self: "IDGen") -> str:
+        """Return a storage-safe run identifier.
+
+        Returns:
+            A ULID-shaped run id suitable for storage lookup keys.
+        """
         # ULID per CONTRACT v0.5 #6. Not counter-based: runs live in storage
         # and are looked up by id, so collisions across files are the risk.
         return _ulid()
