@@ -31,7 +31,13 @@ class Patch:
     rejection_reason: Optional[str] = None
     provenance: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self: "Patch") -> dict[str, Any]:
+        """Convert the patch to a JSON-serializable dictionary.
+
+        Returns:
+            A dictionary containing the patch identity, target, operation,
+            lifecycle status, and provenance fields.
+        """
         return {
             "id": self.id,
             "target": self.target,
