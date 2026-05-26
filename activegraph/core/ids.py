@@ -82,7 +82,12 @@ class IDGen:
         self._relation_counter += 1
         return f"rel_{self._relation_counter:03d}"
 
-    def patch(self) -> str:
+    def patch(self: "IDGen") -> str:
+        """Return the next patch identifier.
+
+        Returns:
+            A monotonic patch id with the `patch_` prefix.
+        """
         self._patch_counter += 1
         return f"patch_{self._patch_counter:03d}"
 
