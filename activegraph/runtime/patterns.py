@@ -701,7 +701,16 @@ class Match:
     def __getitem__(self, key: str) -> str:
         return self.bindings[key]
 
-    def get(self, key: str, default=None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
+        """Return a binding by key, or a fallback when absent.
+
+        Args:
+            key: Binding name to look up.
+            default: Value returned when the binding is absent.
+
+        Returns:
+            The bound object or relation id, or `default` when `key` is not bound.
+        """
         return self.bindings.get(key, default)
 
 
