@@ -38,7 +38,15 @@ class View:
             out = [o for o in out if evaluate_where(where, _object_root(o))]
         return list(out)
 
-    def relations(self, type: Optional[str] = None) -> list[Relation]:
+    def relations(self: "View", type: Optional[str] = None) -> list[Relation]:
+        """Return relations visible in this view, optionally filtered by type.
+
+        Args:
+            type: Optional relation type to include.
+
+        Returns:
+            Relations matching the view scope and optional type filter.
+        """
         out = self._relations
         if type is not None:
             out = [r for r in out if r.type == type]
