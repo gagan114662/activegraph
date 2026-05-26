@@ -91,7 +91,12 @@ class IDGen:
         self._patch_counter += 1
         return f"patch_{self._patch_counter:03d}"
 
-    def frame(self) -> str:
+    def frame(self: "IDGen") -> str:
+        """Return the next frame identifier.
+
+        Returns:
+            A monotonic frame id with the `frame_` prefix.
+        """
         self._frame_counter += 1
         return f"frame_{self._frame_counter:03d}"
 
