@@ -63,7 +63,8 @@ def test_query_filters_by_type_and_where():
     g.add_object("claim", {"text": "y", "confidence": 0.4})
     g.add_object("task", {"title": "t"})
 
-    high = g.query(object_type="claim", where={"confidence": {">": 0.5}})
+    with pytest.deprecated_call():
+        high = g.query(object_type="claim", where={"confidence": {">": 0.5}})
     assert len(high) == 1
     assert high[0].data["text"] == "x"
 
@@ -114,7 +115,8 @@ def test_objects_and_query_return_the_same_results():
     g.add_object("task", {"title": "t"})
 
     new = g.objects(type="claim", where={"confidence": {">": 0.5}})
-    old = g.query(object_type="claim", where={"confidence": {">": 0.5}})
+    with pytest.deprecated_call():
+        old = g.query(object_type="claim", where={"confidence": {">": 0.5}})
     assert [o.id for o in new] == [o.id for o in old]
 
 
@@ -126,7 +128,17 @@ def test_query_alias_still_works_with_positional_arg():
     g.add_object("claim", {"text": "x"})
     g.add_object("task", {"title": "t"})
 
-    assert {o.type for o in g.query("claim")} == {"claim"}
+    with pytest.deprecated_call():
+        res = g.query("claim")
+    assert {o.type for o in res} == {"claim"}
+
+
+def test_graph_query_deprecation_warning():
+    g = _g()
+    with pytest.deprecated_call() as warning_info:
+        g.query("claim")
+    assert len(warning_info) >= 1
+    assert "Graph.query is deprecated" in str(warning_info[0].message)
 
 
 # v1.0.4 #1: graph.relations(source=, target=, type=) as the canonical

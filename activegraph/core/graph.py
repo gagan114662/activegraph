@@ -275,6 +275,13 @@ class Graph:
         ``type`` matches :meth:`View.objects` so the call reads the
         same in and out of behaviors.
         """
+        import warnings
+
+        warnings.warn(
+            "Graph.query is deprecated and will be removed in v1.2. Use Graph.objects(type=...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.objects(type=object_type, where=where)
 
     def has_object_of_type(self, type_: str) -> bool:

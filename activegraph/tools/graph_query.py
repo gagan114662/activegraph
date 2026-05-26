@@ -45,7 +45,7 @@ class GraphQueryInput(BaseModel):
         default=None,
         description=(
             "Optional filter: dotted-path keys, literal or {op: value} values. "
-            "Same semantics as Graph.query(where=...)."
+            "Same semantics as Graph.objects(where=...)."
         ),
     )
     limit: int = Field(default=50, ge=1, le=500)
