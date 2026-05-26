@@ -52,7 +52,13 @@ class CoercedOverride:
     pack_version: str
     schema_constraint_snapshot: dict[str, Any]
 
-    def to_event_payload(self) -> dict[str, Any]:
+    def to_event_payload(self: "CoercedOverride") -> dict[str, Any]:
+        """Return the override payload used in fork attestation events.
+
+        Returns:
+            A JSON-compatible payload containing pack identity, override key,
+            coerced value, and the schema constraint snapshot.
+        """
         value = to_jsonable_python(self.value)
         snapshot = to_jsonable_python(self.schema_constraint_snapshot)
         return {
