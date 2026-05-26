@@ -44,7 +44,15 @@ class View:
             out = [r for r in out if r.type == type]
         return list(out)
 
-    def events(self, type: Optional[str] = None) -> list[Event]:
+    def events(self: "View", type: Optional[str] = None) -> list[Event]:
+        """Return events visible in this view, optionally filtered by type.
+
+        Args:
+            type: Optional event type to include.
+
+        Returns:
+            Events matching the view scope and optional type filter.
+        """
         out = self._events
         if type is not None:
             out = [e for e in out if e.type == type]
