@@ -79,16 +79,55 @@ class RecordedDiligenceProvider:
     def complete(
         self,
         *,
-        system,
-        messages,
-        model,
-        max_tokens,
-        temperature,
-        top_p,
-        output_schema,
-        timeout_seconds,
-        tools=None,
+        system: str,
+        messages: list[LLMMessage],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        output_schema: Optional[type],
+        timeout_seconds: float,
+        tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
+        """Return a scripted :class:`LLMResponse` for the calling behavior.
+
+        Dispatches off the behavior name extracted from ``system`` (per
+        :func:`activegraph.llm.prompt.build_system_prompt`) and the
+        company name extracted from the last user message. The
+        ``tools`` argument is accepted to satisfy the
+        :class:`~activegraph.llm.provider.LLMProvider` Protocol's v0.7
+        widening and is intentionally unused — recorded fixtures do
+        not exercise the tool-turn loop.
+
+        Args:
+            system: System prompt assembled by the runtime; the
+                fixture sniffs the behavior name out of it.
+            messages: Conversation messages assembled by the runtime;
+                the fixture inspects the last user message to identify
+                the company.
+            model: Model name the runtime selected. Echoed back into
+                the response unchanged.
+            max_tokens: Maximum tokens the runtime would let the
+                provider emit. Ignored by recorded fixtures.
+            temperature: Sampling temperature. Ignored by recorded
+                fixtures.
+            top_p: Nucleus-sampling parameter. Ignored by recorded
+                fixtures.
+            output_schema: Optional Pydantic schema the runtime expects
+                back; used by :func:`_resp` to shape the canned
+                structured output.
+            timeout_seconds: Per-call timeout the runtime would enforce.
+                Ignored by recorded fixtures (no network call).
+            tools: Optional tool list (v0.7+). Accepted for Protocol
+                conformance; recorded fixtures dispatch by behavior
+                name, not by tool invocation.
+
+        Returns:
+            An :class:`LLMResponse` whose ``parsed`` field carries the
+            scripted structured output for the dispatched behavior. The
+            fallback (unknown behavior) is a schema-valid empty
+            object.
+        """
         behavior = _extract_behavior_name(system or "")
         last_user = _last_user_content(messages)
         company_name = _extract_company_name(last_user)
