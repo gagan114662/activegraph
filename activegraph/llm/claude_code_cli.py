@@ -162,17 +162,70 @@ class ClaudeCodeCliProvider:
         timeout_seconds: float,
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
+        # v2 (#27): when tools are passed, spin up an in-process MCP HTTP
+        # server that serves them. claude calls our server via MCP for
+        # each tool_use; the server invokes the Python callable
+        # in-process and returns the result. After claude finishes, we
+        # shut down the server. Tool invocation records land in
+        # provider_meta for audit.
+        tool_server_ctx = None
+        merged_mcp_config = self._mcp_config
         if tools:
-            raise NotImplementedError(
-                "ClaudeCodeCliProvider v1 does not support tools. "
-                "Tool use requires wiring activegraph's tools through "
-                "claude's --mcp-config; deferred to v2."
-            )
+            tool_callables = _extract_tool_callables(tools)
+            if tool_callables:
+                from activegraph.llm._mcp_tool_server import start_tool_server
+                tool_server_ctx = start_tool_server(tool_callables)
+                # Merge the activegraph tools server into the operator's
+                # mcp_config (if any). Don't clobber operator-provided
+                # servers like Pentagon's.
+                merged_mcp_config = dict(self._mcp_config or {})
+                servers = dict(merged_mcp_config.get("mcpServers", {}))
+                servers["activegraph"] = {"type": "http", "url": tool_server_ctx.url}
+                merged_mcp_config["mcpServers"] = servers
+            else:
+                # tools= was a list of dict-shaped definitions WITHOUT
+                # callable references (e.g. AnthropicProvider's
+                # serialized form). We can't invoke them in-process —
+                # raise so the runtime falls back to a different provider
+                # or the caller passes activegraph Tool objects directly.
+                raise NotImplementedError(
+                    "ClaudeCodeCliProvider needs activegraph Tool objects "
+                    "(with .function callable) for v2 MCP tool support. "
+                    "Plain dict tool definitions cannot be invoked in "
+                    "this process — pass the Tool objects from the "
+                    "runtime instead."
+                )
 
         prompt = self._serialize_prompt(system, messages, output_schema)
-        args = self._build_args(model)
+        args = self._build_args(model, mcp_config_override=merged_mcp_config)
         env = self._build_env()
 
+        response = None
+        try:
+            response = self._dispatch(prompt, args, env, timeout_seconds, model, usage_extras={"tool_invocations": []})
+        finally:
+            if tool_server_ctx is not None:
+                try:
+                    if response is not None and getattr(response, "provider_meta", None) is not None:
+                        response.provider_meta["tool_invocations"] = list(tool_server_ctx.invocations)
+                except Exception:
+                    pass
+                tool_server_ctx.shutdown()
+        return response
+
+    def _dispatch(
+        self,
+        prompt: str,
+        args: list[str],
+        env: dict[str, str],
+        timeout_seconds: float,
+        model: str,
+        usage_extras: Optional[dict[str, Any]] = None,
+    ) -> LLMResponse:
+        """Inner dispatch — actually invokes claude. Split from complete() so
+        the tool-server lifecycle (start_tool_server / shutdown) wraps the
+        whole subprocess + parse + emit flow cleanly.
+        """
         t0 = time.monotonic()
         try:
             proc = subprocess.run(
@@ -377,7 +430,7 @@ class ClaudeCodeCliProvider:
             )
         return "\n\n".join(parts)
 
-    def _build_args(self, model: str) -> list[str]:
+    def _build_args(self, model: str, mcp_config_override: Optional[dict[str, Any]] = None) -> list[str]:
         args = [
             "--print",
             "--output-format", "stream-json",
@@ -385,8 +438,9 @@ class ClaudeCodeCliProvider:
             "--dangerously-skip-permissions",
             "--model", model,
         ]
-        if self._mcp_config is not None:
-            args.extend(["--strict-mcp-config", "--mcp-config", json.dumps(self._mcp_config)])
+        effective_mcp = mcp_config_override if mcp_config_override is not None else self._mcp_config
+        if effective_mcp is not None:
+            args.extend(["--strict-mcp-config", "--mcp-config", json.dumps(effective_mcp)])
         return args
 
     def _build_env(self) -> dict[str, str]:
@@ -440,6 +494,40 @@ class ClaudeCodeCliProvider:
                     if isinstance(block, dict) and block.get("type") == "text":
                         last_text = block.get("text", last_text)
         return last_text or ""
+
+
+def _extract_tool_callables(tools: list[Any]) -> dict[str, dict[str, Any]]:
+    """Build the {name: {function, description, input_schema}} dict the
+    in-process MCP server expects, from whatever shape `tools` came in
+    as. Supports two shapes:
+
+      1. activegraph Tool objects: have .name + .function + (optional)
+         .description + .input_schema attributes. Common when caller is
+         the runtime passing actual @tool-decorated callables.
+      2. Plain dicts: {name, description, input_schema, function}.
+         The `function` key is REQUIRED for in-process invocation; dicts
+         without it can't be served and the caller gets NotImplementedError.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for tool in tools or []:
+        if hasattr(tool, "name") and (hasattr(tool, "function") or callable(getattr(tool, "func", None))):
+            fn = getattr(tool, "function", None) or getattr(tool, "func", None)
+            if fn is None:
+                continue
+            out[tool.name] = {
+                "function": fn,
+                "description": getattr(tool, "description", "") or "",
+                "input_schema": getattr(tool, "input_schema", None) or {"type": "object", "properties": {}},
+            }
+        elif isinstance(tool, dict) and "function" in tool and callable(tool["function"]):
+            out[tool["name"]] = {
+                "function": tool["function"],
+                "description": tool.get("description", "") or "",
+                "input_schema": tool.get("input_schema") or {"type": "object", "properties": {}},
+            }
+        # Dict-without-function shape is intentionally ignored here so
+        # complete() can fall through to NotImplementedError.
+    return out
 
 
 def _classify_claude_error(result_event: dict[str, Any]) -> str:
