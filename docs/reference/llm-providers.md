@@ -110,6 +110,17 @@ by design: only *recognized* cross-provider mismatches fire.
 | Exception mapping | `llm.rate_limited` on 429-shaped errors; `llm.network_error` for everything else (timeouts, connection errors, **auth failures**) | Same mapping |
 | Pricing | Family-prefix lookup; override with `pricing=` kwarg | Family-prefix lookup; override with `pricing=` kwarg |
 
+Tool-call event payloads keep the same provider-neutral shape for both
+providers: `id`, `name`, and `args`. OpenAI tool calls whose raw
+`arguments` cannot be accepted as JSON-object arguments still use that
+serialized shape; the rejection marker remains provider-internal.
+Invalid arguments surface through the runtime as `tool.invalid_input`.
+`LLMResponse.to_dict()` filters the private provider metadata marker,
+and LLM-cache replay plus recorded fixture hydration ignore any
+persisted `invalid_args_error` value instead of widening the public
+tool-call payload. Invalid-tool-input LLM turns are skipped for durable
+LLM replay rather than restored from provider metadata.
+
 ## Mixing with [`RecordedLLMProvider`](api/index.md)
 
 The fixture-backed provider is provider-agnostic: fixtures are keyed

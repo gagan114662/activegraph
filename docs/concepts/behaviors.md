@@ -82,7 +82,7 @@ mutation lands as an event in the log; downstream behaviors react.
   from an LLM call. The framework handles the prompt assembly, the
   provider call, the cache, the tool loop, and the schema
   validation; the body receives the parsed LLM output and turns it
-  into graph mutations. See the [LLM behavior guide](../guides/writing-llm-behaviors.md).
+  into graph mutations.
 - **`@relation_behavior`** — attached to a relation type rather
   than an event type. Fires when an event affects an endpoint of
   the relation. See [`relations`](relations.md).
@@ -149,5 +149,5 @@ LLM/tool failure shapes specifically.
   subscription primitive.
 - [`failure-model`](failure-model.md) — what happens when a
   behavior body raises.
-- [Writing behaviors](../guides/writing-behaviors.md) — the
-  how-to guide.
+- [Authoring packs](../guides/authoring-packs.md) — the how-to guide
+  for packaging behaviors, tools, prompts, and policies.

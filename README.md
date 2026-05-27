@@ -47,8 +47,7 @@ pip install "activegraph[all]"             # everything
 Both LLM providers expose the same `LLMProvider` Protocol surface;
 swap one for the other without touching `@llm_behavior` definitions.
 The [LLM providers reference](https://docs.activegraph.ai/reference/llm-providers/)
-covers the side-by-side surface and the v1.0.1 limitations
-(OpenAI tool use is a v1.1 candidate).
+covers the side-by-side surface, including OpenAI tool-use parity.
 
 Python 3.11+. Two hard dependencies (`click` for the CLI, `pydantic`
 for the pack format); persistence backends and provider integrations

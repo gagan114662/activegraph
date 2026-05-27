@@ -37,6 +37,17 @@ shared `LLMResponse.tool_calls` model. Tool-result messages are sent
 back as OpenAI `role="tool"` messages with the matching
 `tool_call_id`.
 
+The normalized event payload stays provider-neutral. Valid
+`llm.responded.tool_calls` entries serialize as `id`, `name`, and
+`args`. When OpenAI returns malformed tool-call arguments, the provider
+keeps the rejection marker internal; the recorded tool-call entry still
+uses only `id`, `name`, and `args`. `LLMResponse.to_dict()` also
+filters the private provider metadata marker. LLM-cache replay and
+recorded fixture hydration keep that boundary: if a fixture or older
+event payload carries `invalid_args_error`, hydration ignores it.
+Invalid-tool-input LLM turns are skipped for durable replay instead of
+being restored from provider metadata.
+
 ## Runtime-owned parsing
 
 For providers that declare `runtime_parses_output = True`, the
@@ -56,7 +67,9 @@ operator surface:
 
 - Provider/network failures still map to `llm.network_error` or
   provider-specific existing LLM reasons such as `llm.rate_limited`.
-- Invalid tool arguments still use `tool.invalid_input`.
+- Invalid tool arguments still use `tool.invalid_input`, including
+  OpenAI tool calls whose raw `arguments` JSON is malformed or does
+  not decode to an object.
 - Structured-output parse failures still use the existing LLM parse or
   schema violation path, surfaced through `behavior.failed`.
 

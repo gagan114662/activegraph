@@ -131,6 +131,6 @@ broader principle.
   wrong-type values (e.g., PostgresEventStore target).
 - [`incompatible-runtime-state`](incompatible-runtime-state.md) —
   sibling for state invariants violated at operation time (fork on
-  non-SQLite, attach_store when attached).
+  non-SQLite, attach_store with a different store after events exist).
 - `activegraph migrate` in the [CLI reference](../cli/) — the
   primitive for the save_state-path-conflict recovery.

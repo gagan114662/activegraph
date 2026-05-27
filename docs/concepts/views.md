@@ -136,5 +136,5 @@ behaviors.
 - [`patches`](patches.md) — the write-side counterpart. Behaviors
   read through views and write through patches (or direct
   mutation).
-- [Writing LLM behaviors](../guides/writing-llm-behaviors.md) —
-  practical guidance on view scoping for cost efficiency.
+- [`behaviors`](behaviors.md) — practical context for LLM behaviors
+  and view scoping.

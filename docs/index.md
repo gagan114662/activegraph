@@ -38,9 +38,8 @@ visit it directly; the error message that fired tells you which page.
 
 ## When you're building something
 
-- **[Guides](guides/writing-behaviors.md)** — concrete how-tos for
-  writing behaviors, LLM behaviors, tools, pattern subscriptions,
-  packs, and operating a run in production.
+- **[Guides](guides/operating-in-production.md)** — concrete how-tos for
+  authoring packs and operating a run in production.
 - **[Concepts](concepts/graph.md)** — the model's primitives (graph,
   events, behaviors, relations, patches, views, frames, policies,
   replay, forking) explained one at a time.

@@ -3,8 +3,8 @@
 An operation requires a runtime state that isn't satisfied — either
 a state that must be set but isn't, or a state that mustn't be set
 but is. Two sites currently raise this: `runtime.fork()` requires a
-SQLite-backed runtime, and `graph.attach_store()` requires no store
-already attached.
+SQLite-backed runtime, and `graph.attach_store()` refuses a different
+store after the graph has emitted events.
 
 This is part of the three-page Configuration cluster, along with
 [`invalid-runtime-configuration`](invalid-runtime-configuration.md)
@@ -29,22 +29,29 @@ activegraph fork sqlite:///fork-source.db --run-id <run> --at-event <evt>
 v0.8 #5). Postgres-native forking is a known v1.1 follow-on — file
 an issue if you need it for a production workflow.
 
-### attach_store when one is already attached
+### attach_store with a different store after events exist
 
 ```python
-# Construct a new Graph rather than re-attaching:
+# Before events exist, replacing the store is allowed:
 fresh = Graph()
+fresh.attach_store(initial_store)
 fresh.attach_store(new_store)
+
+# After events exist, construct a new Graph rather than re-attaching:
+replacement = Graph()
+replacement.attach_store(new_store)
 
 # Or, to copy the existing run to a new store, use migration:
 # activegraph migrate --from <old-url> --to <new-url>
 ```
 
-A Graph's store attaches at most once per lifetime. Re-attaching
-would split the event log across two stores (subsequent events
-going to the new one, earlier events stuck in the old) or require
-a copy operation that isn't an attach. Migration is the right
-primitive for moving a run between stores.
+Re-attaching the identical store is idempotent, and attaching a
+different store is legal while the graph has emitted no events.
+After events exist, switching to a different store would split the
+event log across two stores (subsequent events going to the new one,
+earlier events stuck in the old) or require a copy operation that
+isn't an attach. Migration is the right primitive for moving a run
+between stores.
 
 ## How to diagnose
 
@@ -85,8 +92,8 @@ corrupt the audit trail:
 - Fork on non-SQLite would either skip the operation silently (no
   fork happens) or attempt a copy via a primitive the store doesn't
   support (partial copy that mixes runs).
-- Re-attaching a store would split a single run's event log across
-  two stores, making replay see only half.
+- Attaching a different store after events exist would split a single
+  run's event log across two stores, making replay see only half.
 
 Refusing the operation is the framework's way of asking the operator
 to pick the right primitive (migrate, fresh Graph) instead of

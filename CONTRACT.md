@@ -3386,7 +3386,7 @@ v1.0-rc1 follow-on.
 - `runtime.py:1938` RuntimeError (fork requires SQLite) → **PR-F**
 - `runtime.py:257, 1464, 1790, 1803` ValueError (argument validation)
   → **PR-F**
-- `graph.py:240` RuntimeError ("graph already has a store") → **PR-F**
+- `graph.py:240` RuntimeError ("graph already has a store after events") → **PR-F**
 - `graph.py:544` ValueError (patch not proposed) → **PR-G** or
   v1.0-rc1 follow-on (patch lifecycle, post-PR-D territory)
 - `graph.py:766` ValueError (unknown where operator) — internal
@@ -3488,7 +3488,7 @@ audit trail" framing surfaced the right one on second reading.
   operation requires a runtime state that's not satisfied. Used by
   2 sites:
   - `runtime.py:1960` — fork() requires SQLite-backed runtime
-  - `graph.py:240` — attach_store when one is already attached
+  - `graph.py:240` — attach_store with a different store after events exist
   Recovery prose for the fork case flags the Postgres-native-fork
   gap as a v1.1 follow-on (the primitive shape is known but needs
   Postgres operational experience to land).
@@ -4045,13 +4045,14 @@ from runtime engineering.
 
 # v1.0.1 — first external user-test patch
 
-**Review status (2026-05-19):** STILL ACCURATE. #5(c) clauses 1–4
-(token-counting asymmetry, Anthropic-only tool use, instruction-
-based structured output, closed reason taxonomy) all remain
-honest non-promises; the v1.1 candidates they named are
-consolidated in `v1.1-plan.md` (B-1 OpenAI tool-shape, B-2 native
-structured output). Tests for #1–#4 anchor on contract claims
-(see review §4).
+**Review status (2026-05-22):** PARTLY SUPERSEDED. #5(c) clauses
+1, 3, and 4 (token-counting asymmetry, instruction-based structured
+output, closed reason taxonomy) remain honest non-promises. #5(c)
+clause 2 (Anthropic-only tool use) is archeology for the v1.0.1
+release line and is superseded by v1.1 #11's OpenAI tool parity
+closure. B-2 native structured output remains consolidated in
+`v1.1-plan.md`; B-1 is closed by v1.1 #11. Tests for #1–#4 anchor
+on contract claims (see review §4).
 
 The first external user-test produced three small findings, all on
 the "X is confusing" UX side of the heuristic in HANDOFF.md, none
@@ -4196,7 +4197,7 @@ implementation and don't leak into the Protocol surface. New
 providers join by implementing the three methods; they don't
 negotiate the abstraction.
 
-### v1.1 B-1 closure amendment: OpenAI tool parity
+### v1.1 #11. B-1 closure amendment: OpenAI tool parity
 
 T4 closes the v1.0.1 non-promise for OpenAI tool use without widening
 `LLMProvider`. Framework `Tool` objects remain the behavior-facing
@@ -4226,6 +4227,98 @@ invalid tool arguments continue to use `tool.invalid_input`; final
 parse/schema failures continue through the existing behavior failure
 path. Native provider structured-output modes remain outside this
 closure.
+
+Commit `inner:068cdc8` internalizes the OpenAI invalid-argument marker
+needed to route malformed provider arguments into that existing
+`tool.invalid_input` path. v1.1 #12 below makes that boundary explicit:
+the marker is not a public event or fixture field.
+
+T5b hardens the same provider-local boundary for response shape
+tolerance. Per `inner:8d3ff89` (red predicate) and `inner:ccd4f45`
+(GREEN implementation), `OpenAIProvider.complete()` accepts both SDK
+object-shaped chat-completion responses and mapping-shaped responses
+for the same fields: `choices[0]`, `message.content`,
+`message.tool_calls`, `finish_reason`, `usage.prompt_tokens`,
+`usage.completion_tokens`, and `model`. Both shapes normalize into the
+same `LLMResponse` contract. Missing choices produce empty text and no
+tool calls; missing usage counts as zero tokens; missing model falls
+back to the requested model; missing finish reason falls back to
+`"stop"`.
+
+Mapping-shaped content blocks concatenate their `text` fields the same
+way SDK-object content blocks do. Mapping-shaped tool calls normalize
+through the existing provider-neutral `ToolCall` surface: `function`
+fields may be mappings, `arguments` may be a JSON string or mapping,
+and non-object decoded JSON remains representable through the existing
+`{"_raw": ...}` fallback. This amendment does not widen
+`LLMProvider`, add event fields, or add reason codes; the provider's
+job is to normalize SDK/wire variance before the runtime sees
+`LLMResponse`.
+
+### v1.1 #12. Invalid OpenAI tool-argument marker internalization
+
+Commit `inner:068cdc8` internalizes the invalid OpenAI tool-argument
+marker. The marker is not a new reason code and does not change the
+failure path: malformed provider arguments still fail through
+`tool.invalid_input`, observed via `tool.responded` and terminal
+`behavior.failed`.
+
+Commits `inner:d691afc` and `inner:7886d71` close the boundary after the
+transient `inner:605c438` / `inner:c28c3c0` serialization experiment:
+the marker is provider-internal and MUST NOT serialize through
+`ToolCall.to_dict()`, `LLMResponse.to_dict()`, cache replay,
+recorded-fixture hydration, or `llm.responded.tool_calls`. Recorded
+tool calls keep the public provider-neutral shape `id`, `name`, and
+`args`; valid and invalid tool calls use the same serialized shape.
+Parity tests assert absence of `invalid_args_error` from persisted
+`llm.responded.tool_calls[]`. The cache key and provider abstraction do
+not widen.
+
+Commit `inner:5c2cd8e` extends the same internal-only boundary to
+durable provider metadata. The reserved
+`activegraph.invalid_tool_args` metadata key is runtime/private state:
+`LLMResponse.to_dict()` MUST NOT persist it in `provider_meta`, and
+cache or recorded-fixture hydration MUST filter it if found in older
+logs or fixtures. An LLM turn that reaches `tool.invalid_input` because
+of invalid provider-native tool arguments is not eligible for durable
+LLM-cache replay; `LLMCache.from_events()` and inline cache recording
+skip that response rather than persisting the marker or re-validating
+the public `id`/`name`/`args` shape incorrectly. Replays and forks
+therefore call the provider again for that turn, and the failure still
+routes through the existing `tool.invalid_input` path.
+
+### v1.1 #13. `Graph.attach_store()` fresh-graph replacement
+
+Commits `inner:df06a9a` (red regression) and `inner:545889f`
+(GREEN implementation) narrow the `Graph.attach_store()` incompatibility
+boundary. Re-attaching the identical store remains idempotent. Attaching
+a different store is legal while the graph has emitted no events,
+because no history can be split across durability sinks. Once the graph
+has events, attaching a different store still raises
+`IncompatibleRuntimeState`.
+
+This supersedes the shorthand in the PR-F error-audit prose that named
+the site as "`attach_store` when one is already attached": the binding
+condition is "`attach_store` with a different store after events exist."
+The error class, recovery category, snapshot name, and event durability
+invariant do not change.
+
+### v1.1 #14. `Graph.query()` deprecation
+
+Commit `inner:ba88d88` starts the v1.0.3 #1 revisit promised below:
+`Graph.objects(type=..., where=...)` remains the canonical graph query
+API, while `Graph.query(object_type=..., where=...)` remains callable
+only as a backward-compatible alias. Calling the alias now emits a
+`DeprecationWarning` with the removal target `v1.2` and points callers
+to `Graph.objects(type=...)`.
+
+The behavior surface does not change: positional `Graph.query("kind")`,
+keyword `object_type=`, and `where=` continue to return the same objects
+as `Graph.objects(type=..., where=...)`. This is a warning-only
+deprecation, not an early removal. The reference `graph_query` tool is
+not deprecated by this amendment; its user-facing schema now describes
+filter semantics in terms of `Graph.objects(where=...)` so it no longer
+teaches new callers the retiring alias.
 
 ### (b) Three-extras install pattern
 
@@ -4264,16 +4357,16 @@ technical essay.
    the heuristic is the offline fallback. The asymmetry is named,
    not hidden.
 
-2. **Tool use is Anthropic-only in v1.0.1.** `Tool.to_definition()`
-   emits the Anthropic `{name, description, input_schema}` shape;
+2. **Tool use was Anthropic-only in v1.0.1.** This clause is
+   archeology for the v1.0.1 release line: `Tool.to_definition()`
+   emitted the Anthropic `{name, description, input_schema}` shape;
    OpenAI's `{type:"function", function:{name, description,
-   parameters}}` shape would require translation in
-   `Tool.to_definition()` plus a parallel `tool_calls` extraction
-   path in the provider. `OpenAIProvider.complete()` accepts the
-   `tools=` kwarg for Protocol compatibility but raises
-   `LLMBehaviorError(reason="llm.network_error")` with a v1.1
-   pointer when the list is non-empty. Tool-shape translation is
-   scheduled under v1.1 #7-and-beyond.
+   parameters}}` shape required provider-local translation plus a
+   parallel `tool_calls` extraction path in the provider. Current
+   v1.1 behavior is superseded by v1.1 #11 above: `OpenAIProvider`
+   accepts the Protocol `tools=` kwarg, translates tool definitions
+   locally, and normalizes OpenAI tool calls into
+   `LLMResponse.tool_calls`.
 
 3. **Native structured-output modes are v1.1 candidates.** Both
    providers use the framework's instruction-based structured-
@@ -4731,7 +4824,8 @@ The fix is additive and small:
 - **`Graph.query(object_type=None, where=None)`** stays as a
   backward-compatible alias. No deprecation warning in v1.0.3; the
   alias keeps `tools/graph_query.py` and any external code working.
-  v1.1 or later can revisit whether to deprecate.
+  v1.1 #14 revisits this decision: the alias still works but emits a
+  `DeprecationWarning` and names v1.2 as the removal target.
 - **`Graph.all_objects()`** stays as is. Distinct intent
   (no-filter, mirror of `events` / `relations` properties); kept
   to avoid breaking the ~10 internal callsites and the documented
@@ -4751,8 +4845,8 @@ v1.0.1, v1.0.2). The internal tool `tools/graph_query.py` calls it.
 Pack examples and notebook tutorials in the wild may call it. The
 v1.0.3 release is "patch release based on user-test findings," not
 "reshape the query surface." Keeping the alias silent for one
-release lets the docs and ecosystem migrate; v1.1 or later locks
-the decision.
+release lets the docs and ecosystem migrate. v1.1 #14 locks the
+decision: warn in v1.1, remove no earlier than v1.2.
 
 ### Documentation
 
@@ -5045,25 +5139,19 @@ Filed as an adjacent fix in the same commit because the two
 together are the unit of testable behavior; splitting them ships
 the runtime fix with no test coverage.
 
-### OpenAI tool support is out of scope
+### OpenAI tool support was still out of scope for v1.0.3
 
 CONTRACT v1.0.1 #5 (c) clause 2 documented OpenAI tool support as
-a v1.1 candidate. v1.0.3 #4 fixes the documented Anthropic tool
-path; it does **not** add OpenAI tool translation. The new
-`LLMMessage.tool_calls` field is invisible to
-`OpenAIProvider._message_to_openai` (the OpenAI path doesn't
-consume it), so the field addition is non-breaking for the
-OpenAI provider.
+a v1.1 candidate. v1.0.3 #4 fixed the documented Anthropic tool
+path; it did **not** add OpenAI tool translation. That historical
+v1.0.3 boundary is now superseded by v1.1 #11, which closes OpenAI
+tool parity with provider-local function-tool translation,
+OpenAI `tool_calls` normalization into `LLMResponse.tool_calls`,
+and unchanged `LLMProvider` Protocol shape.
 
-**v1.1 candidate** (already filed in v1.0.1 #5 (c) clause 2;
-restated here for the v1.1 backlog consolidation pass): "OpenAI
-tool-use translation. `OpenAIProvider.complete()` doesn't accept
-tools or reshape `LLMMessage.tool_calls` for the OpenAI
-`tool_calls` wire format. Design pass needed: response-extraction
-shape (OpenAI returns `tool_calls` on `choice.message`, not as
-content blocks), tool-result message shape (OpenAI's `role='tool'`
-with `tool_call_id`, which `_message_to_openai` already handles
-for the v0.7 single-direction case)."
+The former v1.1 candidate text is preserved only as release
+archeology for why v1.0.3 did not cover OpenAI tools. It is no
+longer an active backlog item after v1.1 #11.
 
 ## v1.0.3 deliberately does NOT touch
 
@@ -5096,8 +5184,8 @@ Restated here for the post-v1.0.3 consolidation pass:
    per v1.0.3 #2.
 2. **`on_failure=` callback on `run_goal()` and siblings.** Design
    pass needed per v1.0.3 #3.
-3. **OpenAI tool-use translation.** Restated from v1.0.1 #5 (c)
-   clause 2 per v1.0.3 #4; design pass needed.
+3. **OpenAI tool-use translation.** Closed by v1.1 #11; it remains
+   listed here only as v1.0.3 backlog archeology.
 4. **Fire-once-on-condition aggregation triggers for LLM
    behaviors.** Finding E per v1.0.3's scope discipline; current
    workaround is the gate-behavior pattern (Python `@behavior`
@@ -6932,20 +7020,11 @@ above):
   parent's `forked_at_event_id` (already on the runs row) and
   pre-populate the cache from the parent's events through that
   point. New runtime behavior, banned in v1.0; opens up in v1.1.
-- **OpenAI tool-shape translation in `Tool.to_definition()`** (filed
-  during v1.0.1 #5 OpenAI provider work). The shipped framework's
-  `Tool.to_definition()` emits the Anthropic tool shape
-  (`{name, description, input_schema}`); OpenAI's chat-completions
-  API expects `{type:"function", function:{name, description,
-  parameters}}`, and the response carries `tool_calls` rather than
-  `tool_use` content blocks. `OpenAIProvider.complete()` currently
-  raises `LLMBehaviorError(reason="llm.network_error")` when
-  `tools=` is non-empty, with a v1.1 pointer. v1.1 scope: provider-
-  aware tool-shape translation (either parameterize
-  `Tool.to_definition(provider="anthropic"|"openai")` or push the
-  shape into the provider's `complete()`), parallel `tool_calls`
-  extraction in `OpenAIProvider`, and parity tests across both
-  providers for the same tool-using behavior.
+- **OpenAI tool-shape translation** is closed by v1.1 #11. Framework
+  `Tool` definitions remain provider-neutral, `OpenAIProvider`
+  translates to OpenAI's function-tool wire shape locally, and OpenAI
+  `tool_calls` normalize into `LLMResponse.tool_calls`. Provider-native
+  structured-output modes remain separate backlog below.
 - **Native structured-output modes for providers that support them**
   (filed during v1.0.1 #5 OpenAI provider work). Both shipped
   providers use the framework's instruction-based path: the schema
