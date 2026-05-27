@@ -74,4 +74,8 @@ def _object_root(o: Object) -> dict[str, Any]:
         "data": o.data,
         "version": o.version,
         "provenance": o.provenance,
+        # also expose data fields at top level for convenience — mirrors
+        # graph._eval_where_on_object so call sites read the same inside
+        # and outside behaviors (Graph.objects docstring, graph.py:253).
+        **o.data,
     }
