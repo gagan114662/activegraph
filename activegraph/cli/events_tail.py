@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from datetime import datetime
 from typing import Any, Optional
 
@@ -83,10 +84,16 @@ def _resolve_active_store() -> Any:
         raise RuntimeError(_NO_STORE_MSG)
     run_id = os.environ.get("ACTIVEGRAPH_RUN_ID") or os.environ.get("ACTIVEGRAPH_RUN")
     if not run_id:
-        run_id = _most_recent_run_id(url)
+        try:
+            run_id = _most_recent_run_id(url)
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"{_NO_STORE_MSG}: {exc}") from exc
     if not run_id:
         raise RuntimeError(_NO_STORE_MSG)
-    return open_store(url, run_id=run_id)
+    try:
+        return open_store(url, run_id=run_id)
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"{_NO_STORE_MSG}: {exc}") from exc
 
 
 def _most_recent_run_id(url: str) -> str | None:
