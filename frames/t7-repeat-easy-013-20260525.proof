@@ -1,0 +1,11 @@
+hash=T7_REPEAT_EASY_20260525_013
+run_seed=11543407-cfef-4e01-a835-a6250025a758
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=52e01ae
+target_file=activegraph/core/graph.py:47
+target_symbol=activegraph.core.graph.Object.to_dict
+agent_commit_sha=52e01ae901fc248d0b64092808caaa198349aa1f
+pytest_before=697
+pytest_after=697
+ruff_target_exit=0
+verdict=native_easy_done

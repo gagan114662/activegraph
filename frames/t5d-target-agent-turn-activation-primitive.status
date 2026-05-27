@@ -1,0 +1,130 @@
+status: blocked_unbounded_internal_trigger_queue
+evaluated_utc: 2026-05-22T22:28:00Z
+owner: Riley / Evidence Lead
+
+live_checks:
+  pentagon_app_running: true
+  codex_session_has_pentagon_mcp_tools: false
+  pentagon_spawned_agent_processes_active: false
+  default_model_before_repair: claude-opus-4-7[1m]
+  default_model_after_repair: gpt-5.5
+  claude_mcp_connected: true
+  mcp_tools_catalog_has_target_turn_primitive: false
+  spawned_t5d_agent_id: 9dfa236a-e370-418a-be1c-32bb3026d1af
+  spawned_t5d_conversation_id: 259f5017-654f-443c-a87e-62fd74ebab64
+  spawned_t5d_current_task_after_message: null
+  spawned_t5d_visible_reply_after_30s: false
+  hidden_target_schedule_action_id: 0162deda-7227-47f4-bb66-4b44023acc1e
+  hidden_target_schedule_pending_after_cron_window: false
+  hidden_target_schedule_target_reply_after_cron_window: false
+  hidden_target_schedule_worker_process_after_cron_window: false
+  t5c_delayed_ack_found: true
+  t5c_delayed_ack_not_within_window: true
+  t5d_heartbeat_handoff_hash: T5D_HEARTBEAT_HANDOFF_2026-05-22T2208Z
+  t5d_heartbeat_handoff_sent_by_theo_at: 2026-05-22T22:06:08Z
+  t5d_maya_ack_after_90s: false
+  t5d_internal_trigger_id: 3737cf58-35d1-497b-a076-7ea5649758e7
+  t5d_internal_trigger_created_at: 2026-05-22T22:06:08Z
+  t5d_internal_trigger_claimed_at: 2026-05-22T22:11:46Z
+  t5d_internal_trigger_completed_at: 2026-05-22T22:12:35Z
+  t5d_maya_ack_at: 2026-05-22T22:12:19Z
+  t5d_message_to_trigger_claim_seconds: 337
+  t5d_message_to_ack_seconds: 370
+  t5d_trigger_claim_to_ack_seconds: 33
+  t5d_direct_queue_probe_hash: T5D_DIRECT_QUEUE_PROBE_20260522T222533Z
+  t5d_direct_queue_probe_message_id: eb29473d-b61d-4954-a9d3-94d9a35cffd2
+  t5d_direct_queue_probe_trigger_id: 59d84468-a2f0-453c-b43b-6ff7de1e459d
+  t5d_direct_queue_probe_trigger_auto_created: true
+  t5d_direct_queue_probe_trigger_claimed_after_110s: false
+  t5d_direct_queue_probe_maya_ack_after_110s: false
+  t5d_trigger_bridge_script: scripts/pentagon-trigger-bridge.mjs
+  t5d_trigger_bridge_check: node --check scripts/pentagon-trigger-bridge.mjs
+  t5d_trigger_bridge_probe_hash: T5D_BRIDGE_VISIBLE_PROBE_20260522T223300Z
+  t5d_trigger_bridge_probe_trigger_id: d2200d94-cb6f-43ba-a85d-9c0f2ef058e2
+  t5d_trigger_bridge_probe_message_id: 669fcba7-2ca5-4971-9641-79f7d2d67527
+  t5d_trigger_bridge_probe_ack_message_id: 4956fb18-ae95-4f78-bf4d-dd0be5de53af
+  t5d_trigger_bridge_probe_message_to_ack_seconds: 20
+  t5d_trigger_bridge_probe_message_to_complete_seconds: 20
+  t5d_bridge_loop_gauntlet_stamp: 20260522T224124Z
+  t5d_bridge_loop_gauntlet_easy: green
+  t5d_bridge_loop_gauntlet_medium: green
+  t5d_bridge_loop_gauntlet_hard: green
+  t5d_bridge_loop_gauntlet_extra_hard: green
+  t5d_bridge_loop_reverse_terminal_triggers_completed: true
+  t5d_launchd_bridge_service: running
+  t5d_launchd_bridge_clean_hash: T5D_LAUNCHD_BRIDGE_CLEAN_20260522T224946Z
+  t5d_launchd_bridge_clean_trigger_id: 456fbf43-ad74-4850-ae42-abd1aeedbe93
+  t5d_launchd_bridge_clean_ack_message_id: 156c3045-ff60-43df-a808-5f80cbea2926
+  t5d_launchd_bridge_clean_ack_count: 1
+  t5d_launchd_bridge_clean_reverse_trigger_completed: true
+  t5d_skill_load_frontmatter_repaired: true
+  t5d_skill_load_smoke_exit: 0
+  t5d_skill_load_smoke_stderr: empty
+  t5d_launchd_skill_clean_hash: T5D_LAUNCHD_SKILL_CLEAN_20260522T225528Z
+  t5d_launchd_skill_clean_ack_message_id: 069f1e8b-e9fc-48ab-920a-469b7765b48c
+  t5d_launchd_skill_clean_stderr_tail: empty
+  pentagon_default_model: gpt-5.5
+  pentagon_activegraph_agents_model_readback_count: 20
+  pentagon_activegraph_agents_non_gpt55_count: 0
+  t5d_file_backed_gauntlet_stamp: 20260522T230015Z
+  t5d_file_backed_gauntlet_easy_artifact: frames/t5d-file-gauntlet-easy-20260522T230015Z.proof
+  t5d_file_backed_gauntlet_medium_artifact: frames/t5d-file-gauntlet-medium-20260522T230015Z.proof
+  t5d_file_backed_gauntlet_hard_artifact: frames/t5d-file-gauntlet-hard-20260522T230015Z.proof
+  t5d_file_backed_gauntlet_extra_hard_artifact: frames/t5d-file-gauntlet-extra-hard-20260522T230015Z.proof
+  t5d_file_backed_gauntlet_reverse_triggers_completed: true
+  live_heartbeat_spawned_codex_workers: true
+  mapped_mcp_worker_models: gpt-5.5
+
+current_evidence:
+  - frames/t5b-pentagon-handoff-activation-smoke.evaluation.log records closed_watchdog_assisted and autonomous_closure false.
+  - frames/t5c-recipient-self-watchdog-smoke.evaluation.log records goal.incomplete because Maya did not produce WATCHDOG_ACK or WATCHDOG_NO_HANDOFF after Theo's handoff.
+  - frames/pentagon-purpose-repair-2026-05-22.log records that MCP send_message produced 0/9 PURPOSE_PATCHED, 0/9 PURPOSE_BLOCKED, 9/9 SILENT before exact-DM UI activation.
+  - frames/pentagon-model-refresh-2026-05-22.log records the latest default-model drift and repair.
+  - Direct MCP tools/list at 2026-05-22T21:57Z exposed send_message, find_conversation, read_messages, caller-scoped schedule_action, and spawn_agent, but no trigger_turn, target_agent_id, executeAgentTurn, or target conversation scheduling primitive.
+  - MCP spawn_agent created T5d Activation Engineer and send_message delivered the T5d prompt, but no local codex exec worker process appeared and read_messages showed only Priya's spawn/message entries after the observation window.
+  - A negative probe passed hidden agent_id, target_agent_id, and conversation_id fields to schedule_action. The tool accepted the request and returned action 0162deda-7227-47f4-bb66-4b44023acc1e, but list_scheduled_actions showed no target metadata. After the cron window the action was no longer pending, yet the T5d conversation still contained only Priya's spawn/message entries, T5d current_task was null, and no codex exec worker process appeared.
+  - A later readback of the Theo-Maya conversation found delayed T5c ACKs from Maya at 2026-05-22T20:50:57Z and 2026-05-22T20:53:08Z. These invalidate a permanent "no ACK ever" claim, but not the autonomy blocker because they landed far outside the intended watchdog window.
+  - After live UI selection/heartbeat catch-up, Pentagon spawned multiple local codex exec workers. Token-to-agent mapping showed MCP-attributed workers running gpt-5.5 for Maya, Theo, Priya, Rowan, Quinn, Avery, Sam, Ravi, Casey, Simone, Sofia, and Carmen.
+  - Theo's live token sent a fresh T5d hash to Maya at 2026-05-22T22:06:08Z. After a 90 second observation window, the Theo-Maya conversation still had no MAYA_T5D_ACK or MAYA_T5D_BLOCKED response for T5D_HEARTBEAT_HANDOFF_2026-05-22T2208Z.
+  - Direct readback of Pentagon's internal agent_triggers table later found trigger 3737cf58-35d1-497b-a076-7ea5649758e7 for Maya, created from Theo's 2026-05-22T22:06:08Z T5d message, claimed at 2026-05-22T22:11:46Z, and completed at 2026-05-22T22:12:35Z.
+  - Local Pentagon debug logs corroborate executeAgentTurn START for Maya in conversation 0D996A94-45A6-4EF6-B8BD-45BC3F84D7E1 at 2026-05-22T22:11:46Z.
+  - Maya's ACK arrived at 2026-05-22T22:12:19Z: MAYA_T5D_ACK T5D_HEARTBEAT_HANDOFF_2026-05-22T2208Z pwd=/Users/gaganarora/Desktop/my projects/active_graph HEAD=2e79a56.
+  - frames/t5d-internal-trigger-queue-readback-2026-05-22.log records the table/log evidence and reclassifies the blocker from no target execution to unbounded/internal-only target activation.
+  - A fresh direct internal-queue diagnostic at 2026-05-22T22:25:33Z inserted a transparent Theo-to-Maya message. Pentagon automatically created target trigger 59d84468-a2f0-453c-b43b-6ff7de1e459d immediately, but the trigger remained unclaimed and Maya produced no ACK after a 110 second watch.
+  - frames/t5d-direct-queue-probe-2026-05-22.log records this negative bounded probe and narrows the remaining failure to trigger poller/catch-up latency or routing, not message-to-trigger creation.
+  - scripts/pentagon-trigger-bridge.mjs adds an auditable bridge that reads pending agent_triggers, claims a trigger, mints the target agent token, runs Codex with Pentagon MCP configured for that target, persists the final agent message into the Pentagon conversation, and completes the trigger.
+  - node --check scripts/pentagon-trigger-bridge.mjs passed, and dry-run over 3 pending triggers returned would_process for all 3.
+  - A fresh bridge proof for T5D_BRIDGE_VISIBLE_PROBE_20260522T223300Z claimed Maya trigger d2200d94-cb6f-43ba-a85d-9c0f2ef058e2, ran Maya through Codex, persisted visible Maya message 4956fb18-ae95-4f78-bf4d-dd0be5de53af, and completed the trigger about 20 seconds after message creation.
+  - frames/t5d-trigger-bridge-proof-2026-05-22.log records the command, trigger ids, visible ACK, and latency.
+  - The first bridge loop gauntlet exposed a query bug: stale old pending rows could hide fresh rows because max-age filtering happened after oldest-first limit. scripts/pentagon-trigger-bridge.mjs now pushes created_at gte cutoff into the REST query.
+  - The bridge now treats terminal *_ACK and *_BLOCKED messages as terminal and completes their reverse triggers without launching a ping-pong agent turn.
+  - frames/t5d-bridge-sequential-gauntlet-2026-05-22.log records a supervised bridge loop processing fresh easy, medium, hard, and extra-hard Theo-to-Maya triggers. Each target trigger was claimed within about 1 second, persisted a visible Maya ACK, and completed inside about 17 seconds.
+  - launchagents/run.pentagon.trigger-bridge.plist installs the bridge as run.pentagon.trigger-bridge with KeepAlive and RunAtLoad. launchctl readback showed state=running, program=/opt/homebrew/bin/node, pid=72003, runs=4.
+  - frames/t5d-launchd-bridge-proof-2026-05-22.log records a clean LaunchAgent proof: hash T5D_LAUNCHD_BRIDGE_CLEAN_20260522T224946Z, Maya trigger 456fbf43-ad74-4850-ae42-abd1aeedbe93 claimed in about 0.6s, visible ACK 156c3045-ff60-43df-a808-5f80cbea2926, trigger completed in about 8.8s, exactly one ACK row, and reverse terminal trigger 3aa8dc2d-7755-416c-aa3d-d1ebb2c55679 completed.
+  - frames/t5d-skill-load-clean-proof-2026-05-22.log records the local activegraph skill frontmatter repair, direct Codex skill-load smoke with empty stderr, and a fresh LaunchAgent bridge proof T5D_LAUNCHD_SKILL_CLEAN_20260522T225528Z whose bridge result had stderr_tail empty.
+  - frames/pentagon-model-live-readback-2026-05-22.log records defaults read returning gpt-5.5 and live agents-table readback finding 20 active_graph agents with zero non-gpt-5.5 model rows.
+  - frames/t5d-file-backed-gauntlet-2026-05-22.log records a file-backed bridge gauntlet across easy, medium, hard, and extra-hard tasks. Maya and Ravi created four proof files, emitted visible ACKs, and the bridge completed all terminal reverse triggers.
+  - frames/t5e-native-poller-blocker-2026-05-22.log records a fresh native-only probe with the external bridge stopped. The trigger row dd8b2c63-72bc-4088-88c0-48e8a7f99f56 was created, but native polling left claimed_at and completed_at null for about 133 seconds and produced no Maya ACK. The restored bridge then processed the same pending trigger, proving the remaining blocker is native polling, not trigger creation or target-agent execution.
+
+verdict: blocked-native-poller
+reason: >
+  Pentagon does have an internal target-trigger queue: Theo's T5d message
+  created a Maya agent_triggers row, the app claimed it, executeAgentTurn
+  started for Maya, and Maya emitted the requested ACK. That corrects the
+  earlier "no target execution" reading. The objective is still not complete
+  because the target trigger was claimed about 5m37s after message creation and
+  ACKed about 6m10s after message creation, outside the declared 90s watchdog
+  window. A fresh direct internal-queue probe proved trigger rows are created
+  immediately, but the new Maya trigger was still unclaimed after 110 seconds.
+  The bridge now proves a bounded target-trigger execution path in this
+  workspace, including a supervised loop gauntlet across easy, medium, hard,
+  and extra-hard diagnostic task classes. It is now installed and live as a
+  persistent macOS LaunchAgent and has a clean launchd-backed proof with exactly
+  one visible Maya ACK, duplicate-persist guard coverage, and terminal reverse
+  trigger completion. A follow-up proof shows the bridged Codex child now loads
+  activegraph skills without startup stderr noise. It is still not a native
+  Pentagon app poller repair. A fresh native-only probe with the bridge stopped
+  left a new Maya trigger unclaimed for about 133 seconds.
+  The public MCP wrapper also still lacks an explicit target-agent trigger_turn
+  or routed scheduled-action primitive with schema/readback, so native product
+  repair remains open even though the workspace autonomy bridge is operational.

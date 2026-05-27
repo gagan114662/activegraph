@@ -1,0 +1,14 @@
+hash=T7_REPEAT_MEDIUM_20260527_028
+run_seed=3c03f0e9-98b8-403b-b414-6632c7fe15dc
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=4af2b45
+uncovered_symbol=activegraph.runtime.budget.Budget.exhausted_by
+test_file=activegraph/tests/test_budget_exhausted_by_t7m_028_coverage.py
+new_test_count=3
+pytest_collect_before=785
+pytest_collect_after=788
+pytest_before=771
+pytest_after=774
+agent_commit_sha=4af2b45ba968ad22118f56964f4169276ab92a59
+ruff_target_exit=0
+verdict=native_medium_done

@@ -1,0 +1,165 @@
+# T4 adversary log: invalid marker internal boundary
+
+Agent: Quinn
+Target commit: 7886d71 (`Keep invalid arg marker internal`)
+Repo: `/Users/gaganarora/Desktop/my projects/active_graph/activegraph`
+Python: `/Users/gaganarora/Desktop/my projects/active_graph/venv/bin/python` -> Python 3.14.3
+Timestamp: 2026-05-23
+
+## Interpreter smoke
+
+```text
+$ pwd
+/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+
+$ git rev-parse --short HEAD
+7886d71
+
+$ git status --short --branch
+## main...origin/main [ahead 2]
+ M CHANGELOG.md
+ M CONTRACT.md
+ M README.md
+ M docs/concepts/provider-tool-parity.md
+ M docs/reference/llm-providers.md
+?? GAUNTLET.md
+?? frames/t4-openai-invalid-marker-068cdc8.adversary.log
+?? frames/t4-openai-tool-argument-normalization-7a975cd.adversary.log
+?? frames/t4-openai-tool-argument-normalization-fce0cab.adversary.log
+?? uv.lock
+```
+
+Existing dirty docs/log/lock state was present before this adversary pass and is not treated as target evidence.
+
+## Declared and expanded gates
+
+```text
+$ ../venv/bin/pytest tests/test_provider_tool_parity.py -q
+...........                                                              [100%]
+11 passed in 0.03s
+
+$ ../venv/bin/pytest -q tests/test_provider_tool_parity.py tests/test_llm_replay.py tests/test_openai_tool_shape.py tests/test_llm_tool_loop.py tests/test_v1_0_3_tool_multiturn.py tests/test_tool_replay.py
+...............................................                          [100%]
+47 passed in 0.13s
+```
+
+## Breakage: durable LLM cache replays invalid OpenAI args as valid no-arg tool call
+
+`7886d71` intentionally keeps `invalid_args_error` out of persisted `llm.responded.tool_calls[]`, and `LLMCache.from_events()` no longer reconstructs it. The immediate live OpenAI response still rejects malformed args because the provider keeps the marker in memory.
+
+However, a durable cache harvested from those persisted events has only:
+
+```python
+{"id": "call_1", "name": "ping", "args": {"_raw": "{"}}
+```
+
+For a zero-field Pydantic tool schema, that fallback args dict validates because Pydantic ignores extras by default. A fresh identical prompt served from `LLMCache.from_events(parent.events)` therefore invokes the tool and can complete successfully.
+
+Probe command:
+
+```text
+$ ../venv/bin/python - <<'PY'
+from types import SimpleNamespace
+from typing import Any
+from pydantic import BaseModel
+
+from activegraph import FrozenClock, Graph, IDGen, Runtime, clear_registry, clear_tool_registry, llm_behavior, tool
+from activegraph.llm import LLMCache, OpenAIProvider
+
+class EmptyArgs(BaseModel):
+    pass
+class PingResult(BaseModel):
+    ok: bool
+class Answer(BaseModel):
+    answer: str
+
+def fresh_graph(run_id):
+    return Graph(ids=IDGen(), clock=FrozenClock('2026-05-22T12:00:00Z'), run_id=run_id)
+
+invoked=[]
+
+def register():
+    clear_registry(); clear_tool_registry()
+    @tool(name='ping', description='No-argument ping.', input_schema=EmptyArgs, output_schema=PingResult, deterministic=True)
+    def ping(args: EmptyArgs, ctx: Any) -> PingResult:
+        invoked.append('called')
+        return PingResult(ok=True)
+    @llm_behavior(name='answer_with_ping', on=['goal.created'], description='Answer with a no-argument tool call.', output_schema=Answer, tools=[ping], max_tool_turns=2, temperature=0.0)
+    def answer_with_ping(event: Any, graph: Any, ctx: Any, out: Answer) -> None:
+        graph.add_object('answer', {'answer': out.answer})
+
+def invalid_first():
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[SimpleNamespace(id='call_1', type='function', function=SimpleNamespace(name='ping', arguments='{'))]), finish_reason='tool_calls')], usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2), model='gpt-4o-mini')
+
+def final_response():
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"answer":"cached path invoked"}'), finish_reason='stop')], usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2), model='gpt-4o-mini')
+
+class Client:
+    def __init__(self, responses):
+        self.chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=list(responses)))
+        def create(**kwargs):
+            self.chat.completions.calls.append(kwargs)
+            return self.chat.completions._responses.pop(0)
+        self.chat.completions.create=create
+
+register()
+parent_client=Client([invalid_first()])
+parent=fresh_graph('parent')
+Runtime(parent, llm_provider=OpenAIProvider(client=parent_client), budget={'max_tool_calls':4}).run_goal('g')
+print('parent_reason', [e.payload.get('reason') for e in parent.events if e.type=='behavior.failed'])
+print('parent_tool_calls_payload', [e.payload.get('tool_calls') for e in parent.events if e.type=='llm.responded'])
+print('parent_invoked', invoked)
+
+cache=LLMCache.from_events(parent.events)
+req=next(e for e in parent.events if e.type=='llm.requested')
+print('cached_marker', cache.get(req.payload['prompt_hash']).tool_calls[0].invalid_args_error)
+
+replay_client=Client([final_response()])
+replay=fresh_graph('parent')
+Runtime(replay, llm_provider=OpenAIProvider(client=replay_client), replay_llm_cache=True, llm_cache=cache, budget={'max_tool_calls':4}).run_goal('g')
+print('replay_provider_calls', len(replay_client.chat.completions.calls))
+print('replay_invoked', invoked)
+print('replay_types', [e.type for e in replay.events])
+print('replay_reason', [e.payload.get('reason') for e in replay.events if e.type=='behavior.failed'])
+print('object_created', [e.payload['object']['data'] for e in replay.events if e.type=='object.created'])
+PY
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+parent_reason ['tool.invalid_input']
+parent_tool_calls_payload [[{'id': 'call_1', 'name': 'ping', 'args': {'_raw': '{'}}]]
+parent_invoked []
+cached_marker None
+replay_provider_calls 1
+replay_invoked ['called']
+replay_types ['goal.created', 'behavior.started', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'llm.requested', 'llm.responded', 'object.created', 'behavior.completed', 'runtime.idle']
+replay_reason []
+object_created [{'answer': 'cached path invoked'}]
+```
+
+## Disposition
+
+Real bug. Closure path: regression test.
+
+The new test should exercise a durable replay/cache path, not just immediate provider rejection or persisted payload absence:
+
+- parent live OpenAI response has malformed/non-object `function.arguments` for a zero-field tool and terminates as `tool.invalid_input`
+- persisted `llm.responded.tool_calls[]` does not expose `invalid_args_error`
+- `LLMCache.from_events(parent.events)` must not allow the harvested tool call to become a valid zero-field invocation on a fresh identical prompt
+- replay/cache reuse must preserve terminal `tool.invalid_input`, no tool handler invocation, and zero `object.created`
+
+If CONTRACT #12 requires the marker to remain private, the internal durable cache needs another non-public way to avoid serving persisted invalid tool-call args as ordinary tool calls. If durable cache semantics are intentionally unavailable for invalid OpenAI tool args, that needs an explicit non-goal plus code that bypasses/invalidates those cached tool-call responses.
+
+## Bottleneck
+
+```yaml
+event: bottleneck.detected
+frame: T4 OpenAI tool translation / CONTRACT #12
+complexity: medium
+source: review
+symptom: persisted marker absence plus LLMCache.from_events turns malformed OpenAI args into ordinary zero-field tool invocation
+owner: Code Owner
+feedback_action: regression test for durable cache replay of invalid OpenAI args with internal-only marker boundary
+evidence:
+  - activegraph/frames/t4-invalid-marker-internal-7886d71.adversary.log
+  - ../venv/bin/pytest tests/test_provider_tool_parity.py -q -> 11 passed in 0.03s
+  - durable-cache probe output above -> replay_invoked ['called'], object_created [{'answer': 'cached path invoked'}]
+```

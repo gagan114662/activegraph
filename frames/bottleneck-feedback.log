@@ -1,0 +1,635 @@
+# Bottleneck feedback log
+# Workspace: active_graph
+# Created: 2026-05-22
+
+This log is the continuous-improvement loop gagan asked for: bottlenecks become
+events with evidence, owners, and a prevention action. It is not a chat summary.
+
+## bottleneck.detected — T3 starter permissions too narrow
+
+frame: t3-implement-cli-set-flag
+complexity: hard
+source: evaluation.log + frame yaml
+symptom: `no_changes_outside_permissions` RED because a starter yaml omitted real implementation surfaces.
+owner: Avery (Frame Architect)
+feedback_action: Amend frame permissions before Code Owner starts; Riley checks changed-file set against yaml before closure.
+evidence: `frames/t3-implement-cli-set-flag.evaluation.log`, `frames/t3-implement-cli-set-flag.yaml`.
+
+## bottleneck.detected — T3 adversary bugs landed after green tests
+
+frame: t3-implement-cli-set-flag
+complexity: hard
+source: adversary.log + regression tests
+symptom: Focused tests were green but did not cover repeated same-key conflicts, replay CLI exit code, required sibling fields, or JSON-unsafe typed values.
+owner: Quinn (Test Adversary) + Theo (Test Owner)
+feedback_action: Every hard/extra-hard frame gets adversary regression tests before status can close.
+evidence: `frames/t3-implement-cli-set-flag.adversary.log`, inner:745e6d7.
+
+## bottleneck.detected — Feedback loop was terminal, not continuous
+
+frame: org-topology
+complexity: all
+source: user review
+symptom: Agent layout emphasized roles but did not make bottleneck events central to the information flow.
+owner: Riley (Evidence Lead) + Taylor (Trace Archivist)
+feedback_action: Added `#bottleneck-feedback` group and `bottleneck.detected` event shape to `collaboration-topology.md`; added gauntlet rule requiring bottleneck entries before next task opens.
+evidence: `collaboration-topology.md`, `GAUNTLET.md`.
+
+## bottleneck.detected — Purpose-doc updates are not directly writable by Avery
+
+frame: agent-os-all-star-upgrade
+complexity: all
+source: Pentagon tool surface + outer:e91e9d8 Agent OS baseline
+symptom: Avery can patch only Avery's own Purpose doc through `patch_document`; no exposed tool can directly patch Sofia/Sasha/Theo/Maya/Quinn/Rowan/Priya/Riley/Grace Purpose docs.
+owner: Riley (Evidence Lead) + Avery (Frame Architect)
+feedback_action: Avery patched own Purpose doc, relayed exact CORE_PURPOSE_DOCS inserts to the nine priority core agents by DM, and logged this as a durable routing bottleneck. Future fix is a Pentagon admin bulk-purpose-update path or per-agent ack+patch workflow.
+evidence: `ALL_STAR_TEAM_UPGRADE.md`, `agent-os/INTERPRETER_CONTRACT.md`, `agent-os/CORE_PURPOSE_DOCS.md`, DMs sent 2026-05-22 to Sofia/Sasha/Theo/Maya/Quinn/Rowan/Priya/Riley/Grace.
+
+## purpose.audit — Agent OS Purpose coverage is partial
+
+frame: agent-os-all-star-upgrade
+complexity: all
+source: Pentagon conversation-debug logs + repo commits
+symptom: The team can receive Purpose updates, but not all agents have confirmed
+  durable Purpose-doc patches. Some agents only acknowledged in report or
+  knowledge, and some full-team agents have no captured self-patch reply yet.
+owner: Riley (Evidence Lead) + Avery (Frame Architect)
+feedback_action: Treat Purpose coverage as a live bottleneck. Do not unblock
+  downstream T4 tests only from chat acknowledgements; require either a
+  Pentagon `patch_document(doc_type="purpose")` result or a literal
+  `PURPOSE_OK` / `PURPOSE_PATCHED` reply per agent. Keep missing agents on the
+  audit list until their own Purpose docs are verified.
+evidence:
+  outer_agent_os_baseline: outer:e91e9d8
+  direct_write_bottleneck: outer:49d1350
+  gate_snapshot_after_grace_patch: outer:cc7e493
+  confirmed_purpose_patches:
+    - Avery (Frame Architect): "Patched section 'Agent OS Core Purpose' in purpose."
+    - Sofia (Spec Owner): "Patched section 'Activegraph Frame Work' in purpose."
+    - Maya (Code Owner): "Patched section 'Agent OS Purpose' in purpose."
+    - Priya (Goal Reaper): "Patched section 'Goal Reaper Predicate Evaluation' in purpose."
+    - Quinn (Test Adversary): "Patched section 'Breakage Discovery After Implementation' in purpose."
+    - Rowan (Code Reviewer): "Patched section 'Review OS' in purpose."
+    - Grace (Gate Sentinel): "Patched section 'Gate Sentinel Ownership' in purpose."
+    - Theo (Test Owner): "Patched section 'Agent OS Test Owner Purpose' in purpose."; reply "PURPOSE_PATCHED Agent OS Test Owner Purpose."
+  acknowledged_or_report_only:
+    - Sasha (Spec Skeptic): "Purpose update recorded; knowledge article written, no captured Purpose patch result."
+    - Riley (Evidence Lead): "Acknowledged evidence/bottleneck role; knowledge article written, no captured Purpose patch result."
+  no_captured_self_patch_reply:
+    - Blake (Budget Marshal)
+    - Sam (Docs Owner)
+    - Simone (Security Auditor)
+    - Parker (Performance Sentinel)
+    - Casey (Compatibility Auditor)
+    - Finn (Fork Debugger)
+    - Taylor (Trace Archivist)
+    - Ravi (Replay Validator)
+    - Carmen (Contract Owner)
+  t4_unblock_rule: "Satisfied for Theo on 2026-05-22 after Sasha second-pass inner:12f71bf and Theo PURPOSE_PATCHED. Theo wrote and pushed T4 red tests at inner:7c319cf."
+
+## bottleneck.detected - Pentagon handoff message does not auto-activate Code Owner
+
+frame: t4-openai-tool-shape-translation
+complexity: extra-hard
+source: Pentagon conversation-debug logs + process list
+symptom: Theo sent the red-test handoff to Maya (Code Owner), but no Maya
+  'executeAgentTurn' or 'codex exec' worker appeared afterward. Pentagon UI
+  stayed alive; only the Pentagon app process was running.
+owner: Avery (Frame Architect) + Riley (Evidence Lead)
+feedback_action: Treat direct 'send_message' as context delivery only unless a
+  recipient turn is observed in logs. Require an explicit activation step or
+  visible worker process before claiming an owner is working.
+evidence:
+  - "Theo sent handoff to conversation 0d996a94-45a6-4ef6-b8bd-45bc3f84d7e1 at 2026-05-22T16:20:27Z."
+  - "T4 red-test commit: inner:7c319cf."
+  - "Targeted pytest before implementation: 10 failed, 2 passed."
+  - "Post-handoff process check: Pentagon app alive, no codex exec / pytest / Maya worker."
+  - "Fallback implementation landed by Codex at inner:b8eb508 and inner:612ac0a after activation gap; this is not counted as Maya autonomous completion."
+
+## bottleneck.detected - Pentagon default model drifted after agent model patch
+
+frame: pentagon-reliability-repair
+complexity: all
+source: macOS defaults
+symptom: Workspace default still read claude-opus-4-7[1m] even after the live
+  per-agent model audit said agents were patched to gpt-5.5. New agents could
+  inherit the wrong model.
+owner: Avery (Frame Architect) + Riley (Evidence Lead)
+feedback_action: Set run.pentagon.app pentagon.defaultModel to gpt-5.5 and
+  require model refresh audit before T5 starts.
+evidence:
+  - "Before: defaults read run.pentagon.app pentagon.defaultModel -> claude-opus-4-7[1m]"
+  - "After: defaults read run.pentagon.app pentagon.defaultModel -> gpt-5.5"
+
+## standing_gate - Handoff activation proof required
+
+frame: all-future-hard-extra-hard
+complexity: hard|extra-hard
+source: T4 autonomy gap
+symptom: Theo delivered context to Maya, but context delivery did not start
+  execution.
+owner: Avery (Frame Architect) + Riley (Evidence Lead)
+feedback_action: A handoff is incomplete until recipient activation proof is
+  captured: visible turn, worker/process/log evidence, or committed artifact
+  after the handoff timestamp. If missing after 5 minutes, log
+  bottleneck.detected and reactivate the owner.
+evidence:
+  - frames/t4-openai-tool-shape-translation.status
+  - frames/pentagon-reliability-repair.status
+  - agent-os/skills/handoff-recovery.md
+
+## standing_gate - Interpreter smoke proof required
+
+frame: all-future-frames
+complexity: all
+source: skills not installed / chat-only work
+symptom: Agents could acknowledge work but named skills were not always
+  installed, and chat-only status was not sufficient execution proof.
+owner: Riley (Evidence Lead) + Grace (Gate Sentinel)
+feedback_action: Core owners must post INTERPRETER_OK or INTERPRETER_BLOCKED
+  before owning a frame step.
+evidence:
+  - agent-os/INTERPRETER_CONTRACT.md
+  - frames/t5-pentagon-handoff-activation-smoke.yaml
+
+## bottleneck.detected - T5 reproduced Theo-to-Maya handoff activation failure
+
+frame: t5-pentagon-handoff-activation-smoke
+complexity: handoff-smoke
+source: Pentagon UI/state, inner git history, process check, targeted pytest
+symptom: Theo activated, produced interpreter proof, committed and pushed a
+  test-only red commit, and reported a DM handoff to Maya. More than five
+  minutes later there was no Maya activation proof, no Maya implementation
+  commit, Pentagon showed 0 active, and no Pentagon worker was visible.
+owner: Avery (Frame Architect) + Riley (Evidence Lead) + Maya (Code Owner)
+feedback_action: Treat the T5 validation as blocked, not autonomous. Explicitly
+  reactivate Maya inside Pentagon. If Maya does not post INTERPRETER_OK or
+  INTERPRETER_BLOCKED after reactivation, keep the frame open and mark the
+  handoff system failed.
+evidence:
+  - "Theo interpreter proof: INTERPRETER_OK Theo /Users/gaganarora/Desktop/my projects/active_graph 4604f0e"
+  - "Theo red-test commit: inner:ab05ed0"
+  - "Targeted red test remains failing: tests/test_llm_openai.py::test_count_tokens_heuristic_includes_assistant_tool_calls -> assert 1 > 1"
+  - "2026-05-22T17:02:32Z inner head remained ab05ed0; no later Maya implementation commit."
+  - "Pentagon UI/state showed 0 active after Theo handoff."
+  - "No Codex implementation fallback was used for T5."
+
+## bottleneck.detected - Gauntlet accounting skipped T1b frame status
+
+frame: gauntlet-accounting
+complexity: easy-medium
+source: GAUNTLET.md, frame artifact search, current relations test output
+symptom: GAUNTLET.md names T1b graph.relations as easy-medium, but no T1b
+  frame/evaluation/review/status artifacts were found. Current inner relations
+  tests pass, so the product surface is pre-satisfied, not a Pentagon frame
+  proof.
+owner: Riley (Evidence Lead)
+feedback_action: Created frames/evidence-index-2026-05-22.md and classified
+  T1b as pre_satisfied_without_frame.
+evidence:
+  - "Current test: ../venv/bin/pytest -q tests/test_graph.py -k relations -> 10 passed, 11 deselected in 0.01s"
+  - frames/evidence-index-2026-05-22.md
+
+## bottleneck.detected - Flywheel rules existed as text, not readiness enforcement
+
+frame: pentagon-reliability-repair
+complexity: system
+source: bottleneck-feedback.log, T5 status, Purpose/interpreter coverage
+symptom: Repeated bottlenecks were required to become gates or Purpose rules,
+  but T5 started while Purpose coverage, interpreter proof, and activation
+  protocol were still incomplete.
+owner: Avery (Frame Architect) + Riley (Evidence Lead) + Grace (Gate Sentinel)
+feedback_action: Created frames/flywheel-readiness.status and
+  frames/flywheel-bottleneck-gate-map.md.
+evidence:
+  - frames/flywheel-readiness.status
+  - frames/flywheel-bottleneck-gate-map.md
+
+## bottleneck.resolved - Skills not installed / chat-only work
+
+frame: pentagon-flywheel-repair
+complexity: system
+source: local Codex skills folder, agent-os/skills, purpose docs
+symptom: Core agents had repo runbooks, but Codex did not have active_graph
+  skills installed and the repo lacked dedicated skills for interpreter smoke,
+  activation watchdog, evidence indexing, model audit, and clean replay.
+owner: Riley (Evidence Lead) + Grace (Gate Sentinel)
+feedback_action: Installed active_graph skill wrappers into
+  /Users/gaganarora/.codex/skills and added missing repo-backed skills under
+  agent-os/skills.
+evidence:
+  - frames/skills-installation-2026-05-22.md
+  - agent-os/skills/interpreter-smoke.md
+  - agent-os/skills/activation-watchdog.md
+  - agent-os/skills/evidence-indexing.md
+  - agent-os/skills/model-audit.md
+  - agent-os/skills/clean-venv-replay.md
+
+## bottleneck.detected - Pentagon MCP unavailable from Codex session
+
+frame: pentagon-flywheel-repair
+complexity: system
+source: claude mcp health, direct HTTP probe, Codex tool surface
+symptom: Historical Pentagon MCP logs prove tools exist, but this Codex session
+  does not expose mcp__pentagon__ tools. Adding the HTTP endpoint through
+  claude mcp failed health checks, and direct HTTP auth did not accept the
+  existing app token.
+owner: gagan / Pentagon auth surface + Riley (Evidence Lead)
+feedback_action: Created frames/pentagon-mcp-connectivity-2026-05-22.log and
+  frames/pentagon-agent-activation-packet-2026-05-22.md. Keep activation and
+  interpreter readiness red until tool access is restored or UI-applied proof is
+  committed.
+evidence:
+  - frames/pentagon-mcp-connectivity-2026-05-22.log
+  - frames/pentagon-agent-activation-packet-2026-05-22.md
+
+## bottleneck.partially_resolved - Maya direct activation proof obtained through Pentagon UI
+
+frame: pentagon-flywheel-repair
+complexity: system
+source: Pentagon live UI via Computer Use
+symptom: Earlier T5 failed because Maya did not activate after Theo handoff.
+owner: Maya (Code Owner) + Riley (Evidence Lead)
+feedback_action: Sent the interpreter-smoke request directly in Maya's Pentagon
+  conversation and captured literal shell output plus INTERPRETER_OK.
+evidence:
+  - frames/pentagon-live-ui-verification-2026-05-22.log
+remaining_gap: This proves direct Maya activation, not full Theo-to-Maya handoff
+  reliability or all-agent readiness.
+
+## bottleneck.resolved - Core Purpose coverage repaired through exact-DM activation
+
+frame: pentagon-flywheel-repair
+complexity: system
+source: Pentagon live UI plus Claude CLI MCP scope check
+symptom: Core agent Purpose coverage was repo-documented but not proven inside
+  Pentagon.
+owner: Avery (Frame Architect) + Riley (Evidence Lead)
+feedback_action: Used Claude CLI MCP to prove patch_document is caller-scoped;
+  patched Priya through that token; then used exact-DM live UI activation with
+  selected-header verification to obtain PURPOSE_PATCHED evidence for Avery,
+  Sofia, Sasha, Theo, Maya, Quinn, Rowan, Riley, and Grace.
+durable_conversion:
+  - Purpose rule: every core Purpose now includes the required sections.
+  - Gate: UI-driven agent operations must verify the exact selected header
+    before sending; moving-list coordinate clicks are invalid proof.
+evidence:
+  - frames/pentagon-purpose-repair-2026-05-22.log
+
+## bottleneck.detected - MCP send_message delivers context without activation
+
+frame: pentagon-flywheel-repair
+complexity: system
+source: Claude CLI Pentagon MCP read_messages poll
+symptom: Priya-scoped MCP send_message delivered Purpose self-patch directives
+  to nine peer agents, but the follow-up poll found directive-only
+  conversations: 0/9 PURPOSE_PATCHED, 0/9 PURPOSE_BLOCKED, 9/9 SILENT.
+owner: Riley (Evidence Lead)
+feedback_action: Do not use MCP send_message delivery as activation proof. Use
+  exact-DM UI activation or a tool that explicitly starts a recipient turn, then
+  require visible recipient output.
+durable_conversion:
+  - Gate: handoff activation requires recipient turn/process/log/artifact
+    evidence within the watchdog window.
+  - Frame predicate: T5 cannot close until Theo-to-Maya handoff shows recipient
+    activation before implementation.
+evidence:
+  - frames/pentagon-purpose-repair-2026-05-22.log
+
+## bottleneck.fixed - T5b Theo-to-Maya handoff activation smoke closed
+
+frame: t5b-pentagon-handoff-activation-smoke
+complexity: handoff-smoke
+source: Theo red test commit, Maya post-watchdog activation proof, Maya implementation commit, local Codex pytest verification
+symptom: Earlier T5/T5b state required proof that a Theo-to-Maya handoff caused visible recipient activation before downstream implementation.
+owner: Theo (red predicate) + Maya (implementation) + Riley (Evidence Lead)
+feedback_action: Recorded handoff.fixed because the handoff now has a current
+  Theo red predicate commit, Maya activation proof after the watchdog, Maya's
+  implementation commit, and a focused pytest pass covering the red predicate
+  and OpenAI tool-shape surface.
+evidence:
+  - frames/t5b-pentagon-handoff-activation-smoke.status
+  - frames/t5b-pentagon-handoff-activation-smoke.dispatch.log
+  - frames/t5b-pentagon-handoff-activation-smoke.gates.log
+  - frames/t5b-pentagon-handoff-activation-smoke.adversary.log
+handoff_fixed:
+  theo_red_test_commit: 8d3ff89
+  maya_activation_after_watchdog: "INTERPRETER_OK Maya /Users/gaganarora/Desktop/my projects/active_graph 8d3ff89"
+  maya_implementation_commit: ccd4f45
+  local_verification: "python3 -m pytest -q tests/test_llm_openai.py::test_complete_extracts_text_from_mapping_response_shape tests/test_llm_openai.py tests/test_openai_tool_shape.py -> 20 passed"
+remaining_failure: none_recorded
+
+## bottleneck.detected - Recipient self-watchdog schedule did not visibly activate Maya
+
+frame: t5c-recipient-self-watchdog-smoke
+complexity: handoff-smoke
+source: Pentagon live UI, Maya scheduled actions, Theo handoff messages
+symptom: Maya successfully scheduled one-shot and repeated caller-scoped
+  self-watchdog actions, and Theo sent matching handoffs, but no visible
+  WATCHDOG_ACK or WATCHDOG_NO_HANDOFF appeared in Maya/Theo threads after the
+  watchdog windows.
+owner: Pentagon activation substrate + Riley (Evidence Lead)
+feedback_action: Recorded T5c as blocked and converted the failure into a
+  product/tooling gate. Do not claim fully autonomous handoff reliability until
+  Pentagon exposes target-agent activation or scheduled actions with explicit
+  target agent/conversation routing and visible output.
+durable_conversion:
+  - Gate: scheduled_action is not activation proof unless a visible recipient
+    output appears.
+  - Product predicate: target-agent activation primitive is required for full
+    autonomous handoffs.
+evidence:
+  - frames/t5c-recipient-self-watchdog-smoke.status
+  - frames/t5c-recipient-self-watchdog-smoke.dispatch.log
+
+## bottleneck.detected - Pentagon default model drifted after repair
+
+frame: pentagon-flywheel-repair
+complexity: system
+source: live macOS defaults check at 2026-05-22T21:54Z
+symptom: Earlier logs recorded the default model repaired to gpt-5.5, but a
+  fresh check returned claude-opus-4-7[1m]. The default was immediately repaired
+  again with defaults write and rechecked as gpt-5.5.
+owner: Pentagon app settings surface + Riley (Evidence Lead)
+feedback_action: Keep model_audit_current amber until a fresh Pentagon launch
+  and live per-agent readback prove the gpt-5.5 assignment is durable.
+durable_conversion:
+  - Gate: no autonomous gauntlet frame may start from a historical model audit
+    only; it needs current defaults plus live per-agent readback.
+evidence:
+  - frames/pentagon-model-refresh-2026-05-22.log
+  - frames/flywheel-readiness.status
+
+## bottleneck.detected - spawn_agent plus send_message did not prove execution
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: Claude MCP spawn_agent/send_message, get_org_context, read_messages,
+  local process check, Pentagon UI active count
+symptom: MCP spawn_agent created T5d Activation Engineer
+  9dfa236a-e370-418a-be1c-32bb3026d1af and send_message delivered the T5d
+  prompt to conversation 259f5017-654f-443c-a87e-62fd74ebab64, but no local
+  codex exec worker process appeared, get_org_context still showed current_task
+  null, read_messages contained only Priya's spawn/message entries, and the UI
+  still showed 0 active.
+owner: Pentagon activation substrate + Riley (Evidence Lead)
+feedback_action: Do not count spawn_agent or send_message as execution proof.
+  Require visible target output, current_task/progress transition, worker
+  process evidence, or committed agent-produced artifact before calling a
+  handoff autonomous.
+durable_conversion:
+  - Gate: new-agent creation is not activation proof unless it produces a
+    visible worker turn or artifact within the observation window.
+evidence:
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.detected - heartbeat catch-up is not bounded handoff activation
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: Theo-Maya read_messages, live process token-to-agent mapping, Pentagon UI
+  active count
+symptom: A later readback found Maya did eventually emit the old T5c ACKs, and
+  live heartbeat/catch-up spawned multiple gpt-5.5 codex workers. However, the
+  T5c ACKs landed far outside the intended watchdog window, and a fresh Theo
+  T5d hash sent at 2026-05-22T22:06:08Z had no Maya ACK/BLOCKED response after
+  90 seconds.
+owner: Pentagon heartbeat scheduler + target-agent activation substrate
+feedback_action: Reclassify the blocker from "no ACK ever" to "no bounded
+  target activation SLA." Full autonomy requires a target turn to start and
+  produce visible output inside the frame's watchdog window.
+durable_conversion:
+  - Gate: delayed heartbeat catch-up is useful liveness evidence but cannot
+    close an autonomous handoff frame unless the response meets the declared
+    frame window.
+  - Product requirement: expose bounded trigger_turn or target scheduled action
+    semantics with readback and target-thread output.
+evidence:
+  - frames/t5c-recipient-self-watchdog-smoke.status
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.detected - invalid OpenAI tool argument marker not serialized
+
+frame: t4-openai-tool-shape-translation
+complexity: medium
+source: adversary replay against inner commit 7a975cd
+symptom: `ToolCall.invalid_args_error` rejects invalid OpenAI arguments on the
+  immediate provider/runtime path, but `ToolCall.to_dict()` omits the marker.
+  `LLMResponse.to_dict()` therefore drops the marker before cache/recorded
+  hydration can preserve it.
+owner: Maya (Code Owner)
+feedback_action: Add a regression test for invalid-args marker round-trip
+  through `LLMResponse.to_dict()`, cache hydration, and recorded hydration; fix
+  serialization by emitting `invalid_args_error` when present.
+durable_conversion:
+  - Gate: provider/runtime boundary markers that affect validation must be
+    asserted at the durable event/fixture serialization boundary.
+evidence:
+  - activegraph/frames/t4-openai-tool-argument-normalization-7a975cd.adversary.log
+  - command: ../venv/bin/python invalid marker round-trip probe exited 1 with
+    KeyError: 'invalid_args_error'
+
+## bottleneck.detected - hidden schedule_action target fields did not activate target
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: Claude MCP schedule_action with extra agent_id, target_agent_id, and
+  conversation_id fields; list_scheduled_actions; read_messages; local process
+  check
+symptom: schedule_action accepted hidden target fields and returned action
+  0162deda-7227-47f4-bb66-4b44023acc1e. list_scheduled_actions showed the
+  prompt and fire_at only, with no target metadata. After the cron window the
+  action was gone from pending actions, but the T5d conversation had no target
+  reply and no codex exec worker process was present.
+owner: Pentagon MCP schedule_action wrapper + activation substrate
+feedback_action: Treat schedule_action as caller-scoped unless the public tool
+  schema and readback expose target agent/conversation routing and the target
+  thread emits visible output.
+durable_conversion:
+  - Gate: hidden/undocumented tool arguments are not valid activation proof.
+  - Product requirement: expose target_agent_id/conversation_id in the schema
+    and return them in scheduled action readback, or provide a separate
+    trigger_turn tool.
+evidence:
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.reclassified - internal trigger queue works but is not bounded/public
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: Supabase REST readback of agent_triggers/messages/conversation_participants
+  plus ~/.pentagon/conversation-debug.log
+symptom: The previous T5d reading was too broad. Theo's T5d message did create
+  target trigger 3737cf58-35d1-497b-a076-7ea5649758e7 for Maya in the
+  Theo-Maya conversation, and the local app later claimed it, ran
+  executeAgentTurn for Maya, and produced the requested MAYA_T5D_ACK. However,
+  the trigger was claimed about 5m37s after message creation and ACKed about
+  6m10s after message creation, outside the 90s watchdog window. The public MCP
+  tool catalog still lacks an explicit routed target-agent trigger primitive.
+owner: Pentagon trigger catch-up + MCP activation surface
+feedback_action: Reclassify the failure from "no target execution" to
+  "internal target execution exists but lacks bounded public/auditable
+  activation semantics." Do not close full autonomy until the exposed control
+  plane can trigger and read back target execution inside the declared window.
+durable_conversion:
+  - Gate: a handoff frame must record message_created_at, trigger_created_at,
+    trigger_claimed_at, executeAgentTurn START, target ACK time, and
+    message-to-ACK latency.
+  - Product requirement: expose target trigger creation/claim/readback through
+    the public MCP/tool surface or prove the existing send_message path claims
+    triggers inside the declared SLA.
+evidence:
+  - frames/t5d-internal-trigger-queue-readback-2026-05-22.log
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.detected - fresh target trigger stayed unclaimed
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: Direct internal-queue diagnostic with Supabase REST readback and local
+  Pentagon debug log grep
+symptom: A fresh transparent Theo-to-Maya diagnostic message created message
+  eb29473d-b61d-4954-a9d3-94d9a35cffd2 at 2026-05-22T22:25:33Z. Pentagon
+  automatically created Maya target trigger 59d84468-a2f0-453c-b43b-6ff7de1e459d
+  at the same timestamp, without a manual trigger insert. After a 110 second
+  watch, the trigger still had claimed_at null and completed_at null, and no
+  Maya ACK/BLOCKED message existed for T5D_DIRECT_QUEUE_PROBE_20260522T222533Z.
+owner: Pentagon trigger poller / catch-up loop
+feedback_action: Focus the next implementation fix on making pending
+  agent_triggers claim promptly while the app is running, or exposing a public
+  trigger_turn path that claims the target trigger synchronously with readback.
+durable_conversion:
+  - Gate: any future "bounded handoff" claim must include a fresh trigger id
+    that transitions created -> claimed -> completed inside the watchdog
+    window, plus a target message id.
+evidence:
+  - frames/t5d-direct-queue-probe-2026-05-22.log
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.repaired-partial - workspace trigger bridge closes bounded execution path
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: scripts/pentagon-trigger-bridge.mjs, mint-agent-token,
+  claim_agent_trigger, complete_agent_trigger, visible messages readback
+symptom: Native trigger catch-up still failed to claim a fresh Maya trigger
+  inside 110 seconds, but the workspace bridge claimed a fresh target trigger,
+  minted Maya's agent token, ran Codex with Pentagon MCP configured for Maya,
+  persisted Maya's visible ACK message, and completed the trigger in about 20
+  seconds from message creation.
+owner: Riley (Evidence Lead) for bridge proof; Pentagon app poller still owns
+  native trigger catch-up repair.
+feedback_action: Treat the bridge as the current bounded activation workaround.
+  Do not call the full objective complete until the bridge is run continuously
+  or replaced by native app poller behavior, and a fresh easy/medium/hard/
+  extra-hard audit proves coverage.
+durable_conversion:
+  - Gate: bridge/native trigger execution must persist a target message id and
+    complete the trigger inside the watchdog window.
+  - Next repair: run the bridge as a supervised loop or implement equivalent
+    native trigger poller catch-up.
+evidence:
+  - scripts/pentagon-trigger-bridge.mjs
+  - frames/t5d-trigger-bridge-proof-2026-05-22.log
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.repaired-partial - bridge loop gauntlet passes task-class triggers
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: supervised scripts/pentagon-trigger-bridge.mjs loop with fresh
+  Theo-to-Maya triggers for easy, medium, hard, and extra-hard diagnostics
+symptom: The first loop attempt found two bridge defects: local post-query age
+  filtering let old backlog hide fresh triggers, and persisted ACK messages
+  created reverse triggers that could ping-pong. The bridge now pushes
+  created_at gte cutoff into the query and completes terminal ACK/BLOCKED
+  reverse triggers without a new Codex turn.
+owner: Riley (Evidence Lead) for bridge loop proof; Pentagon app poller still
+  owns native trigger catch-up repair.
+feedback_action: Treat bridge-loop activation as green for bounded diagnostic
+  task classes. Keep full objective open until this bridge is installed as a
+  persistent supervised service or native app poller behavior is fixed.
+durable_conversion:
+  - Gate: loop proof must include at least one easy, medium, hard, and
+    extra-hard trigger with target message id, trigger claim time, and trigger
+    complete time.
+evidence:
+  - frames/t5d-bridge-sequential-gauntlet-2026-05-22.log
+  - scripts/pentagon-trigger-bridge.mjs
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.repaired-operational - persistent bridge service proven
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: macOS LaunchAgent run.pentagon.trigger-bridge running
+  scripts/pentagon-trigger-bridge.mjs as a continuous local bridge
+symptom: The bridge-loop slice was green but still depended on a supervised
+  foreground process. Without a persistent service, Pentagon handoffs could
+  regress to the native unbounded trigger poller.
+owner: Riley (Evidence Lead) for proof and logs; Ops owns the launchd service;
+  Pentagon app poller still owns native product repair.
+feedback_action: Install the bridge under
+  /Users/gaganarora/Library/LaunchAgents/run.pentagon.trigger-bridge.plist with
+  RunAtLoad and KeepAlive, then prove a fresh Theo-to-Maya handoff from launchd.
+durable_conversion:
+  - Gate: launchctl readback must show the service running.
+  - Gate: clean proof must show one visible target ACK, target trigger
+    completion, and terminal reverse-trigger completion.
+evidence:
+  - launchagents/run.pentagon.trigger-bridge.plist
+  - frames/t5d-launchd-bridge-proof-2026-05-22.log
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.repaired-operational - bridged Codex skill load clean
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: local Codex skill loader during Pentagon bridge target-agent turns
+symptom: Successful bridged agent turns still emitted nonfatal stderr noise for
+  each local activegraph skill because SKILL.md files were missing YAML
+  frontmatter.
+owner: Riley (Evidence Lead) for proof; local Codex skill installation owns the
+  frontmatter repair.
+feedback_action: Add minimal YAML frontmatter to local activegraph skill files,
+  run a direct Codex skill-load smoke, then run a fresh LaunchAgent bridge
+  handoff and require stderr_tail to be empty.
+durable_conversion:
+  - Gate: future bridge proofs should record stderr_tail and treat repeated
+    skill-load errors as an evidence-quality regression.
+evidence:
+  - frames/t5d-skill-load-clean-proof-2026-05-22.log
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md
+
+## bottleneck.repaired-operational - file-backed gauntlet passes
+
+frame: t5d-target-agent-turn-activation-primitive
+complexity: system
+source: persistent bridge dispatch to Maya and Ravi for file-backed tasks
+symptom: Prior bridge proofs were strong for target activation and ACK routing,
+  but the easy/medium/hard/extra-hard proof was still mostly diagnostic rather
+  than artifact-producing work.
+owner: Riley (Evidence Lead) for proof; Maya and Ravi for target execution.
+feedback_action: Dispatch four bounded Pentagon bridge tasks that require local
+  proof artifacts: easy cwd/head proof, medium parser/plist checks, hard audit
+  verdict, and extra-hard prompt-to-artifact checklist.
+durable_conversion:
+  - Gate: future autonomy completion claims should include at least one
+    file-backed target-agent artifact, not only a chat ACK.
+evidence:
+  - frames/t5d-file-backed-gauntlet-2026-05-22.log
+  - frames/t5d-file-gauntlet-easy-20260522T230015Z.proof
+  - frames/t5d-file-gauntlet-medium-20260522T230015Z.proof
+  - frames/t5d-file-gauntlet-hard-20260522T230015Z.proof
+  - frames/t5d-file-gauntlet-extra-hard-20260522T230015Z.proof
+  - frames/t5d-target-agent-turn-activation-primitive.status
+  - frames/autonomy-completion-audit-2026-05-22.md

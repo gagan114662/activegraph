@@ -1,0 +1,14 @@
+hash=T7_REPEAT_MEDIUM_20260526_003
+run_seed=af062b71-7787-4ac4-b316-8710fe68f556
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=ecdfd02
+uncovered_symbol=activegraph.runtime.view_builder.build_view
+test_file=activegraph/tests/test_build_view_t7m_003_coverage.py
+new_test_count=2
+pytest_collect_before=722
+pytest_collect_after=724
+pytest_before=708
+pytest_after=710
+agent_commit_sha=ecdfd025786e206801a49b918cdb75bb02989be5
+ruff_target_exit=0
+verdict=native_medium_done

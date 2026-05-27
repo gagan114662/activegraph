@@ -1,0 +1,127 @@
+# Frame t4 OpenAI tool argument normalization - adversary rerun
+
+Commit under test: inner:fce0cab `Frame t4 fix OpenAI tool argument normalization`
+Worktree note: checked out detached at `fce0cab`; unrelated untracked `GAUNTLET.md` present before this pass.
+
+## Declared target verification
+
+Command:
+
+```sh
+pytest -q tests/test_openai_tool_shape.py tests/test_provider_tool_parity.py tests/test_llm_failure.py::test_provider_kwargs_are_threaded_through
+```
+
+Observed:
+
+```text
+..............                                                           [100%]
+14 passed in 0.43s
+```
+
+## Breakage discovered
+
+Invalid OpenAI `tool_calls[].function.arguments` can still execute a tool successfully when the tool input schema has zero declared fields, because `_extract_tool_calls` encodes invalid/non-object arguments as `{"_raw": ...}` and Pydantic `BaseModel` ignores extra fields by default.
+
+That means the new regression only proves invalid args fail for a schema with a required field (`query: str`). It does not guarantee the promised invariant: invalid JSON and decoded non-objects flow to `tool.invalid_input` and cannot invoke the tool.
+
+Additional edge: empty string arguments are coerced to `{}` by:
+
+```python
+arguments = _value(function, "arguments") or "{}"
+```
+
+so `""` is treated as a valid empty JSON object instead of invalid JSON.
+
+## Interpreter-backed reproduction
+
+Command:
+
+```sh
+python3 - <<'PY'
+from __future__ import annotations
+from types import SimpleNamespace
+from typing import Any
+from pydantic import BaseModel
+from activegraph import FrozenClock, Graph, IDGen, Runtime, clear_registry, clear_tool_registry, llm_behavior, tool
+from activegraph.llm import OpenAIProvider
+
+class EmptyArgs(BaseModel):
+    pass
+class PingResult(BaseModel):
+    ok: bool
+class Answer(BaseModel):
+    answer: str
+
+def run(arguments: str):
+    clear_registry(); clear_tool_registry()
+    @tool(name='ping', description='No-arg ping.', input_schema=EmptyArgs, output_schema=PingResult, deterministic=True)
+    def ping(args: EmptyArgs, ctx: Any) -> PingResult:
+        return PingResult(ok=True)
+    @llm_behavior(name='answer_with_ping', on=['goal.created'], description='Answer with ping.', output_schema=Answer, tools=[ping], max_tool_turns=2, temperature=0.0)
+    def answer_with_ping(event: Any, graph: Any, ctx: Any, out: Answer) -> None:
+        graph.add_object('answer', {'answer': out.answer})
+    first = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[SimpleNamespace(id='call_1', type='function', function=SimpleNamespace(name='ping', arguments=arguments))]), finish_reason='tool_calls')], usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2), model='gpt-4o-mini')
+    final = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"answer":"done"}'), finish_reason='stop')], usage=SimpleNamespace(prompt_tokens=6, completion_tokens=3), model='gpt-4o-mini')
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=[first, final])))
+    def create(**kwargs):
+        client.chat.completions.calls.append(kwargs)
+        return client.chat.completions._responses.pop(0)
+    client.chat.completions.create = create
+    graph = Graph(ids=IDGen(), clock=FrozenClock('2026-05-22T12:00:00Z'), run_id='t4-adversary')
+    Runtime(graph, llm_provider=OpenAIProvider(client=client), budget={'max_tool_calls': 4}).run_goal('g')
+    return [(e.type, e.payload.get('reason'), e.payload.get('tool'), e.payload.get('args'), e.payload.get('object')) for e in graph.events]
+
+for arg in ['', '{', '1', '"not an object"']:
+    print('ARGS', repr(arg))
+    for row in run(arg):
+        print(row)
+PY
+```
+
+Observed:
+
+```text
+ARGS ''
+('tool.requested', None, 'ping', {}, None)
+('tool.responded', None, 'ping', None, None)
+('object.created', None, None, None, {'id': 'answer#1', 'type': 'answer', 'data': {'answer': 'done'}, ...})
+('behavior.completed', None, None, None, None)
+
+ARGS '{'
+('tool.requested', None, 'ping', {'_raw': '{'}, None)
+('tool.responded', None, 'ping', None, None)
+('object.created', None, None, None, {'id': 'answer#1', 'type': 'answer', 'data': {'answer': 'done'}, ...})
+('behavior.completed', None, None, None, None)
+
+ARGS '1'
+('tool.requested', None, 'ping', {'_raw': 1}, None)
+('tool.responded', None, 'ping', None, None)
+('object.created', None, None, None, {'id': 'answer#1', 'type': 'answer', 'data': {'answer': 'done'}, ...})
+('behavior.completed', None, None, None, None)
+
+ARGS '"not an object"'
+('tool.requested', None, 'ping', {'_raw': 'not an object'}, None)
+('tool.responded', None, 'ping', None, None)
+('object.created', None, None, None, {'id': 'answer#1', 'type': 'answer', 'data': {'answer': 'done'}, ...})
+('behavior.completed', None, None, None, None)
+```
+
+Full command output in terminal included every event; the signal is that invalid args reached `tool.responded`, produced `object.created`, and completed the behavior.
+
+## Closure requirement
+
+Regression test.
+
+Add a no-argument / zero-field tool schema fixture and assert invalid OpenAI argument encodings do not invoke the tool:
+
+- `function.arguments = ""`
+- malformed JSON such as `"{"`
+- decoded non-object JSON such as `"1"` and `"\"not an object\""`
+
+Expected behavior:
+
+- `llm.responded` is still emitted.
+- terminal reason is `tool.invalid_input`.
+- no successful `tool.responded` and no `object.created` success artifact.
+
+Implementation likely needs a first-class invalid-tool-args marker in the provider/runtime boundary, or an equivalent guaranteed-invalid path. Encoding invalid provider input as a normal dict is not sufficient because valid Pydantic schemas may ignore extra keys.

@@ -1,0 +1,46 @@
+status: watchdog_assisted_only
+evaluated_utc: 2026-05-22T21:54:19Z
+owner: Riley / Evidence Lead
+scope: Pentagon autonomy flywheel readiness before reopening T5
+
+default_model: gpt-5.5
+evidence_index: frames/evidence-index-2026-05-22.md
+bottleneck_gate_map: frames/flywheel-bottleneck-gate-map.md
+identity_map: agent-os/AGENT_IDENTITY_MAP.md
+
+checks:
+  evidence_index_clean: green
+  evidence_index_note: outer workspace is clean at e12873f after committing and pushing the evidence index and historical proof files
+  no_untracked_proof: amber
+  no_untracked_proof_note: outer proof-like files are committed; inner activegraph/GAUNTLET.md remains untracked and is explicitly excluded from proof until committed or retired
+  purpose_coverage_current: green
+  purpose_coverage_note: frames/pentagon-purpose-repair-2026-05-22.log records exact-DM PURPOSE_PATCHED evidence for Avery, Sofia, Sasha, Theo, Maya, Quinn, Rowan, Riley, and Grace; Priya was patched through the caller-scoped Pentagon MCP token
+  model_audit_current: amber
+  model_audit_note: macOS default drifted back to claude-opus-4-7[1m] and was repaired again at 2026-05-22T21:54Z; current defaults read is gpt-5.5, but durability and live per-agent readback remain unproven after the drift
+  interpreter_proof_current: green
+  interpreter_proof_note: frames/pentagon-live-ui-verification-2026-05-22.log records live UI INTERPRETER_OK proof for Avery, Sofia, Sasha, Theo, Maya, Quinn, Rowan, Priya, Riley, and Grace
+  capability_gate_current: green
+  capability_gate_note: current core owners produced literal command evidence; legacy Forge/Nova/Spec Owner identities are retired by agent-os/AGENT_IDENTITY_MAP.md and cannot own active frames
+  activation_protocol_tested: amber
+  activation_protocol_note: T5b closed watchdog-assisted, but T5c proved recipient-owned scheduled watchdogs do not yet produce visible target-agent activation. Full autonomous handoff still requires a Pentagon target-agent activation primitive.
+  pentagon_mcp_connectivity: green
+  pentagon_mcp_connectivity_note: Claude Code CLI registered pentagon via claude mcp add with a valid pentagon_agent bearer token; claude mcp get pentagon reports Status ✓ Connected and tools/list returns the patch_document catalog. Token identifies as Pentagon agent 642755A2-A869-440B-B4F7-E5A718E0FB8B so MCP calls attribute to that agent. See Resolution section in frames/pentagon-mcp-connectivity-2026-05-22.log dated 2026-05-22T17:50Z. Per-agent attribution rotation and a fresh-session tool-exposure check are still pending.
+  skills_installed: green
+  skills_installed_note: active_graph skill wrappers installed in /Users/gaganarora/.codex/skills and repo-backed skills added under agent-os/skills
+  t2_partial_debt_tracked: green
+  t1b_accounted: green
+  v0_1_accounted: green
+  t4_adversary_accounted: green
+  t5_red_state_preserved: green
+  t5_red_state_note: T5b replaced the invalidated original T5 red predicate with current Theo red test commit 8d3ff89, followed by Maya activation and implementation commit ccd4f45.
+
+required_before_t5_reopen:
+  - commit and push all proof/control artifacts, and either commit or retire inner activegraph/GAUNTLET.md if it is used as proof
+  - refresh model audit with current names only or explicitly mark legacy agents retired
+  - prove the gpt-5.5 default remains durable after a fresh Pentagon launch and live per-agent readback
+  - implement or expose a target-agent activation primitive; MCP send_message and caller-scoped scheduled actions are not enough
+  - use exact-DM selected-header verification for any UI-driven activation; do not rely on moving-list coordinates
+  - no remaining T5b closure blockers recorded
+
+verdict: watchdog_assisted_only
+reason: core Purpose/interpreter readiness are proven and T5b records successful watchdog-assisted delivery, but T5c shows fully autonomous target-agent activation is still blocked by the current Pentagon activation surface; the default model also drifted once after repair and must be proven durable before autonomous reopening.

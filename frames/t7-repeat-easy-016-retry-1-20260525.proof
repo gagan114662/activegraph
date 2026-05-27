@@ -1,0 +1,11 @@
+hash=T7_REPEAT_EASY_20260525_016_RETRY_1
+run_seed=e6eb0d2b-dbfa-4a11-805e-8d0528ae2a64
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=1ef372b
+target_file=activegraph/core/ids.py:94
+target_symbol=activegraph.core.ids.IDGen.frame
+agent_commit_sha=1ef372bad0ae0442105185b9bf3350a20a6b9b46
+pytest_before=697
+pytest_after=697
+ruff_target_exit=0
+verdict=native_easy_done

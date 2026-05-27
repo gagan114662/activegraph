@@ -1,0 +1,11 @@
+hash=T7_REPEAT_EASY_20260525_005
+run_seed=4d7a1261-1856-4a3a-aa1f-308bc8cc621c
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=9a065bc
+target_file=activegraph/core/event.py:24
+target_symbol=activegraph.core.event.Event.to_dict
+agent_commit_sha=9a065bcb06714053a6d317cf73f1de0cc1b31f0b
+pytest_before=697
+pytest_after=697
+ruff_target_exit=0
+verdict=native_easy_done

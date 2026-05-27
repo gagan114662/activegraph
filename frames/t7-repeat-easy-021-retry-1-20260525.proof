@@ -1,0 +1,11 @@
+hash=T7_REPEAT_EASY_20260525_021_RETRY_1
+run_seed=4fdd99c7-db84-4ae9-9b42-7b2003d81ac0
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=56a2340
+target_file=activegraph/core/overrides.py:55
+target_symbol=activegraph.core.overrides.CoercedOverride.to_event_payload
+agent_commit_sha=56a2340f6f323c6468f276e1698836b4c1d5290d
+pytest_before=704
+pytest_after=704
+ruff_target_exit=0
+verdict=native_easy_done

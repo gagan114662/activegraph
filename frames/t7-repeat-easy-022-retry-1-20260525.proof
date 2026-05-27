@@ -1,0 +1,11 @@
+hash=T7_REPEAT_EASY_20260525_022_RETRY_1
+run_seed=c02752a1-19ef-4346-a07d-8527ad9d8684
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=a0a1452
+target_file=activegraph/core/view.py:41
+target_symbol=activegraph.core.view.View.relations
+agent_commit_sha=a0a145268a79b4179c9201ed27e761ae5ecb6ed2
+pytest_before=704
+pytest_after=704
+ruff_target_exit=0
+verdict=native_easy_done

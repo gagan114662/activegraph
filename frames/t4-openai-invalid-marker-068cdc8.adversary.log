@@ -1,0 +1,136 @@
+# T4 adversary log - invalid OpenAI argument marker durability
+
+Target commit: `068cdc8` (`Internalize invalid OpenAI argument marker`)
+
+Exact verification checkout:
+
+```text
+$ git worktree add --detach /tmp/ag-068cdc8.GqwnGI 068cdc8
+Preparing worktree (detached HEAD 068cdc8)
+
+$ git rev-parse --short HEAD && git status --short
+068cdc8
+```
+
+Declared/focused gates:
+
+```text
+$ pytest tests/test_provider_tool_parity.py -q
+.......                                                                  [100%]
+7 passed in 0.11s
+
+$ pytest -q tests/test_openai_tool_shape.py tests/test_provider_tool_parity.py tests/test_llm_failure.py::test_provider_kwargs_are_threaded_through
+...............                                                          [100%]
+15 passed in 0.12s
+```
+
+## Regression discovered
+
+`068cdc8` makes `invalid_args_error` internal by dropping it from
+`ToolCall.to_dict()`. Immediate provider-to-runtime execution still fails as
+`tool.invalid_input`, but durable `llm.responded` events no longer preserve the
+marker. `LLMCache.from_events()` hydrates the tool call from that event payload
+with `invalid_args_error=None`.
+
+For a zero-field/no-arg tool schema, the cached call's fallback args
+`{"_raw": "{"}` are accepted by Pydantic, so replay/fork LLM-cache reuse turns
+the originally-invalid provider output into a successful tool invocation and
+completed behavior.
+
+Probe command:
+
+```text
+$ python3 - <<'PY'
+from types import SimpleNamespace
+from typing import Any
+from pydantic import BaseModel
+
+from activegraph import FrozenClock, Graph, IDGen, Runtime, clear_registry, clear_tool_registry, llm_behavior, tool
+from activegraph.llm import OpenAIProvider
+from activegraph.llm.cache import LLMCache
+
+class EmptyArgs(BaseModel):
+    pass
+class PingResult(BaseModel):
+    ok: bool
+class Answer(BaseModel):
+    answer: str
+
+def fresh_graph():
+    return Graph(ids=IDGen(), clock=FrozenClock('2026-05-22T12:00:00Z'), run_id='t4')
+
+def register():
+    clear_registry(); clear_tool_registry()
+    @tool(name='ping', description='No-argument ping.', input_schema=EmptyArgs, output_schema=PingResult, deterministic=True)
+    def ping(args: EmptyArgs, ctx: Any) -> PingResult:
+        return PingResult(ok=True)
+    @llm_behavior(name='answer_with_ping', on=['goal.created'], description='Answer with a no-argument tool call.', output_schema=Answer, tools=[ping], max_tool_turns=2, temperature=0.0)
+    def answer_with_ping(event: Any, graph: Any, ctx: Any, out: Answer) -> None:
+        graph.add_object('answer', {'answer': out.answer})
+
+def response_tool(arguments):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[SimpleNamespace(id='call_1', type='function', function=SimpleNamespace(name='ping', arguments=arguments))]), finish_reason='tool_calls')], usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2), model='gpt-4o-mini')
+
+def response_final():
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"answer":"done"}'), finish_reason='stop')], usage=SimpleNamespace(prompt_tokens=6, completion_tokens=3), model='gpt-4o-mini')
+
+def make_provider(responses):
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(calls=[], _responses=list(responses))))
+    def create(**kwargs):
+        client.chat.completions.calls.append(kwargs)
+        return client.chat.completions._responses.pop(0)
+    client.chat.completions.create = create
+    return OpenAIProvider(client=client), client
+
+register()
+g1 = fresh_graph()
+provider1, client1 = make_provider([response_tool('{')])
+Runtime(g1, llm_provider=provider1, budget={'max_tool_calls': 4}).run_goal('g')
+print('original_types', [e.type for e in g1.events])
+print('original_terminal', [e.payload.get('reason') for e in g1.events if e.type == 'behavior.failed'])
+print('original_answers', [e.payload for e in g1.events if e.type == 'object.created'])
+llm_responded = [e for e in g1.events if e.type == 'llm.responded'][0]
+print('serialized_tool_call', llm_responded.payload['tool_calls'][0])
+
+cache = LLMCache.from_events(g1.events)
+prompt_hash = [e.payload['prompt_hash'] for e in g1.events if e.type == 'llm.requested'][0]
+cached = cache.get(prompt_hash)
+print('cached_marker', cached.tool_calls[0].invalid_args_error if cached and cached.tool_calls else None)
+print('cached_args', cached.tool_calls[0].args if cached and cached.tool_calls else None)
+
+register()
+g2 = fresh_graph()
+provider2, client2 = make_provider([response_final()])
+Runtime(g2, llm_provider=provider2, budget={'max_tool_calls': 4}, replay_llm_cache=True, llm_cache=cache).run_goal('g')
+print('replay_types', [e.type for e in g2.events])
+print('replay_terminal', [e.payload.get('reason') for e in g2.events if e.type == 'behavior.failed'])
+print('replay_answers', [e.payload for e in g2.events if e.type == 'object.created'])
+print('provider2_calls', len(client2.chat.completions.calls))
+PY
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+original_types ['goal.created', 'behavior.started', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed', 'runtime.idle']
+original_terminal ['tool.invalid_input']
+original_answers []
+serialized_tool_call {'id': 'call_1', 'name': 'ping', 'args': {'_raw': '{'}}
+cached_marker None
+cached_args {'_raw': '{'}
+replay_types ['goal.created', 'behavior.started', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'llm.requested', 'llm.responded', 'object.created', 'behavior.completed', 'runtime.idle']
+replay_terminal []
+replay_answers [{'object': {'id': 'answer#1', 'type': 'answer', 'data': {'answer': 'done'}, 'version': 1, 'provenance': {'created_by': 'answer_with_ping', 'caused_by_event': 'evt_001', 'frame_id': None, 'timestamp': '2026-05-22T12:00:00Z', 'evidence': [], 'run_id': 't4', 'llm_request_event_id': 'evt_003', 'tool_request_event_ids': ['evt_005']}}, 'id': 'answer#1'}]
+provider2_calls 1
+```
+
+## Closure requirement
+
+Regression test. Cover replay/fork cache hydration from durable
+`llm.responded` events for invalid OpenAI tool arguments on zero-field schemas.
+The second run must preserve the original terminal `tool.invalid_input` shape
+and must not emit `object.created`.
+
+Implementation direction: either preserve enough durable information for
+`LLMCache.from_events()` / recorded fixtures to rehydrate the invalid marker, or
+encode invalid provider arguments as a payload shape that cannot validate as a
+zero-field Pydantic model after hydration. If the marker must remain hidden from
+public `llm.responded.tool_calls`, use a private/internal event payload field or
+separate cache metadata, but replay/fork cache semantics cannot turn invalid
+provider output into a valid tool call.

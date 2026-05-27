@@ -1,0 +1,14 @@
+hash=T7_REPEAT_MEDIUM_20260526_013
+run_seed=41de06c4-9f6c-4714-8b1d-f3d2c6cfe091
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=d65b8a1
+uncovered_symbol=activegraph.core.graph.Graph.has_object_of_type
+test_file=activegraph/tests/test_graph_has_object_of_type_t7m_013_coverage.py
+new_test_count=2
+pytest_collect_before=740
+pytest_collect_after=742
+pytest_before=726
+pytest_after=728
+agent_commit_sha=d65b8a1b2800cbadfbd6ce9e81af8732e4431a6b
+ruff_target_exit=0
+verdict=native_medium_done

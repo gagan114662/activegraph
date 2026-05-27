@@ -1,0 +1,11 @@
+hash=T7_REPEAT_EASY_20260525_019
+run_seed=cd8eed27-c395-4990-85b5-dba36a325711
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=bf4203f
+target_file=activegraph/runtime/patterns.py:704
+target_symbol=activegraph.runtime.patterns.Match.get
+agent_commit_sha=bf4203f02c24b9e3b7361123ec4371c3bdabf242
+pytest_before=698
+pytest_after=698
+ruff_target_exit=0
+verdict=native_easy_done

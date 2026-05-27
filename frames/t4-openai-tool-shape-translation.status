@@ -1,0 +1,94 @@
+status: incomplete_dirty_unpushed
+inner_head: 83eaef0
+outer_head_at_evaluation: 32eca85
+outer_evidence_head: latest committed revision of this status file
+evaluated: 2026-05-25
+review: clean_for_inner_5c2cd8e_commit_scoped_only_stale_for_current_545889f
+focused_tests: "focused T4 shard 35 passed"
+adjacent_runtime_tests: 48 passed
+full_tests: 702 passed, 15 skipped, 1 warning
+mypy: success
+docstrings: Ring 0 102/102, Ring 1 103/120
+cli_flag_drift: OK
+doc_links: 3 passed
+wheel_completeness: 1 passed
+docs:
+  changelog_entry_present_for_t4: true
+  contract_amendment_locks_openai_tool_parity: true
+  docs_provider_tool_parity_page_exists: true
+autonomy:
+  theo_test_owner_pentagon_red_tests: true
+  maya_code_owner_auto_activation: false
+  implementation_completed_by_codex_fallback: true
+  counts_as_pentagon_only_extra_hard_autonomy: false
+bottlenecks_open:
+  - pushed-head closure is false: inner HEAD 83eaef0 is twenty commits ahead of origin/main 62015ed
+  - dirty inner tree remains: CHANGELOG.md, CONTRACT.md, README.md, docs/concepts/provider-tool-parity.md, docs/reference/llm-providers.md plus untracked artifacts
+  - no_changes_outside_permissions remains false: activegraph/behaviors/base.py, activegraph/core/clock.py, activegraph/core/event.py, activegraph/core/graph.py, activegraph/core/ids.py, activegraph/llm/cache.py, activegraph/llm/recorded.py, activegraph/packs/__init__.py, activegraph/runtime/patterns.py, activegraph/tests/test_attach_store_fresh_reattach_regression.py, activegraph/tests/test_policy_coverage.py, and activegraph/tools/cache.py are changed while only covered by activegraph/activegraph/**/*.py:ro
+  - frame architect explicitly declined :rw scope amendment for activegraph/behaviors/base.py, activegraph/llm/cache.py, and activegraph/llm/recorded.py
+  - Pentagon handoff message does not auto-activate Code Owner
+untracked_not_claimed:
+  inner:
+    - GAUNTLET.md
+    - frames/t4-invalid-marker-internal-7886d71.adversary.log
+    - frames/t4-openai-invalid-marker-068cdc8.adversary.log
+    - frames/t4-openai-tool-argument-normalization-7a975cd.adversary.log
+    - frames/t4-openai-tool-argument-normalization-fce0cab.adversary.log
+    - frames/t6-native-gauntlet-easy-20260523.proof
+    - frames/t6-native-gauntlet-hard-20260523.proof
+    - frames/t6-native-gauntlet-medium-20260523.proof
+    - frames/t7-repeat-easy-001-20260525.proof
+    - frames/t7-repeat-easy-002-20260525.proof
+    - frames/t7-repeat-easy-003-20260525.proof
+    - frames/t7-repeat-easy-004-20260525.proof
+    - frames/t7-repeat-easy-005-20260525.proof
+    - frames/t7-repeat-easy-006-20260525.proof
+    - frames/t7-repeat-easy-007-20260525.proof
+    - frames/t7-repeat-easy-008-20260525.proof
+    - frames/t7-repeat-easy-009-20260525.proof
+    - frames/t7-repeat-easy-010-20260525.proof
+    - frames/t7-repeat-easy-011-20260525.proof
+    - frames/t7-repeat-easy-012-20260525.proof
+    - frames/t7-repeat-easy-013-20260525.proof
+    - frames/t7-repeat-easy-014-20260525.proof
+    - uv.lock
+  outer:
+    - .review-worktrees/
+    - CLAUDE.md
+    - frames/codex-goals/
+    - frames/pipeline-smoke-test-20260525.log
+    - frames/pipeline-smoke-test-20260525.txt
+    - frames/post-baseline-flywheel-roadmap-2026-05-23.md
+    - frames/t13-and-beyond-factory-survivability-2026-05-23.md
+    - frames/t4-invalid-marker-internal-7886d71.bottleneck.log
+    - frames/t6-extra-hard-live-run-20260525.log
+    - frames/t6-extra-hard-self-audit-20260525.sqlite
+    - frames/t6-extra-hard-self-audit-20260525.sqlite-shm
+    - frames/t6-extra-hard-self-audit-20260525.sqlite-wal
+    - frames/t6-native-easy-run-20260523.log
+    - frames/t6-native-extra-hard-1-sofia-20260525.txt
+    - frames/t6-native-extra-hard-2-maya-20260525.txt
+    - frames/t6-native-extra-hard-3-quinn-20260525.txt
+    - frames/t6-native-extra-hard-3b-quinn-ack-correction-20260525.txt
+    - frames/t6-native-extra-hard-3c-maya-fix-20260525.txt
+    - frames/t6-native-extra-hard-4-sam-20260525.txt
+    - frames/t6-native-extra-hard-5-riley-20260525.txt
+    - frames/t6-native-gauntlet-extra-hard-20260525.proof
+    - frames/t6-native-hard-maya-run-RETRY-20260523.log
+    - frames/t6-native-hard-quinn-run-20260523.log
+    - frames/t6-native-hard-quinn-run-RETRY-20260523.log
+    - frames/t6-quinn-activation-retry-20260523.log
+    - frames/t6-real-autonomy-gauntlet-2026-05-23.md
+    - frames/t6-shadow-trigger-investigation-20260525.log
+    - frames/t7-repeat-easy-001-instruction-20260525.txt
+    - frames/t7-repeat-easy-001-run-20260525.log
+    - frames/t7-t12-scale-reliability-gauntlet-2026-05-23.md
+    - frames/t7-t6-regrade-25x-20260525.jsonl
+    - frames/t7-t6-regrade-25x-20260525.md
+    - frames/t7-t6-regrade-25x-after-duplicate-ack-fix-20260525.jsonl
+    - frames/t7-t6-regrade-25x-after-duplicate-ack-fix-20260525.md
+  modified_outer_not_claimed:
+    - scripts/pentagon-trigger-bridge.mjs
+    - scripts/run-native-pentagon-task.mjs
+    - scripts/verify-pentagon-autonomy-from-logs.mjs
+next_unlock: system-level Pentagon activation repair

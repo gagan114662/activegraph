@@ -1,0 +1,14 @@
+hash=T7_REPEAT_MEDIUM_20260527_027
+run_seed=3c03f0e9-98b8-403b-b414-6632c7fe15dc
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=534af06
+uncovered_symbol=activegraph.runtime.budget.Budget.cost_remaining_amount
+test_file=activegraph/tests/test_budget_cost_remaining_amount_t7m_027_coverage.py
+new_test_count=3
+pytest_collect_before=782
+pytest_collect_after=785
+pytest_before=768
+pytest_after=771
+agent_commit_sha=534af062bb89b7cc5e6d86d078dbfaa0f7aeb216
+ruff_target_exit=0
+verdict=native_medium_done

@@ -1,0 +1,128 @@
+# T4 adversary log - OpenAI invalid tool arguments marker
+
+Agent: Quinn (Test Adversary)
+Target commit: 7a975cd (`Reject invalid OpenAI tool arguments`)
+Worktree state at probe: `CONTRACT.md` modified; `GAUNTLET.md` untracked; prior `frames/t4-openai-tool-argument-normalization-fce0cab.adversary.log` untracked.
+
+## Interpreter smoke
+
+```text
+$ git rev-parse --short HEAD
+7a975cd
+
+$ git status --short --branch
+## main...origin/main [ahead 1]
+ M CONTRACT.md
+?? GAUNTLET.md
+?? frames/t4-openai-tool-argument-normalization-fce0cab.adversary.log
+
+$ ../venv/bin/python --version
+Python 3.14.3
+```
+
+## Declared target gate
+
+```text
+$ ../venv/bin/pytest -q tests/test_openai_tool_shape.py tests/test_provider_tool_parity.py tests/test_llm_failure.py::test_provider_kwargs_are_threaded_through tests/test_llm_openai.py
+............................                                             [100%]
+28 passed in 0.33s
+```
+
+## Prior zero-field repro shape
+
+Probe expanded the prior zero-field Pydantic escape hatch across missing, `None`, non-string list, empty string, malformed JSON, JSON number, and JSON string arguments. All invalid shapes now stop before tool success; valid `{}` still succeeds.
+
+```text
+$ ../venv/bin/python - <<'PY'
+...
+PY
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+behavior failed: answer_with_ping (reason=tool.invalid_input)
+missing ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed'] tool.invalid_input answer_objects= 0 calls= 1
+none ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed'] tool.invalid_input answer_objects= 0 calls= 1
+list-object ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed'] tool.invalid_input answer_objects= 0 calls= 1
+empty-string ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed'] tool.invalid_input answer_objects= 0 calls= 1
+malformed-json ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed'] tool.invalid_input answer_objects= 0 calls= 1
+json-number ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed'] tool.invalid_input answer_objects= 0 calls= 1
+json-string ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'behavior.failed'] tool.invalid_input answer_objects= 0 calls= 1
+valid-empty-object ['goal.created', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded', 'llm.requested', 'llm.responded', 'object.created'] None answer_objects= 1 calls= 2
+```
+
+## Regression discovered: invalid marker is not serialized
+
+Finn's closure claim includes "cache/recorded hydration preserves the marker." The hydration code reads `invalid_args_error`, but the committed serialization path drops it: `ToolCall.to_dict()` returns only `id`, `name`, and `args`.
+
+```text
+$ nl -ba activegraph/llm/types.py | sed -n '82,96p'
+    82	    argument payload.
+    83	    """
+    84	
+    85	    id: str
+    86	    name: str
+    87	    args: dict[str, Any]
+    88	    invalid_args_error: Optional[str] = None
+    89	
+    90	    def to_dict(self) -> dict[str, Any]:
+    91	        return {"id": self.id, "name": self.name, "args": dict(self.args)}
+    92	
+    93	
+    94	@dataclass
+    95	class LLMResponse:
+    96	    raw_text: str
+```
+
+Minimal interpreter-backed reproduction:
+
+```text
+$ ../venv/bin/python - <<'PY'
+from decimal import Decimal
+from activegraph.llm import LLMResponse, ToolCall
+from activegraph.llm.cache import _response_from_event_payload
+from activegraph.llm.recorded import _response_from_fixture
+
+response = LLMResponse(
+    raw_text="",
+    parsed=None,
+    input_tokens=1,
+    output_tokens=1,
+    cost_usd=Decimal("0"),
+    latency_seconds=0.0,
+    model="gpt-4o-mini",
+    finish_reason="tool_calls",
+    tool_calls=[
+        ToolCall(
+            id="call_1",
+            name="ping",
+            args={"_raw": ""},
+            invalid_args_error="bad args",
+        )
+    ],
+)
+payload = response.to_dict()
+cache_hydrated = _response_from_event_payload(payload)
+fixture_hydrated = _response_from_fixture(payload, None)
+print(payload["tool_calls"][0])
+print(cache_hydrated.tool_calls[0].to_dict())
+print(fixture_hydrated.tool_calls[0].to_dict())
+assert payload["tool_calls"][0]["invalid_args_error"] == "bad args"
+assert cache_hydrated.tool_calls[0].invalid_args_error == "bad args"
+assert fixture_hydrated.tool_calls[0].invalid_args_error == "bad args"
+PY
+{'id': 'call_1', 'name': 'ping', 'args': {'_raw': ''}}
+{'id': 'call_1', 'name': 'ping', 'args': {'_raw': ''}}
+{'id': 'call_1', 'name': 'ping', 'args': {'_raw': ''}}
+Traceback (most recent call last):
+  File "<stdin>", line 13, in <module>
+KeyError: 'invalid_args_error'
+```
+
+## Disposition
+
+Real regression remains against `7a975cd`: invalid OpenAI tool argument markers survive the immediate provider-to-runtime path, but are lost at the durable `LLMResponse.to_dict()` boundary. That means cached or recorded replay can rehydrate the same call without `invalid_args_error`; zero-field schemas can again accept the fallback `{"_raw": ...}` args after replay.
+
+Closure requirement: add a regression test for `invalid_args_error` round-tripping through `LLMResponse.to_dict()` plus cache and recorded hydration, then emit the marker from `ToolCall.to_dict()` when present. This is a regression test closure path, not a contract non-goal, because the implementation already claims and partially implements marker preservation.

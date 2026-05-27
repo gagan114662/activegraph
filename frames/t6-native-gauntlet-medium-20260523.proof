@@ -1,0 +1,13 @@
+hash=T6_NATIVE_MEDIUM_20260523
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=37f413c
+uncovered_symbol=activegraph.policy.Policy
+test_file=activegraph/tests/test_policy_coverage.py
+new_test_count=2
+pytest_collect_before=714
+pytest_collect_after=716
+pytest_before=696
+pytest_after=698
+agent_commit_sha=37f413ce2d37562000c45347c6c14f68026e869f
+ruff_target_exit=0
+verdict=native_medium_done

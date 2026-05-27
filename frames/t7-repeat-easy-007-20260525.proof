@@ -1,0 +1,11 @@
+hash=T7_REPEAT_EASY_20260525_007
+run_seed=a19b1fad-c84d-4ef1-b16c-275209108539
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=f36880a
+target_file=activegraph/core/clock.py:11
+target_symbol=activegraph.core.clock.Clock.now
+agent_commit_sha=f36880a20a41b2b6de0e84a589891ac58066b688
+pytest_before=697
+pytest_after=697
+ruff_target_exit=0
+verdict=native_easy_done
