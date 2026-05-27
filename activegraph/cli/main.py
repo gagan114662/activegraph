@@ -138,9 +138,22 @@ def cli() -> None:
 # enough to deserve isolation and the command surface here is just
 # the registration.
 
-from activegraph.cli.quickstart import cmd_quickstart as _cmd_quickstart
+from activegraph.cli.quickstart import cmd_quickstart as _cmd_quickstart  # noqa: E402
 
 cli.add_command(_cmd_quickstart)
+
+
+# ---- events -------------------------------------------------------------
+
+from activegraph.cli.events_tail import cmd_events_tail as _cmd_events_tail  # noqa: E402
+
+
+@cli.group("events")
+def cmd_events() -> None:
+    """Event-log operator commands."""
+
+
+cmd_events.add_command(_cmd_events_tail)
 
 
 # ---- pack ---------------------------------------------------------------
