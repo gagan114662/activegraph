@@ -26,6 +26,7 @@ Public surface:
 
 from activegraph.llm.anthropic import AnthropicProvider
 from activegraph.llm.cache import LLMCache
+from activegraph.llm.claude_code_cli import ClaudeCodeCliProvider
 from activegraph.llm.errors import LLMBehaviorError, MissingProviderError
 from activegraph.llm.openai import OpenAIProvider
 from activegraph.llm.parsing import parse_structured_response
@@ -43,6 +44,7 @@ from activegraph.llm.types import LLMMessage, LLMResponse, ToolCall
 __all__ = [
     "AnthropicProvider",
     "AssembledPrompt",
+    "ClaudeCodeCliProvider",
     "LLMBehaviorError",
     "LLMCache",
     "LLMMessage",
