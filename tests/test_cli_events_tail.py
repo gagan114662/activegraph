@@ -1,13 +1,27 @@
-"""Adversarial tests for ``activegraph events tail``.
+"""Adversarial tests for ``activegraph events tail`` (Quinn, opus-4.7 cohort).
 
-Expected current failure at Maya commit 17b891f:
-```
-$ pytest -q tests/test_cli_events_tail.py
-......F                                                                  [100%]
-E       AssertionError: Usage errors must fail before appending the audit event.
-E       assert 1 == 2
-E        +  where 1 = <Result TypeError("can't compare offset-naive and offset-aware datetimes")>.exit_code
-```
+Target: Maya commit 78728a9 (T6 extra-hard, opus-4.7 cohort).
+
+The suite covers each clause of ``docs/specs/events-tail.md`` that is
+mechanically checkable from the CLI surface:
+
+* NDJSON row schema (id, ts, kind, payload, parent_id) with no extra keys.
+* ``--n`` as a suffix selector that includes the audit event when it matches.
+* ``--since`` as an inclusive ISO 8601 ``>=`` comparison.
+* ``--filter`` as a case-sensitive literal substring on event kind.
+* ``--n 0`` is legal, emits the audit event, prints zero rows.
+* Audit payload preserves effective flag values verbatim (defaults applied).
+* Usage errors (malformed ``--n``, date-only ``--since``) exit 2 before the
+  audit event is appended.
+* No-active-store and unreachable-store paths both emit the canonical
+  ``no active event store`` stderr message and exit 1.
+
+The last test (``test_unreachable_sqlite_path_reports_no_active_event_store``)
+is the focused adversarial probe: Maya's ``_resolve_active_store`` only
+catches ``(InvalidStoreURL, FileNotFoundError, RuntimeError)``, so a SQLite
+URL whose parent directory does not exist raises an uncaught
+``sqlite3.OperationalError`` and the CLI exits with an empty stderr instead
+of the spec-required ``no active event store`` message.
 """
 
 from __future__ import annotations
@@ -191,3 +205,91 @@ def test_date_only_since_is_rejected_before_audit_append(
         "Usage errors must fail before appending the audit event."
     )
     assert [event.type for event in _events(active_store)] == []
+
+
+def test_n_zero_emits_audit_event_but_prints_no_rows(
+    runner: CliRunner, active_store
+) -> None:
+    """``--n 0`` is legal: zero rows printed, but the audit event MUST still
+    be appended to the store (spec selection step 3 is unconditional on N)."""
+    _append(
+        active_store,
+        _event("evt_001", "object.created", "2026-05-25T15:00:00Z", {}),
+    )
+
+    result = runner.invoke(cli, ["events", "tail", "--n", "0"])
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert _rows(result.output) == []
+    kinds = [event.type for event in _events(active_store)]
+    assert kinds == ["object.created", "events_tail_invoked"]
+
+
+def test_audit_payload_records_effective_flag_values(
+    runner: CliRunner, active_store
+) -> None:
+    """The audit event's payload must record effective values after defaults
+    are applied, and must preserve the caller's accepted ``--since`` text."""
+    since_text = "2026-05-25T15:00:00+00:00"
+
+    result = runner.invoke(
+        cli,
+        [
+            "events",
+            "tail",
+            "--n",
+            "5",
+            "--since",
+            since_text,
+            "--filter",
+            "object",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == EXIT_OK, result.output
+    stored = _events(active_store)
+    audit = [e for e in stored if e.type == "events_tail_invoked"]
+    assert len(audit) == 1, [e.type for e in stored]
+    payload = audit[0].payload
+    assert payload == {
+        "n": 5,
+        "since": since_text,
+        "filter": "object",
+        "json": True,
+    }
+
+
+def test_unreachable_sqlite_path_reports_no_active_event_store(
+    runner: CliRunner, monkeypatch, tmp_path
+) -> None:
+    """Adversarial: a SQLite URL whose parent directory does not exist must
+    surface as the canonical ``no active event store`` stderr message with
+    exit code 1 — not as an uncaught ``sqlite3.OperationalError`` traceback.
+
+    Spec ``### No Store``: "must write a clear stderr message containing the
+    substring `no active event store` and exit with the CLI's generic error
+    code `1`." A bad URL is, from the operator's perspective, the same
+    failure class as an unset URL: there is no active store.
+
+    Maya commit 78728a9 catches ``(InvalidStoreURL, FileNotFoundError,
+    RuntimeError)`` in ``_resolve_active_store`` but ``sqlite3.connect``
+    raises ``sqlite3.OperationalError`` on a missing parent directory, which
+    is unrelated to the three caught classes. The exception escapes and the
+    CLI exits with the wrong stderr surface.
+    """
+    bad_path = tmp_path / "does" / "not" / "exist" / "events.sqlite"
+    monkeypatch.setenv("ACTIVEGRAPH_STORE_URL", f"sqlite:///{bad_path}")
+    monkeypatch.delenv("ACTIVEGRAPH_STORE", raising=False)
+    monkeypatch.delenv("ACTIVEGRAPH_RUN_ID", raising=False)
+    monkeypatch.delenv("ACTIVEGRAPH_RUN", raising=False)
+
+    result = runner.invoke(cli, ["events", "tail"])
+
+    assert result.exit_code == EXIT_GENERIC_ERROR, (
+        f"expected exit 1 with clean stderr, got exit={result.exit_code} "
+        f"exception={result.exception!r}"
+    )
+    assert "no active event store" in result.output, (
+        f"expected canonical 'no active event store' stderr; got {result.output!r}"
+    )
