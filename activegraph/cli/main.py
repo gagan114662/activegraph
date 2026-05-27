@@ -150,7 +150,14 @@ from activegraph.cli.events_tail import cmd_events_tail as _cmd_events_tail  # n
 
 @cli.group("events")
 def cmd_events() -> None:
-    """Event-log operator commands."""
+    """Event-log operator commands.
+
+    Subcommands:
+      tail   Print the last N events from the active event store as NDJSON.
+             Resolves the active store from ACTIVEGRAPH_STORE_URL (+ optional
+             ACTIVEGRAPH_RUN_ID) and emits one ``events_tail_invoked`` audit
+             event per invocation. See docs/specs/events-tail.md.
+    """
 
 
 cmd_events.add_command(_cmd_events_tail)
