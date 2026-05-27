@@ -42,6 +42,11 @@ pip install "activegraph[openai]"          # OpenAI provider only (+ tiktoken)
 pip install "activegraph[postgres]"        # Postgres-backed event store
 pip install "activegraph[prometheus]"      # Prometheus metrics
 pip install "activegraph[all]"             # everything
+
+# Or run on a Claude Code MAX subscription — no API key required.
+# Uses the local `claude` CLI for dispatch, including tool calls via MCP.
+# See activegraph.llm.ClaudeCodeCliProvider + examples/dark_factory_*.py.
+pip install activegraph mcp                # mcp is the MCP Python SDK (for tool support)
 ```
 
 Both LLM providers expose the same `LLMProvider` Protocol surface;
