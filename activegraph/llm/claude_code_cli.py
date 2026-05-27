@@ -47,12 +47,46 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from decimal import Decimal
 from typing import Any, Optional
 
 from activegraph.llm.errors import LLMBehaviorError
 from activegraph.llm.types import LLMMessage, LLMResponse
+
+
+def _try_emit_factory_event(**kwargs: Any) -> None:
+    """Best-effort emit to the dark-factory event log.
+
+    Imports lazily so activegraph remains usable without the operator-side
+    scripts/ directory on sys.path. Any failure here is swallowed —
+    raising would mask the real LLMBehaviorError the caller wants to see.
+    """
+    try:
+        # Look for scripts/factory_events.py up the tree from this file.
+        here = os.path.dirname(os.path.abspath(__file__))
+        for parent in (here, *list(_walk_parents(here, max_levels=6))):
+            scripts_dir = os.path.join(parent, "scripts")
+            if os.path.isdir(scripts_dir) and os.path.isfile(os.path.join(scripts_dir, "factory_events.py")):
+                if scripts_dir not in sys.path:
+                    sys.path.insert(0, scripts_dir)
+                break
+        import factory_events  # type: ignore
+
+        factory_events.emit_factory_event(**kwargs)
+    except Exception:
+        # Silent — we never want event-logging to break the LLM call.
+        pass
+
+
+def _walk_parents(path: str, max_levels: int) -> Any:
+    for _ in range(max_levels):
+        parent = os.path.dirname(path)
+        if parent == path:
+            return
+        yield parent
+        path = parent
 
 # Pricing for claude-opus-4-7 per Anthropic public documentation. Used by
 # estimate_cost() for pre-call budget gating; the actual cost returned by
@@ -151,6 +185,17 @@ class ClaudeCodeCliProvider:
                 check=False,
             )
         except subprocess.TimeoutExpired as e:
+            _try_emit_factory_event(
+                type="behavior.failed",
+                behavior="activegraph.ClaudeCodeCliProvider",
+                reason="llm.network_error",
+                message=f"claude CLI timed out after {timeout_seconds}s",
+                extras={
+                    "model": model,
+                    "exception_type": "TimeoutExpired",
+                    "timeout_seconds": float(timeout_seconds),
+                },
+            )
             raise LLMBehaviorError(
                 "llm.network_error",
                 f"claude CLI timed out after {timeout_seconds}s",
@@ -162,6 +207,17 @@ class ClaudeCodeCliProvider:
                 },
             ) from e
         except FileNotFoundError as e:
+            _try_emit_factory_event(
+                type="behavior.failed",
+                behavior="activegraph.ClaudeCodeCliProvider",
+                reason="llm.network_error",
+                message=f"claude CLI not found at {self._cli_path}",
+                extras={
+                    "model": model,
+                    "exception_type": "FileNotFoundError",
+                    "cli_path": self._cli_path,
+                },
+            )
             raise LLMBehaviorError(
                 "llm.network_error",
                 f"claude CLI not found at {self._cli_path}",
@@ -176,6 +232,18 @@ class ClaudeCodeCliProvider:
 
         result_event = self._parse_stream_json(proc.stdout)
         if result_event is None:
+            _try_emit_factory_event(
+                type="behavior.failed",
+                behavior="activegraph.ClaudeCodeCliProvider",
+                reason="llm.network_error",
+                message="claude CLI produced no result event",
+                extras={
+                    "model": model,
+                    "exception_type": "MissingResultEvent",
+                    "exit_code": proc.returncode,
+                    "stderr_tail": (proc.stderr or proc.stdout)[-500:],
+                },
+            )
             raise LLMBehaviorError(
                 "llm.network_error",
                 "claude CLI produced no result event",
@@ -197,6 +265,18 @@ class ClaudeCodeCliProvider:
                 "duration_ms": result_event.get("duration_ms"),
                 "session_id": result_event.get("session_id"),
             }
+            _try_emit_factory_event(
+                type="behavior.failed",
+                behavior="activegraph.ClaudeCodeCliProvider",
+                reason=reason,
+                message=extras["message"],
+                extras={
+                    "model": model,
+                    "api_error_status": result_event.get("api_error_status"),
+                    "duration_ms": result_event.get("duration_ms"),
+                    "session_id": result_event.get("session_id"),
+                },
+            )
             raise LLMBehaviorError(reason, extras["message"], payload_extras=extras)
 
         text = self._extract_text(result_event, proc.stdout)
@@ -210,6 +290,22 @@ class ClaudeCodeCliProvider:
             else self.estimate_cost(
                 input_tokens=input_tokens, output_tokens=output_tokens, model=model
             )
+        )
+
+        _try_emit_factory_event(
+            type="llm.responded",
+            behavior="activegraph.ClaudeCodeCliProvider",
+            extras={
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": float(cost),
+                "latency_seconds": latency,
+                "finish_reason": str(result_event.get("stop_reason") or "end_turn"),
+                "session_id": result_event.get("session_id"),
+                "cache_read_input_tokens": int(usage.get("cache_read_input_tokens") or 0),
+                "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0),
+            },
         )
 
         return LLMResponse(
