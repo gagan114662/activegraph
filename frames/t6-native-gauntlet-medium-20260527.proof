@@ -1,0 +1,13 @@
+hash=T6_NATIVE_MEDIUM_20260527_OPUS47
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=8b6b8f8
+uncovered_symbol=activegraph.runtime.budget.Budget.add_cost
+test_file=activegraph/tests/test_budget_add_cost_t6_native_medium_coverage.py
+new_test_count=3
+pytest_collect_before=805
+pytest_collect_after=808
+pytest_before=696
+pytest_after=794
+agent_commit_sha=8b6b8f81f08764bc45f563dcd533c256b737a5f9
+ruff_target_exit=0
+verdict=native_medium_done

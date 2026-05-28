@@ -75,9 +75,15 @@ def _try_emit_factory_event(**kwargs: Any) -> None:
         import factory_events  # type: ignore
 
         factory_events.emit_factory_event(**kwargs)
-    except Exception:
-        # Silent — we never want event-logging to break the LLM call.
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # We never want event-logging to break the LLM call, but a silently
+        # broken event pipeline is exactly what the log exists to catch (H13),
+        # so surface it on stderr without re-raising.
+        try:
+            sys.stderr.write(f"[claude_code_cli] factory event emission failed: {exc}\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
 
 
 def _walk_parents(path: str, max_levels: int) -> Any:

@@ -1,0 +1,10 @@
+hash=T6_NATIVE_EASY_20260527_OPUS47
+pwd=/Users/gaganarora/Desktop/my projects/active_graph/activegraph
+head=c18d390
+target_file=activegraph/packs/diligence/fixtures/__init__.py:79
+target_symbol=activegraph.packs.diligence.fixtures.RecordedDiligenceProvider.complete
+agent_commit_sha=c18d390090ea5a9e7d5c4a57ab17c604b6b6979b
+pytest_before=791
+pytest_after=791
+ruff_target_exit=0
+verdict=native_easy_done
