@@ -464,6 +464,18 @@ class ClaudeCodeCliProvider:
         for key in _STRIP_ENV_VARS:
             env.pop(key, None)
         env.update(self._env_overrides)
+        # Opus 4.8 multi-turn thinking-preservation mitigation (2026-05-28).
+        # On agentic multi-turn tool use (Maya: read -> pytest -> commit, many
+        # turns), the claude CLI mangles a `thinking`/`redacted_thinking` block
+        # from an earlier assistant turn when it sends the follow-up, and the API
+        # rejects the whole request: "400 ... thinking blocks ... must remain as
+        # they were in the original response." This 400-failed EVERY T7 gauntlet
+        # dispatch (fast claim+complete, no output = looked like ghost_completion).
+        # Single-turn dispatches (T6 reviews) never hit it. Disabling extended
+        # thinking means no thinking blocks are produced, so there is nothing to
+        # mangle. Override with FACTORY_CLAUDE_MAX_THINKING_TOKENS (e.g. once a
+        # newer CLI fixes the cross-turn preservation).
+        env["MAX_THINKING_TOKENS"] = os.environ.get("FACTORY_CLAUDE_MAX_THINKING_TOKENS", "0")
         return env
 
     @staticmethod
