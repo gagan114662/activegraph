@@ -31,6 +31,7 @@ from activegraph.observability.migration import (
     migrate,
 )
 from activegraph.observability.prometheus import PrometheusMetrics
+from activegraph.observability.otel import OpenTelemetryMetrics
 from activegraph.observability.status import (
     BehaviorInfo,
     BudgetSnapshot,
@@ -51,6 +52,7 @@ __all__ = [
     "MigrationReport",
     "MigrationRunReport",
     "NoOpMetrics",
+    "OpenTelemetryMetrics",
     "PrometheusMetrics",
     "RuntimeStatus",
     "configure_logging",
