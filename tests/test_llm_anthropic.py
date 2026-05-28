@@ -179,6 +179,14 @@ def test_count_tokens_delegates_to_sdk():
 
 
 def test_missing_api_key_raises_when_constructing_real_client(monkeypatch):
+    # The check this test exercises is "no ANTHROPIC_API_KEY → RuntimeError
+    # mentioning the env var name." That check only fires AFTER the
+    # anthropic SDK import succeeds — without the SDK installed,
+    # AnthropicProvider raises a different RuntimeError about the missing
+    # SDK first, masking the API-key check. Skip cleanly when the SDK
+    # isn't on the path so this test doesn't gate environments that
+    # don't install the `[llm]` extra.
+    pytest.importorskip("anthropic")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     p = AnthropicProvider()  # no client override
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):

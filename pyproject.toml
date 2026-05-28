@@ -114,6 +114,18 @@ markers = [
     "postgres: tests that require a running Postgres (skipped unless ACTIVEGRAPH_TEST_POSTGRES_URL is set)",
     "slow: long-running tests opt-in by name in CI (e.g. wheel-completeness gate; builds + installs into a fresh venv)",
 ]
+# T7 medium coverage tests tag themselves via pytestmark = getattr(pytest.mark, "<dotted_symbol>")
+# so individual symbol coverage can be filtered later. The dotted names are intentional
+# (matching activegraph.core.graph.Graph.relations etc.) but pytest can't register them
+# as static markers. Suppress the warning class so they don't fail the test gate.
+filterwarnings = [
+    "ignore::pytest.PytestUnknownMarkWarning",
+]
+# Slow tests (wheel-completeness, etc.) are explicitly opt-in. Default
+# pytest invocation skips them; CI runs them via `pytest -m slow`.
+# This matches the marker's documented intent and prevents local
+# `pytest` from paying the multi-minute build+install cost.
+addopts = "-m 'not slow'"
 
 # ---------------------------------------------------------------------------
 # mypy configuration. CONTRACT v1.0 #C5 — allowlist-driven strict mode.

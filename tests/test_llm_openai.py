@@ -316,6 +316,11 @@ def test_count_tokens_heuristic_includes_assistant_tool_calls(monkeypatch):
 
 
 def test_missing_api_key_raises_when_constructing_real_client(monkeypatch):
+    # Skip cleanly when the openai SDK isn't installed — the API-key check
+    # this test exercises only runs AFTER the SDK import succeeds, so
+    # without the SDK we hit a different RuntimeError and mask the
+    # check we actually care about.
+    pytest.importorskip("openai")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     p = OpenAIProvider()  # no client override
     # The error message must name OPENAI_API_KEY so the operator

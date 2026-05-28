@@ -113,8 +113,13 @@ def test_example_passes_mypy_strict() -> None:
     Any-leak errors against ``assert_type`` because the project mypy
     config sets ``follow_imports = "skip"``. Code Owner closes this.
     """
-    if shutil.which("mypy") is None and not _mypy_module_importable():
-        pytest.skip("mypy not installed in this environment")
+    # The subprocess below runs `sys.executable -m mypy`, so the relevant
+    # availability question is whether the VENV python (sys.executable) can
+    # import mypy — not whether a system mypy exists on PATH. Skip when the
+    # venv can't import it; otherwise the test fails for an environment
+    # reason rather than a real type regression.
+    if not _mypy_module_importable():
+        pytest.skip("mypy not importable by sys.executable; skipping in this environment")
     result = subprocess.run(
         [sys.executable, "-m", "mypy", "--strict", str(EXAMPLE_REL)],
         cwd=PROJECT_ROOT,
@@ -136,8 +141,13 @@ def test_runtime_diff_passes_mypy_strict_standalone() -> None:
     itself must remain --strict-clean. Frame success criterion
     ``mypy_strict_passes_runtime_diff_zero_errors``.
     """
-    if shutil.which("mypy") is None and not _mypy_module_importable():
-        pytest.skip("mypy not installed in this environment")
+    # The subprocess below runs `sys.executable -m mypy`, so the relevant
+    # availability question is whether the VENV python (sys.executable) can
+    # import mypy — not whether a system mypy exists on PATH. Skip when the
+    # venv can't import it; otherwise the test fails for an environment
+    # reason rather than a real type regression.
+    if not _mypy_module_importable():
+        pytest.skip("mypy not importable by sys.executable; skipping in this environment")
     target = Path("activegraph") / "runtime" / "diff.py"
     result = subprocess.run(
         [sys.executable, "-m", "mypy", "--strict", str(target)],
