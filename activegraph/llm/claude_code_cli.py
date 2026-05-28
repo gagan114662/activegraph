@@ -345,21 +345,31 @@ class ClaudeCodeCliProvider:
             )
         )
 
-        _try_emit_factory_event(
-            type="llm.responded",
-            behavior="activegraph.ClaudeCodeCliProvider",
-            extras={
-                "model": model,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cost_usd": float(cost),
-                "latency_seconds": latency,
-                "finish_reason": str(result_event.get("stop_reason") or "end_turn"),
-                "session_id": result_event.get("session_id"),
-                "cache_read_input_tokens": int(usage.get("cache_read_input_tokens") or 0),
-                "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0),
-            },
-        )
+        # Skip the emit when an outer layer (Node bridge) will re-emit this
+        # event with full Pentagon context. Without this guard, the same
+        # dispatch produces three llm.responded rows at three behavior
+        # labels and downstream cost aggregators (Blake's caps,
+        # factory-health dashboard) triple-count the spend. The bridge
+        # sets FACTORY_SUPPRESS_LLM_RESPONDED_EMIT=1 when spawning this
+        # provider via bridge_dispatch.py. Standalone library usage
+        # (no bridge in the call stack) leaves the env var unset and
+        # this emit fires normally.
+        if not os.environ.get("FACTORY_SUPPRESS_LLM_RESPONDED_EMIT"):
+            _try_emit_factory_event(
+                type="llm.responded",
+                behavior="activegraph.ClaudeCodeCliProvider",
+                extras={
+                    "model": model,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cost_usd": float(cost),
+                    "latency_seconds": latency,
+                    "finish_reason": str(result_event.get("stop_reason") or "end_turn"),
+                    "session_id": result_event.get("session_id"),
+                    "cache_read_input_tokens": int(usage.get("cache_read_input_tokens") or 0),
+                    "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0),
+                },
+            )
 
         return LLMResponse(
             raw_text=text,
