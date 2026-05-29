@@ -41,11 +41,16 @@ def canonicalize_args(args: Any) -> Any:
     dump = getattr(args, "model_dump", None)
     if callable(dump):
         try:
-            return dump(mode="json")
+            return canonicalize_args(dump(mode="json"))
         except TypeError:
-            return dump()
+            return canonicalize_args(dump())
     if isinstance(args, dict):
-        return {k: canonicalize_args(v) for k, v in args.items()}
+        # Sort keys so the normalized shape is order-stable, per the
+        # docstring's ordering-stability guarantee. The downstream
+        # `hash_tool_call` sorts at dump time too, but this helper's
+        # output is also persisted verbatim into recorded tool fixtures
+        # (see tools/recorded.py), so the shape itself must be stable.
+        return {k: canonicalize_args(args[k]) for k in sorted(args)}
     if isinstance(args, list):
         return [canonicalize_args(v) for v in args]
     if isinstance(args, Decimal):

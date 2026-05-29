@@ -1385,7 +1385,14 @@ def test_internal_bug_fields_helper_shape() -> None:
         location="tests/test_errors_format.py:test_helper_shape",
         extra_context={"foo": "bar"},
     )
-    assert fields["summary"] == "test summary"
+    # v1.0 PR-G drift fix (T7 repeat-hard 023): the one-line message is
+    # emitted under `summary_or_message` — the actual parameter name
+    # `ActiveGraphError.__init__` accepts — so the returned dict is truly
+    # splattable as `ActiveGraphError(**internal_bug_fields(...))`, which
+    # is what the helper's docstring promises ("the kwargs dict the
+    # __init__ consumes"). It used to emit `summary`, which raised
+    # TypeError on splat.
+    assert fields["summary_or_message"] == "test summary"
     assert fields["what_failed"] == "something internal happened"
     assert fields["why"] == "the invariant"
     ctx = fields["context"]
@@ -1459,12 +1466,21 @@ def _trigger_internal_pattern_unknown_ast() -> UnsupportedPatternError:
 
 
 def _trigger_internal_graph_view_unknown_op() -> InternalEvaluatorError:
-    """Synthesize the graph view-filter unknown-operator case by
-    calling evaluate_where with a bogus operator."""
+    """Synthesize the graph view-filter unknown-operator case by calling
+    evaluate_where with a malformed operator dict.
+
+    The dict reads as an operator dict (it carries a real operator, ``==``,
+    which matches so iteration continues) and then carries a bogus operator
+    (``NOT_A_REAL_OP``) that trips the safety net. T7-repeat-hard-014 fixed
+    evaluate_where so a dict with NO operator keys is treated as a LITERAL
+    (equality) per the docstring; the unknown-operator guard now fires only
+    inside a genuine operator dict, which this trigger exercises. The raised
+    error's operator is still 'NOT_A_REAL_OP', so the snapshot is unchanged.
+    """
     from activegraph.core.graph import evaluate_where
     try:
         evaluate_where(
-            where={"text": {"NOT_A_REAL_OP": "anything"}},
+            where={"text": {"==": "anything", "NOT_A_REAL_OP": "anything"}},
             root={"text": "anything"},
         )
     except InternalEvaluatorError as e:

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import click
@@ -155,14 +155,25 @@ def _since_satisfied(event_ts: str, since: str) -> bool:
     """Return True iff ``event_ts`` is at or after ``since``.
 
     Both inputs are ISO 8601 strings; ``since`` is validated tz-aware at
-    parse time. For events whose stored timestamp is non-ISO, fall back
-    to lexicographic compare (correct for the canonical Z-suffixed UTC
-    text emitted by ``_now_iso``).
+    parse time. A stored ``event_ts`` that is valid ISO 8601 but *naive*
+    (no offset) is treated as UTC — the same convention the clocks use
+    (see ``TickingClock``) and consistent with the canonical Z-suffixed
+    UTC text emitted by ``_now_iso``. For events whose stored timestamp
+    is non-ISO, fall back to lexicographic compare.
     """
     try:
-        return _from_iso(event_ts) >= _from_iso(since)
+        ev = _from_iso(event_ts)
+        sn = _from_iso(since)
     except ValueError:
         return event_ts >= since
+    # `since` is validated tz-aware; a naive `ev` would otherwise raise
+    # TypeError on comparison. Assume naive stamps are UTC so the function
+    # always honors its documented "Return True iff ..." bool contract.
+    if ev.tzinfo is None and sn.tzinfo is not None:
+        ev = ev.replace(tzinfo=timezone.utc)
+    elif sn.tzinfo is None and ev.tzinfo is not None:
+        sn = sn.replace(tzinfo=timezone.utc)
+    return ev >= sn
 
 
 def _row(event: Event) -> dict[str, Any]:

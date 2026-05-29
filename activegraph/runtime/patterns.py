@@ -344,7 +344,7 @@ _TOKEN_RE = re.compile(
   | (?P<COMMA>,)
   | (?P<COLON>:)
   | (?P<DOT>\.)
-  | (?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)
+  | (?P<IDENT>[A-Za-z][A-Za-z0-9_]*)
     """,
     re.VERBOSE,
 )
@@ -373,6 +373,17 @@ def _tokenize(s: str) -> list[Tok]:
     while pos < len(s):
         m = _TOKEN_RE.match(s, pos)
         if not m:
+            # Identifiers must have a leading letter (locked subset, see the
+            # module docstring). A leading underscore is the common way to trip
+            # this — call it out explicitly so the message points at the rule.
+            if s[pos] == "_":
+                raise UnsupportedPatternError.syntax_error(
+                    what=(
+                        "identifiers must start with a letter "
+                        "(ASCII letters/digits/underscore, leading letter)"
+                    ),
+                    at=s[pos : pos + 8],
+                )
             raise UnsupportedPatternError.syntax_error(
                 what=f"unexpected character at position {pos}",
                 at=s[pos : pos + 8],
@@ -869,7 +880,7 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
                 extra_context={"operator": expr.op},
             )
             raise UnsupportedPatternError(
-                fields["summary"],
+                fields["summary_or_message"],
                 what_failed=fields["what_failed"],
                 why=fields["why"],
                 how_to_fix=fields["how_to_fix"],
@@ -919,7 +930,7 @@ def _eval_where(expr: BoolExpr, bindings: dict[str, str], graph) -> bool:
         extra_context={"ast_node_type": type(expr).__name__},
     )
     raise UnsupportedPatternError(
-        _fields["summary"],
+        _fields["summary_or_message"],
         what_failed=_fields["what_failed"],
         why=_fields["why"],
         how_to_fix=_fields["how_to_fix"],

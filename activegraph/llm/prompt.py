@@ -304,9 +304,19 @@ def _example_instance(node: Any, *, defs: dict[str, Any], depth: int = 0) -> Any
         properties = node.get("properties") or {}
         if not properties:
             return {}
+        # Honor the documented ``required`` walk: when the schema names its
+        # required properties, the minimal example carries exactly those
+        # (an instance the model should mirror, not an over-specified shape).
+        # Absent a ``required`` list there is no minimization signal, so every
+        # property is shown.
+        required = node.get("required")
+        if isinstance(required, list) and required:
+            selected = [(n, properties[n]) for n in required if n in properties]
+        else:
+            selected = list(properties.items())
         return {
             name: _example_instance(spec, defs=defs, depth=depth + 1)
-            for name, spec in properties.items()
+            for name, spec in selected
         }
 
     if schema_type == "array":

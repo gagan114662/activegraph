@@ -49,7 +49,11 @@ class MigrationReport:
 
     @property
     def ok(self) -> bool:
-        return all(r.status != "failed" for r in self.runs)
+        # migrate()'s docstring contract: successful iff every run's status
+        # is "ok" or "skipped" (an allowlist). The earlier `status != "failed"`
+        # was a blocklist that reported success for any unrecognized status,
+        # breaking the documented "iff ok or skipped" guarantee.
+        return all(r.status in ("ok", "skipped") for r in self.runs)
 
     @property
     def failures(self) -> tuple[MigrationRunReport, ...]:

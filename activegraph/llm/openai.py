@@ -77,9 +77,14 @@ def _pricing_for(
     for key in pricing:
         if model.startswith(key) and (best_key is None or len(key) > len(best_key)):
             best_key = key
-    if best_key is None:
-        best_key = "gpt-4o"
-    entry = pricing[best_key]
+    if best_key is not None:
+        entry = pricing[best_key]
+    else:
+        # Documented fallback: gpt-4o pricing. Prefer the supplied table's
+        # gpt-4o entry; if a custom table omits it, fall back to the framework
+        # default so the documented fallback can never KeyError (mirrors the
+        # AnthropicProvider._pricing_for claude-sonnet-4 backstop).
+        entry = pricing.get("gpt-4o") or _DEFAULT_PRICING["gpt-4o"]
     return Decimal(str(entry["input"])), Decimal(str(entry["output"]))
 
 

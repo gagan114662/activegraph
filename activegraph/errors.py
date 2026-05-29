@@ -329,7 +329,12 @@ def internal_bug_fields(
     if extra_context:
         ctx.update(extra_context)
     return {
-        "summary": summary,
+        # `ActiveGraphError.__init__` takes the one-line message as its
+        # positional/keyword parameter `summary_or_message` — NOT `summary`.
+        # Emitting the key under the real parameter name is what makes the
+        # documented "kwargs dict the __init__ consumes" promise actually
+        # hold (`ActiveGraphError(**internal_bug_fields(...))` must work).
+        "summary_or_message": summary,
         "what_failed": what_happened,
         "why": why_invariant,
         "how_to_fix": (

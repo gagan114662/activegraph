@@ -1,0 +1,11 @@
+hash=T7_REPEAT_HARD_20260528_OPUS48_019
+test_file=activegraph/tests/test_graph_emit_validates_without_store_t7_repeat_hard_019.py
+bug_source=comment:activegraph/core/graph.py:350
+failing_test_commit=cb45257
+fix_commit=b0cfd68
+pytest_before=950
+pytest_after=952
+candidates_considered=docstring:activegraph/core/ids.py:71(IDGen.event 'monotonic id' breaks lexical sort past 999 — REJECTED: fix needs format change, breaks 120 existing tests/snapshots, not surgical),docstring:activegraph/core/graph.py:890(evaluate_where in/not-in crash on None vs guarded >/< — REJECTED: documented line 890 is in exclusion list),no-docstring:activegraph/core/graph.py:175(get_relations invalid 'direction' silently returns all relations — REJECTED: real bug but no docstring anchor, only weakly documented in docs/concepts/graph.md),comment:activegraph/core/graph.py:350(Graph.emit 'bad payloads never land in the in-memory log either' but validate_event gated behind 'if self._store is not None' — SELECTED: store-less graph skips validation, surgical one-line fix, no regression)
+uncovered_symbol=activegraph.core.graph.Graph.emit
+agent_commit_sha=b0cfd68
+verdict=native_hard_done

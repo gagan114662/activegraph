@@ -45,7 +45,27 @@ class TickingClock(Clock):
         start: str = "2026-05-15T10:32:01Z",
         step_seconds: int = 1,
     ) -> None:
-        self._t = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        # The class contract is that the clock "monotonically advances ... on
+        # every call". A non-positive step would move now() backward (negative)
+        # or stall it (zero), both of which break monotonicity, so refuse to
+        # construct a clock that cannot honor its documented invariant.
+        if step_seconds < 1:
+            raise ValueError(
+                f"step_seconds must be >= 1 to keep TickingClock monotonic, "
+                f"got {step_seconds!r}"
+            )
+        parsed = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        # Honor the inherited Clock contract ("Real wall-clock UTC, Z suffix"):
+        # normalize the start to UTC so now() always emits a Z-suffixed UTC
+        # stamp. A naive start is assumed UTC; an offset start is converted.
+        # Without this, now() passes through the caller's timezone and a naive
+        # or non-UTC start yields a non-Z / non-UTC string that corrupts the
+        # documented event-log timestamp format.
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+        self._t = parsed
         self._step = step_seconds
 
     def now(self: "TickingClock") -> str:

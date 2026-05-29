@@ -46,18 +46,28 @@ def _pricing_for(model: str, pricing: Mapping[str, Mapping[str, str]]) -> tuple[
     """Lookup by longest matching family prefix.
 
     `claude-sonnet-4-6` resolves to the `claude-sonnet-4` family entry.
-    Unknown models fall back to sonnet-4 pricing and emit a warning
-    via the returned `Decimal` (caller can detect by comparing to
+    Unknown models fall back to sonnet-4 pricing (the caller can detect
+    the fallback by comparing the returned `Decimal` against the
     family default).
+
+    The sonnet-4 fallback is unconditional: it holds even when the
+    supplied `pricing` table is a custom one that omits the
+    `claude-sonnet-4` family key. In that case the framework's built-in
+    `_DEFAULT_PRICING` sonnet-4 rate is the backstop — the documented
+    fallback must never raise `KeyError`.
     """
 
     best_key: Optional[str] = None
     for key in pricing:
         if model.startswith(key) and (best_key is None or len(key) > len(best_key)):
             best_key = key
-    if best_key is None:
-        best_key = "claude-sonnet-4"
-    entry = pricing[best_key]
+    if best_key is not None:
+        entry = pricing[best_key]
+    else:
+        # Documented fallback: sonnet-4 pricing. Prefer the supplied
+        # table's sonnet-4 entry; if a custom table omits it, fall back
+        # to the framework default so the fallback can never KeyError.
+        entry = pricing.get("claude-sonnet-4") or _DEFAULT_PRICING["claude-sonnet-4"]
     return Decimal(str(entry["input"])), Decimal(str(entry["output"]))
 
 

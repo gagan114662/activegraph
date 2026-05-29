@@ -395,13 +395,21 @@ def memo_synthesizer(event, graph, ctx, out, *, settings: DiligenceSettings):
 
     # Idempotent: only one memo per company. The risk_identifier may
     # produce more than one risk object — we only synthesize on the
-    # first one.
+    # first one. Check BOTH materialized memos AND pending memo approvals:
+    # under the memo_approval policy (auto_approve_memos=False) the memo is
+    # deferred via ctx.propose_object and is NOT yet visible in the view,
+    # so a second risk for the same company would otherwise propose a
+    # duplicate memo (the same guard risk_identifier already applies).
     existing = [
         o for o in ctx.view.objects(type="memo")
         if o.data.get("company_id") == company_id
     ]
     if existing:
         return
+    if ctx._runtime is not None:
+        for pa in ctx._runtime.pending_approvals():
+            if pa.object_type == "memo" and pa.data.get("company_id") == company_id:
+                return
 
     payload = Memo(
         company_id=company_id or "",

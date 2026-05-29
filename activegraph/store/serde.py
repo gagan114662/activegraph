@@ -43,8 +43,16 @@ def _default(o: Any) -> Any:
     if isinstance(o, (datetime, date)):
         return o.isoformat()
     if isinstance(o, (set, frozenset)):
-        # Stable order for snapshot-friendliness.
-        return sorted(o)
+        # Stable order for snapshot-friendliness. `sorted` alone raises
+        # TypeError on a heterogeneous set (mixed, mutually-incomparable
+        # element types), which would contradict the documented adapter
+        # contract ("set -> sorted list", no comparability caveat). Sort on
+        # a (type-name, str) key so any set serializes to a deterministic
+        # JSON list. Homogeneous comparable sets keep their natural order.
+        try:
+            return sorted(o)
+        except TypeError:
+            return sorted(o, key=lambda v: (type(v).__name__, str(v)))
     raise TypeError(f"object of type {type(o).__name__} is not JSON-serializable")
 
 
@@ -122,7 +130,7 @@ def decode_payload(s: str) -> dict[str, Any]:
     corruption is visible at the call site that triggered the load.
     """
     try:
-        return json.loads(s)
+        decoded = json.loads(s)
     except json.JSONDecodeError as e:
         preview = s if len(s) <= 64 else s[:60] + " ..."
         raise CorruptedEventPayloadError(
@@ -169,6 +177,49 @@ def decode_payload(s: str) -> dict[str, Any]:
                 "underlying_msg": e.msg,
             },
         ) from e
+
+    # An event payload is always a JSON object. Valid-but-non-object JSON
+    # (an array, number, string, null, bool) parses without raising, but it
+    # is not a usable payload — returning it would silently violate the
+    # documented `dict[str, Any]` contract and feed a non-dict downstream,
+    # corrupting the replay contract exactly the same way unparseable bytes
+    # would. Treat it as corruption and fail loudly, like the decode error.
+    if not isinstance(decoded, dict):
+        preview = s if len(s) <= 64 else s[:60] + " ..."
+        raise CorruptedEventPayloadError(
+            f"event payload decoded as {type(decoded).__name__}, not a JSON object",
+            what_failed=(
+                f"While reading a stored event payload, the bytes parsed as "
+                f"valid JSON but produced a {type(decoded).__name__} rather "
+                f"than an object/dict:\n"
+                f"  payload preview: {preview!r}"
+            ),
+            why=(
+                "Every event payload is a JSON object (a dict of fields). A "
+                "row that parses as a bare array / number / string / null / "
+                "bool is corrupt or schema-mismatched — some non-payload value "
+                "was written into the payload column. Handing the caller a "
+                "non-dict would let the wrong type flow into replay, fork, and "
+                "diff, which would lie about what happened just as a silently "
+                "skipped corrupt row would."
+            ),
+            how_to_fix=(
+                "Inspect the offending row and restore the JSON object form:\n"
+                "    activegraph inspect <store> --tail 50\n"
+                "or open the store directly with sqlite3 / psql and repair the\n"
+                "payload column for that event id. If the run is not worth\n"
+                "recovering, migrate the readable subset:\n"
+                "    activegraph migrate --from <src> --to <new-dst> --skip-corrupted\n"
+                "The store is append-only; this corruption does not propagate\n"
+                "backward in time."
+            ),
+            context={
+                "decoded_type": type(decoded).__name__,
+                "preview": preview,
+            },
+        )
+
+    return decoded
 
 
 def encode_event(event: Event) -> dict[str, Any]:

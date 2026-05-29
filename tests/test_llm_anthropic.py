@@ -166,6 +166,25 @@ def test_estimate_cost_uses_family_prefix():
     assert opus == Decimal("15")
 
 
+def test_unknown_model_falls_back_to_sonnet_with_custom_pricing():
+    # `_pricing_for`'s docstring promises: "Unknown models fall back to
+    # sonnet-4 pricing." That fallback must hold even when the caller
+    # supplies a custom `pricing=` table (a documented constructor kwarg)
+    # that does NOT itself contain the `claude-sonnet-4` family key — the
+    # framework's sonnet-4 default is the documented backstop. Before the
+    # fix the code set best_key="claude-sonnet-4" and then indexed the
+    # supplied table with it, raising KeyError instead of falling back.
+    from activegraph.llm.anthropic import _pricing_for
+
+    custom_without_sonnet = {"claude-opus-4": {"input": "15", "output": "75"}}
+    in_price, out_price = _pricing_for(
+        "some-unknown-future-model", custom_without_sonnet
+    )
+    # Sonnet-4 framework-default rates: $3 in / $15 out per Mtok.
+    assert in_price == Decimal("3")
+    assert out_price == Decimal("15")
+
+
 def test_count_tokens_delegates_to_sdk():
     client = MagicMock()
     client.messages.count_tokens.return_value = SimpleNamespace(input_tokens=123)
