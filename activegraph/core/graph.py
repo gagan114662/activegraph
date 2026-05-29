@@ -348,11 +348,12 @@ class Graph:
     def emit(self, event: Event) -> Event:
         """Append to log, project, persist (if attached), notify. CONTRACT #2."""
         # Fail-fast serialization check at emit time so bad payloads never
-        # land in the in-memory log either (CONTRACT v0.5 #4).
-        if self._store is not None:
-            from activegraph.store.serde import validate_event
+        # land in the in-memory log either (CONTRACT v0.5 #4). This runs
+        # unconditionally: a store-less (in-memory) graph keeps the same
+        # clean-log invariant, so validation must not be gated on `_store`.
+        from activegraph.store.serde import validate_event
 
-            validate_event(event)
+        validate_event(event)
         self._events.append(event)
         apply_event(self, event)
         if self._store is not None:
@@ -532,26 +533,41 @@ class Graph:
         actor: str = "system",
         caused_by: Optional[str] = None,
         frame_id: Optional[str] = None,
+        expected_version: Optional[int] = None,
         rationale: Optional[str] = None,
         evidence: Optional[list[str]] = None,
         llm_request_event_id: Optional[str] = None,
         tool_request_event_ids: Optional[list[str]] = None,
     ) -> Patch:
-        """Auto-apply shortcut: build patch, version-check, emit applied/rejected."""
+        """Auto-apply shortcut: build patch, version-check, emit applied/rejected.
+
+        ``expected_version`` is the optimistic-concurrency token. When the
+        caller supplies it and it no longer matches the object's current
+        version (the object changed under the caller), the version-check
+        fails: the patch is NOT applied, a ``patch.rejected`` event is
+        emitted, and the returned ``Patch`` has ``status == "rejected"``.
+        When omitted (or matching the current version) the patch applies and
+        a ``patch.applied`` event is emitted — the backward-compatible
+        auto-apply behavior.
+        """
         obj = self._objects.get(target)
         if obj is None:
             raise KeyError(f"unknown object: {target}")
         clean = _strip_provenance(copy.deepcopy(updates))
+        # The version-check token: an explicit caller token if given, else the
+        # object's current version (which always matches → preserves the v0
+        # auto-apply contract for existing call sites).
+        token = obj.version if expected_version is None else expected_version
         patch = Patch(
             id=self.ids.patch(),
             target=target,
             op="update",
             value=clean,
-            expected_version=obj.version,
+            expected_version=token,
             proposed_by=actor,
             rationale=rationale,
             evidence=list(evidence or []),
-            status="applied",
+            status="proposed",
             provenance=self._provenance(
                 actor,
                 caused_by,
@@ -561,6 +577,22 @@ class Graph:
                 tool_request_event_ids,
             ),
         )
+        # Register the patch first so both the applied and the rejected
+        # lifecycle paths can resolve it from `self._patches` (the
+        # patch.rejected projection mutates the existing entry in place).
+        self._patches[patch.id] = patch
+        if token != obj.version:
+            # Documented version-check failure → emit patch.rejected, do NOT
+            # mutate the object. The returned Patch carries status="rejected".
+            self._reject(
+                patch.id,
+                reason=f"version mismatch: expected {token}, got {obj.version}",
+                actor=actor,
+                caused_by=caused_by,
+                frame_id=frame_id,
+            )
+            return self._patches[patch.id]
+        patch.status = "applied"
         diff = _diff(obj.data, clean)
         event = Event(
             id=self.ids.event(),
@@ -861,7 +893,21 @@ def evaluate_where(where: dict[str, Any], root: Any) -> bool:
     """
     for key, expected in where.items():
         actual = _resolve_path(root, key.split("."))
-        if isinstance(expected, dict):
+        # A dict value is an operator dict when at least one of its keys is
+        # a known operator (e.g. {">": 5}); within such a dict an unknown
+        # operator key is still a framework bug and raises below (the safety
+        # net is preserved). A dict with NO operator keys is a dict-shaped
+        # LITERAL, matched by equality in the `else` branch — exactly as the
+        # docstring promises ("Values are either literals (equality) or
+        # `{op: value}` dicts for comparisons"). Before this fix the code
+        # treated every dict as an operator dict, so a literal like {"k": 1}
+        # crashed with InternalEvaluatorError("unknown where operator: 'k'")
+        # instead of matching by equality.
+        is_operator_dict = (
+            isinstance(expected, dict)
+            and any(op in _OPS for op in expected)
+        )
+        if is_operator_dict:
             for op, value in expected.items():
                 fn = _OPS.get(op)
                 if fn is None:
@@ -889,7 +935,7 @@ def evaluate_where(where: dict[str, Any], root: Any) -> bool:
                         extra_context={"operator": op},
                     )
                     raise InternalEvaluatorError(
-                        _fields["summary"],
+                        _fields["summary_or_message"],
                         what_failed=_fields["what_failed"],
                         why=_fields["why"],
                         how_to_fix=_fields["how_to_fix"],

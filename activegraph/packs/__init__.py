@@ -510,7 +510,10 @@ def load_prompts_from_dir(path: Union[str, Path]) -> tuple[PackPrompt, ...]:
                 f"duplicate prompt name {prompt.name!r} (file: {md_path})"
             )
         out[prompt.name] = prompt
-    return tuple(out.values())
+    # Sort by name to honor the documented contract. The glob above sorts by
+    # filename, but a prompt's `name` can be overridden via frontmatter, so
+    # filename order is not necessarily name order.
+    return tuple(out[name] for name in sorted(out))
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n(.*)\Z", re.DOTALL)

@@ -13,7 +13,9 @@ the source of truth but mean different things are bug-bait.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, fields, is_dataclass
+from types import MappingProxyType
 from typing import Any, Literal, Optional
 
 
@@ -22,11 +24,21 @@ RuntimeState = Literal["idle", "running", "stopped", "exhausted"]
 
 @dataclass(frozen=True)
 class BudgetSnapshot:
-    used: dict[str, float]
-    limits: dict[str, Optional[float]]
+    used: Mapping[str, float]
+    limits: Mapping[str, Optional[float]]
     cost_used_usd: str
     cost_limit_usd: Optional[str]
     exhausted_by: Optional[str]
+
+    def __post_init__(self) -> None:
+        # The module/`status()` docstrings promise the snapshot is
+        # immutable ("mutating any field raises"). The dataclass freeze
+        # only protects top-level assignment; the `used` / `limits`
+        # mappings would still be mutable plain dicts. Wrap them in
+        # read-only views so item assignment raises `TypeError`, making
+        # the documented immutability guarantee actually hold.
+        object.__setattr__(self, "used", MappingProxyType(dict(self.used)))
+        object.__setattr__(self, "limits", MappingProxyType(dict(self.limits)))
 
 
 @dataclass(frozen=True)
@@ -74,10 +86,17 @@ def status_to_dict(status: RuntimeStatus) -> dict[str, Any]:
 
 
 def _asdict_with_tuples(obj: Any) -> Any:
-    if hasattr(obj, "__dataclass_fields__"):
-        return {k: _asdict_with_tuples(v) for k, v in asdict(obj).items()}
+    # Recurse over dataclass fields by hand rather than via
+    # `dataclasses.asdict`: the snapshot's `used` / `limits` are
+    # `MappingProxyType` views (immutability guarantee), and `asdict`
+    # deep-copies field values, which cannot pickle a mappingproxy.
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {
+            f.name: _asdict_with_tuples(getattr(obj, f.name))
+            for f in fields(obj)
+        }
     if isinstance(obj, (list, tuple)):
         return [_asdict_with_tuples(v) for v in obj]
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         return {k: _asdict_with_tuples(v) for k, v in obj.items()}
     return obj

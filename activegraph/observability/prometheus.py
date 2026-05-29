@@ -19,9 +19,14 @@ class PrometheusMetrics:
     """Drop-in Metrics implementation backed by prometheus_client.
 
     Instruments are lazy. Tag keys for an instrument are fixed by the
-    first observation; subsequent observations with a different key set
-    raise (prometheus_client behavior). This matches the standard metric
-    list's fixed tag schemas.
+    first observation. Per the Metrics protocol, all three methods are
+    best-effort and non-throwing: prometheus_client errors (e.g. a
+    re-registration collision when a name is observed with a different
+    label-key set, or an invalid metric name) are contained, not
+    propagated — matching NoOpMetrics and OpenTelemetryMetrics. The
+    standard metric list's fixed tag schemas mean these collisions do
+    not arise in normal use; the containment is for ad-hoc / off-contract
+    callers, who must never see an exception escape a metrics call.
     """
 
     def __init__(self, registry: Any | None = None) -> None:
@@ -43,49 +48,58 @@ class PrometheusMetrics:
     # ---- protocol ----
 
     def counter(self, name: str, tags: dict[str, str], value: float = 1.0) -> None:
-        keys = tuple(sorted(tags.keys()))
-        key = (name, keys)
-        c = self._counters.get(key)
-        if c is None:
-            c = self._client.Counter(
-                name, name.replace("_", " "), labelnames=keys,
-                registry=self._registry,
-            )
-            self._counters[key] = c
-        if keys:
-            c.labels(**tags).inc(value)
-        else:
-            c.inc(value)
+        try:
+            keys = tuple(sorted(tags.keys()))
+            key = (name, keys)
+            c = self._counters.get(key)
+            if c is None:
+                c = self._client.Counter(
+                    name, name.replace("_", " "), labelnames=keys,
+                    registry=self._registry,
+                )
+                self._counters[key] = c
+            if keys:
+                c.labels(**tags).inc(value)
+            else:
+                c.inc(value)
+        except Exception:
+            return  # best-effort, non-throwing (Metrics protocol contract)
 
     def histogram(self, name: str, tags: dict[str, str], value: float) -> None:
-        keys = tuple(sorted(tags.keys()))
-        key = (name, keys)
-        h = self._histograms.get(key)
-        if h is None:
-            h = self._client.Histogram(
-                name, name.replace("_", " "), labelnames=keys,
-                registry=self._registry,
-            )
-            self._histograms[key] = h
-        if keys:
-            h.labels(**tags).observe(value)
-        else:
-            h.observe(value)
+        try:
+            keys = tuple(sorted(tags.keys()))
+            key = (name, keys)
+            h = self._histograms.get(key)
+            if h is None:
+                h = self._client.Histogram(
+                    name, name.replace("_", " "), labelnames=keys,
+                    registry=self._registry,
+                )
+                self._histograms[key] = h
+            if keys:
+                h.labels(**tags).observe(value)
+            else:
+                h.observe(value)
+        except Exception:
+            return  # best-effort, non-throwing (Metrics protocol contract)
 
     def gauge(self, name: str, tags: dict[str, str], value: float) -> None:
-        keys = tuple(sorted(tags.keys()))
-        key = (name, keys)
-        g = self._gauges.get(key)
-        if g is None:
-            g = self._client.Gauge(
-                name, name.replace("_", " "), labelnames=keys,
-                registry=self._registry,
-            )
-            self._gauges[key] = g
-        if keys:
-            g.labels(**tags).set(value)
-        else:
-            g.set(value)
+        try:
+            keys = tuple(sorted(tags.keys()))
+            key = (name, keys)
+            g = self._gauges.get(key)
+            if g is None:
+                g = self._client.Gauge(
+                    name, name.replace("_", " "), labelnames=keys,
+                    registry=self._registry,
+                )
+                self._gauges[key] = g
+            if keys:
+                g.labels(**tags).set(value)
+            else:
+                g.set(value)
+        except Exception:
+            return  # best-effort, non-throwing (Metrics protocol contract)
 
 
 def _require_client() -> Any:

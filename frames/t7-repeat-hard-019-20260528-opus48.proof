@@ -1,0 +1,11 @@
+hash=T7_REPEAT_HARD_20260528_OPUS48_019
+test_file=activegraph/tests/test_openai_pricing_fallback_t7_repeat_hard_019.py
+bug_source=docstring:activegraph/llm/openai.py:74
+failing_test_commit=5d80207
+fix_commit=5183fee
+pytest_before=950
+pytest_after=952
+candidates_considered=docstring:activegraph/llm/openai.py:74 (SELECTED — unknown-model gpt-4o fallback raises KeyError on a custom pricing table that omits gpt-4o; the AnthropicProvider twin guards this exact case and its docstring states the fallback must never KeyError), docstring:activegraph/llm/parsing.py:42 _first_balanced_span (REJECTED — empirically correct on nested/escaped/string-literal brackets), docstring:activegraph/runtime/budget.py:101 cost_remaining (REJECTED — <= correctly treats exactly-reaching the ceiling as not 'past'), docstring:activegraph/observability/migration.py:88 MigrationReport.ok (REJECTED — already uses the correct ok/skipped allowlist; the prior blocklist bug was already fixed), docstring:activegraph/trace/printer.py:299 _fmt_pack_loaded policy-plural (REJECTED — caller uses an explicit singular/plural table, never routes 'policy' through _plural's naive +s)
+uncovered_symbol=activegraph.llm.openai._pricing_for
+agent_commit_sha=5183fee
+verdict=native_hard_done

@@ -63,9 +63,24 @@ def _now_iso() -> str:
 def _normalize_args(tool: Tool, args: Any) -> Any:
     """If args is a dict and the tool has an input_schema, return the dict.
     If args is a BaseModel instance, dump to dict via canonicalize_args.
+
+    The stored fixture is dumped with ``sort_keys=True`` regardless, so the
+    only behaviour that matters here is honouring the documented contract:
+    the dict-passthrough branch returns the caller's dict, and the tool's
+    ``input_schema`` selects that branch (previously the ``tool`` argument
+    was ignored and every input — including a plain dict — was routed
+    through ``canonicalize_args``, which silently rewrote the dict into a
+    new, key-sorted dict).
     """
     from activegraph.tools.cache import canonicalize_args
 
+    # Documented dict-passthrough branch: a dict against a tool that declares
+    # an input_schema is returned as-is (it is already the validated shape).
+    if isinstance(args, dict) and tool.input_schema is not None:
+        return args
+
+    # Otherwise (BaseModel instance, or a dict on a schemaless tool, or a
+    # scalar/list) fall back to the canonical normalization.
     return canonicalize_args(args)
 
 

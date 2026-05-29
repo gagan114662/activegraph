@@ -99,7 +99,14 @@ def causal_chain(graph: Graph, object_id: str) -> str:
         seen.add(cursor.id)
         actor = cursor.actor or "?"
         lines.append(f"{indent}← {actor} ({cursor.id}) {cursor.type}")
-        if cursor.caused_by is None:
+        # Termination contract (module docstring): walk back through
+        # caused_by links "until we hit a goal.created (or an event with no
+        # parent)". goal.created is the audit boundary — the chain renders
+        # lineage back to the goal that started the run and stops there.
+        # Stop AFTER rendering the goal.created so the goal stays in the
+        # chain but its runtime-internal parent (e.g. runtime.started) does
+        # not leak above the boundary.
+        if cursor.type == "goal.created" or cursor.caused_by is None:
             break
         cursor = by_id.get(cursor.caused_by)
         indent += "  "

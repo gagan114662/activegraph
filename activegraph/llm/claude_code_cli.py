@@ -454,6 +454,17 @@ class ClaudeCodeCliProvider:
             "--dangerously-skip-permissions",
             "--model", model,
         ]
+        # pt.20: per-role/tier effort + native budget cap, set by the dispatcher
+        # (bridge_dispatch.py) per dispatch from agent-os/dispatch-profiles.json.
+        # Absent env => no flag => default effort (backwards-compatible). Opus 4.8's
+        # /effort lever: low|medium|high|max — route hard tier to max (deepest
+        # reasoning), reviewers/medium lower (cheaper).
+        _effort = os.environ.get("FACTORY_CLAUDE_EFFORT")
+        if _effort:
+            args.extend(["--effort", _effort])
+        _budget = os.environ.get("FACTORY_CLAUDE_MAX_BUDGET_USD")
+        if _budget:
+            args.extend(["--max-budget-usd", _budget])
         effective_mcp = mcp_config_override if mcp_config_override is not None else self._mcp_config
         if effective_mcp is not None:
             args.extend(["--strict-mcp-config", "--mcp-config", json.dumps(effective_mcp)])

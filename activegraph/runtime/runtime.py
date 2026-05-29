@@ -1682,6 +1682,28 @@ class Runtime:
 
     # ---------- v0.8: runtime.status ----------
 
+    # How many trailing events status() inspects to derive `state`. The
+    # terminal lifecycle event (`runtime.idle` / `runtime.budget_exhausted`)
+    # is always the last meaningful emit of a run, so a small tail window
+    # is sufficient — this is what keeps status() off the "no event log
+    # scan" tripwire documented in observability/status.py.
+    _STATUS_STATE_TAIL = 4
+
+    def _tail_events(self, n: int) -> list[Event]:
+        """The last ``n`` events, in reverse (newest first).
+
+        Reads a bounded slice of the underlying log rather than copying
+        the whole thing (`graph.events` makes a full list copy), so the
+        cost is O(n), independent of total log length — the tail-slice
+        access the status() docstring promises.
+        """
+        if n <= 0:
+            return []
+        events = self.graph._events
+        tail = events[-n:]
+        tail.reverse()
+        return tail
+
     def status(self, recent: int = 20) -> RuntimeStatus:
         """Frozen snapshot of the runtime. CONTRACT v0.8 #11.
 
@@ -1731,12 +1753,27 @@ class Runtime:
             exhausted_by=self.budget.exhausted_by(),
         )
 
-        # State derivation: log-based, so a freshly loaded runtime and
-        # the runtime that saved the log agree. Walk back through the
-        # event log for the most recent terminal lifecycle event.
-        # CONTRACT v0.8 #11.
+        # State derivation. CONTRACT v0.8 #11.
+        #
+        # The status.py module docstring promises "no event log scan" and
+        # this method's docstring promises "no graph traversal beyond a
+        # tail-slice of the event log". The terminal lifecycle events
+        # (`runtime.idle` / `runtime.budget_exhausted`) are always the LAST
+        # meaningful emit of a run, so they live at the very tail of the log
+        # — there is never a reason to walk the whole thing. The previous
+        # implementation walked `reversed(self.graph.events)` with no bound,
+        # which (when no terminal event exists — the common live-run case)
+        # visited every event, an O(len(log)) scan that contradicted both
+        # docstrings.
+        #
+        # Bound the look-back to a small tail window. This keeps the
+        # loaded-runtime case working (a freshly loaded runtime and the
+        # runtime that saved the log still agree, because the terminal event
+        # is in the tail) while honoring the documented "no full scan" /
+        # tail-slice-only contract. `_STATUS_STATE_TAIL` covers any trailing
+        # non-lifecycle events that could sit after the terminal one.
         state: str = "stopped"
-        for ev in reversed(self.graph.events):
+        for ev in self._tail_events(self._STATUS_STATE_TAIL):
             t = ev.type
             if t == "runtime.budget_exhausted":
                 state = "exhausted"
@@ -1773,8 +1810,15 @@ class Runtime:
                     )
                 )
 
-        events = self.graph.events
-        tail = events[-recent:] if recent > 0 else []
+        # Read the underlying log directly for the bounded tail-slice rather
+        # than `self.graph.events` (which does `list(self._events)` — a full
+        # O(len(log)) copy). Copying the whole log to extract its last
+        # `recent` events would be exactly the "event log scan" / "graph
+        # traversal beyond a tail-slice" both docstrings say status() avoids.
+        # A list slice is O(recent), and `len(...)` on the live list is O(1),
+        # so the snapshot cost stays independent of total log length.
+        all_events = self.graph._events
+        tail = all_events[-recent:] if recent > 0 else []
         e_summaries = tuple(
             EventSummary(
                 id=e.id, type=e.type, actor=e.actor, timestamp=e.timestamp
@@ -1786,7 +1830,7 @@ class Runtime:
             run_id=self.graph.run_id,
             state=state,  # type: ignore[arg-type]
             queue_depth=len(self._queue),
-            events_processed=len(events),
+            events_processed=len(all_events),
             budget=budget_snap,
             frame=frame_snap,
             registered_behaviors=tuple(b_infos),

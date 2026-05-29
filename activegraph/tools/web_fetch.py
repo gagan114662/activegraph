@@ -55,12 +55,28 @@ def web_fetch(args: WebFetchInput, ctx: ToolContext) -> WebFetchOutput:
             text=_decode(body), status=e.code, final_url=args.url
         )
     except urllib.error.URLError as e:
+        # A socket timeout surfaces wrapped: urlopen raises URLError whose
+        # `.reason` is a TimeoutError/socket.timeout — the URLError itself is
+        # NOT a TimeoutError, so a bare `except TimeoutError` below never sees
+        # it. Distinguish here so a timeout maps to the documented
+        # `tool.timeout` reason rather than the generic `tool.network_error`.
+        if isinstance(e.reason, TimeoutError):
+            raise ToolError(
+                "tool.timeout",
+                f"timeout after {args.timeout_seconds}s fetching {args.url}",
+                payload_extras={
+                    "url": args.url,
+                    "timeout_seconds": args.timeout_seconds,
+                },
+            ) from e
         raise ToolError(
             "tool.network_error",
             f"network error fetching {args.url}: {e.reason}",
             payload_extras={"url": args.url},
         ) from e
     except TimeoutError as e:
+        # Defensive: a bare TimeoutError (e.g. a future transport that raises
+        # it directly rather than wrapping in URLError) still maps to timeout.
         raise ToolError(
             "tool.timeout",
             f"timeout after {args.timeout_seconds}s fetching {args.url}",

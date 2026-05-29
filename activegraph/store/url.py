@@ -97,7 +97,23 @@ def parse_store_url(url: str) -> StoreURL:
             ),
             url=url if isinstance(url, str) else None,
         )
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError as e:
+        # urlparse raises bare ValueError (e.g. "Invalid IPv6 URL") on some
+        # malformed inputs. The docstring promises InvalidStoreURL with a
+        # helpful message — convert it so callers catching InvalidStoreURL
+        # (and operators) get the contract, not a confusing parse error.
+        raise _invalid_url(
+            f"store URL {url!r} is malformed",
+            what_failed=f"The string {url!r} could not be parsed as a URL.",
+            how_to_fix=(
+                "Provide a well-formed URL like:\n"
+                "  sqlite:///path/to/run.db\n"
+                "  postgres://host/dbname"
+            ),
+            url=url,
+        ) from e
     scheme = parsed.scheme.lower()
     if not scheme:
         # Bare path — the most common operator mistake.

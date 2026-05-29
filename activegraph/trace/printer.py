@@ -27,7 +27,7 @@ TAG_COL = 26
 def _format_tag(tag_text: str) -> str:
     """Bracketed tag, left-padded to TAG_COL (or one trailing space if longer)."""
     bracketed = f"[{tag_text}]"
-    if len(bracketed) >= TAG_COL:
+    if len(bracketed) > TAG_COL:
         return bracketed + " "
     return bracketed.ljust(TAG_COL)
 
